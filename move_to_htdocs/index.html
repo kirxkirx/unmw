@@ -1,0 +1,49 @@
+<html>
+<head>
+<style type="text/css">
+body { color: #000;
+ background: #fff;
+ font-family: arial, helvetica, sans-serif;
+ font-size: 12pt;
+ line-height: 16pt;
+ margin-top: 3mm;
+ margin-bottom: 3mm;
+ margin-left: 10mm;
+ margin-right: 10mm;
+}
+ 
+p {text-align: justify; text-indent: 6mm; line-height: 16pt}
+.code {text-align: left; font-family: courier; background: #ccc; color:
+#000}
+table.main {border-spacing: 5pt}
+td { padding-left: 20pt; padding-right: 20pt; padding-bottom: 3pt }
+
+a:link {color: #55f; text-decoration: none}
+a:visited {color: #33f; text-decoration: none}
+a:active {color: #55f; text-decoration: none}
+a:hover {color: #55f; text-decoration: underline}
+</style>
+</head>
+
+<CENTER>  
+<h2>Upload RAR or ZIP archive with NMW images for processing</h2><br>
+
+Please enter the file name:
+<form enctype="multipart/form-data" action="../cgi-bin/unmw/upload.py" method="post">
+<TABLE width="750">
+<tr><td>File to upload: </td><td><input type="file" name="file" size=32></td></tr>
+<tr><td></td><td><input type="submit" value="Upload"></td></tr>
+<tr><td>Work start e-mail <input type="checkbox" name="workstartemail" checked></td><td>Work done e-mail<input type="checkbox" name="workendemail" checked></td></tr>
+<tr><td colspan=2><hr></td></tr>
+</TABLE>
+</form>
+</CENTER>
+<br>
+It will take a lot of time to upload and process the data. Please be patient
+and hope for the best.
+<br/><br/><br/>
+
+If you have questions, bug reports or suggestions how to improve this
+service, please fell free to contact the author (Kirill Sokolovsky) via e-mail: <b>kirx[at]scan&#046;sai&#046;msu&#046;ru</b><br/>
+
+</html>

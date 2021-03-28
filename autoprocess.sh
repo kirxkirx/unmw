@@ -12,8 +12,8 @@ if [ -z "$IMAGE_DATA_ROOT" ] || [ -z "$DATA_PROCESSING_ROOT" ] || [ -z "$URL_OF_
  URL_OF_DATA_PROCESSING_ROOT="http://vast.sai.msu.ru/unmw/uploads"
 
  if [ `hostname` == "scan" ];then
-  IMAGE_DATA_ROOT="/dataN/NMW_web_upload"
-  DATA_PROCESSING_ROOT="/dataN/NMW_web_upload"
+  IMAGE_DATA_ROOT="/home/NMW_web_upload"
+  DATA_PROCESSING_ROOT="/home/NMW_web_upload"
   URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
   # rar is in /opt/bin/
   PATH=$PATH:/opt/bin/
@@ -80,20 +80,61 @@ if [ -f "$VAST_REFERENCE_COPY".lock ];then
  echo "Lock file found $VAST_REFERENCE_COPY.lock - another copy of $0 seems to be installin VaST, so we'll just wait"
  sleep 600
 elif [ ! -d "$VAST_REFERENCE_COPY" ];then
- if [ ! -d "vast" ];then
-  touch "$VAST_REFERENCE_COPY".lock
-  echo "Trying to install VaST in directory $VAST_REFERENCE_COPY" 
-  cd `dirname "$VAST_REFERENCE_COPY"`
-  git checkout https://github.com/kirxkirx/vast.git
-  cd "vast"
-  make
-  cd `dirname "$VAST_REFERENCE_COPY"`
-  BASENAME_VAST_REFERENCE_COPY=`basename $VAST_REFERENCE_COPY`
-  if [ "$BASENAME_VAST_REFERENCE_COPY" != "vast" ];then
-   mv "vast" "$BASENAME_VAST_REFERENCE_COPY"
-  fi
-  rm -f "$VAST_REFERENCE_COPY".lock
+ #
+ echo -n "Checking write permissions for the current directory ( $PWD ) ... "
+ touch testfile$$.tmp
+ if [ $? -eq 0 ];then
+  rm -f testfile$$.tmp
+  echo "OK"
+ else
+  echo "ERROR: please make sure you have write permissions for the current directory.
+
+Maybe you need something like:
+sudo chown -R $USER $PWD"
+  exit 1
  fi
+ #
+ mkdir "$VAST_REFERENCE_COPY"
+ if [ $? -ne 0 ];then
+  echo "ERROR: cannot create VaST directory $VAST_REFERENCE_COPY"
+  exit 1
+ fi
+ touch "$VAST_REFERENCE_COPY".lock
+ echo "Trying to install VaST in directory $VAST_REFERENCE_COPY" 
+ cd "$VAST_REFERENCE_COPY"
+ git checkout https://github.com/kirxkirx/vast.git .
+ # compile VaST
+ make
+ if [ $? -eq 0 ];then
+  # update offline catalogs
+  lib/update_offline_catalogs.sh all
+  # manually update the two big ones
+  # Tycho-2
+  cd `dirname "$VAST_REFERENCE_COPY"`
+  if [ ! -d tycho2 ];then
+   mkdir tycho2
+   cd tycho2
+   wget -nH --cut-dirs=4 --no-parent -r -l0 -c -A 'ReadMe,*.gz,robots.txt' "http://scan.sai.msu.ru/~kirx/data/tycho2/"
+   for i in tyc2.dat.*gz ;do
+    gunzip $i
+   done
+   cd `dirname "$VAST_REFERENCE_COPY"`
+  fi
+  # and UCAC5
+  cd `dirname "$VAST_REFERENCE_COPY"`
+  if [ ! -d UCAC5 ];then
+   mkdir UCAC5
+   cd UCAC5
+   wget -r -Az* -c --no-dir "http://scan.sai.msu.ru/~kirx/data/ucac5"
+   cd `dirname "$VAST_REFERENCE_COPY"`
+  fi
+ fi
+ cd `dirname "$VAST_REFERENCE_COPY"`
+ BASENAME_VAST_REFERENCE_COPY=`basename $VAST_REFERENCE_COPY`
+ if [ "$BASENAME_VAST_REFERENCE_COPY" != "vast" ];then
+  mv "vast" "$BASENAME_VAST_REFERENCE_COPY"
+ fi
+ rm -f "$VAST_REFERENCE_COPY".lock
 fi
 
 if [ ! -d "$VAST_REFERENCE_COPY" ];then
@@ -131,7 +172,6 @@ fi
 
 # Delay processing if the server load is high
 UNIXSEC_START_WAITLOAD=`date +%s`
-#for LOADWAITITERATION in `seq 1 30` ;do
 for LOADWAITITERATION in `seq 1 $NUMBER_OF_ITERATIONS` ;do
  ONEMINUTELOADTIMES100=`uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1*100}'`
  if [ -z "$ONEMINUTELOADTIMES100" ];then
@@ -143,19 +183,23 @@ for LOADWAITITERATION in `seq 1 $NUMBER_OF_ITERATIONS` ;do
   break
  else
   #sleep 60
+  echo "sleep $RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
   sleep $RANDOM_TWO_DIGIT_NUMBER
   # wait longer if the load is really high
   if [ $ONEMINUTELOADTIMES100 -gt 1400 ];then
    #sleep 400
+   echo "sleep 4$RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
    sleep 4$RANDOM_TWO_DIGIT_NUMBER
   fi
   # wait longer if the load is really high
   if [ $ONEMINUTELOADTIMES100 -gt 2400 ];then
    #sleep 500
+   echo "sleep 5$RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
    sleep 5$RANDOM_TWO_DIGIT_NUMBER
   fi
  fi
 done
+echo "Done sleeping"
 UNIXSEC_STOP_WAITLOAD=`date +%s`
 
 # Make up file names
@@ -178,6 +222,21 @@ ABSOLUTE_PATH_TO_ZIP_ARCHIVE=`readlink -f "$PATH_TO_ZIP_ARCHIVE"`
 
 echo "Changing directory to $IMAGE_DATA_ROOT" 
 cd "$IMAGE_DATA_ROOT"
+#
+echo -n "Checking write permissions for the current directory ( $PWD ) ... "
+touch testfile$$.tmp
+if [ $? -eq 0 ];then
+ rm -f testfile$$.tmp
+ echo "OK"
+else
+ echo "ERROR: please make sure you have write permissions for the current directory.
+
+Maybe you need something like:
+sudo chown -R $USER $PWD"
+ exit 1
+fi
+#
+
 # Remove image directory with the same name if exist
 if [ -d "$LOCAL_PATH_TO_IMAGES" ];then
  rm -rf "$LOCAL_PATH_TO_IMAGES"
@@ -197,11 +256,6 @@ mkdir "$VAST_RESULTS_DIR_FILENAME"
 
 mv -v "$ZIP_ARCHIVE_FILENAME" "$LOCAL_PATH_TO_IMAGES"
 
-# Copy and unpack ZIP archive with second-epoch images
-#PATH_TO_ZIP_ARCHIVE=`dirname "$INPUT_ZIP_ARCHIVE"`
-#if [ "$PATH_TO_ZIP_ARCHIVE" != "$IMAGE_DATA_ROOT" ];then
-# cp -vf "$INPUT_ZIP_ARCHIVE" "$ABSOLUTE_PATH_TO_IMAGES"
-#fi
 echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
 cd "$ABSOLUTE_PATH_TO_IMAGES"
 if [ ! -f "$ZIP_ARCHIVE_FILENAME" ];then
@@ -243,31 +297,47 @@ else
 fi
 rm -f "$ZIP_ARCHIVE_FILENAME"
 
-#LOCAL_PATH_TO_IMAGES=`basename $ZIP_ARCHIVE_FILENAME .zip`
-#echo 'A' | unzip "$ZIP_ARCHIVE_FILENAME"
-#mv ../"$ZIP_ARCHIVE_FILENAME" .
-
-#if [ $? -ne 0 ];then
-# echo "ERROR: cannot unzip $ZIP_ARCHIVE_FILENAME " 
-# exit 1
-#fi
-# Deprecated
-#if [ "$PATH_TO_ZIP_ARCHIVE" != "$IMAGE_DATA_ROOT" ];then
-# rm -f "$ZIP_ARCHIVE_FILENAME"
-#fi
-
 # Rename SF files
 echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
 cd "$ABSOLUTE_PATH_TO_IMAGES"
+#
+echo -n "Checking write permissions for the current directory ( $PWD ) ... "
+touch testfile$$.tmp
+if [ $? -eq 0 ];then
+ rm -f testfile$$.tmp
+ echo "OK"
+else
+ echo "ERROR: please make sure you have write permissions for the current directory.
+
+Maybe you need something like:
+sudo chown -R $USER $PWD"
+ exit 1
+fi
+#
 echo "Renaming the SF files" 
-for i in *-SF* ;do mv "$i" "${i/-SF/}" ;done
+for i in *-SF* ;do 
+ if [ -f "$i" ];then
+  mv "$i" "${i/-SF/}"
+ fi 
+done
 
 # make a VaST Copy
 echo "Changing directory to $DATA_PROCESSING_ROOT" 
 cd "$DATA_PROCESSING_ROOT"
-#echo "Making a symlink copy of "`readlink -f "$VAST_REFERENCE_COPY"`"to $VAST_WORKING_DIR_FILENAME" 
-# VaST can't work if its symlinked
-#cp -sR `readlink -f "$VAST_REFERENCE_COPY"` "$VAST_WORKING_DIR_FILENAME"
+#
+echo -n "Checking write permissions for the current directory ( $PWD ) ... "
+touch testfile$$.tmp
+if [ $? -eq 0 ];then
+ rm -f testfile$$.tmp
+ echo "OK"
+else
+ echo "ERROR: please make sure you have write permissions for the current directory.
+Maybe you need something like:
+sudo chown -R $USER $PWD"
+ exit 1
+fi
+#
+
 echo "Making a copy of "`readlink -f "$VAST_REFERENCE_COPY"`" to $VAST_WORKING_DIR_FILENAME" 
 # P is to copy symlinks as symlinks
 cp -rP `readlink -f "$VAST_REFERENCE_COPY"` "$VAST_WORKING_DIR_FILENAME"
@@ -283,7 +353,6 @@ fi
 ln -s ../"$VAST_RESULTS_DIR_FILENAME" transient_report
 
 # Place the redirect link
-#echo "$URL_OF_DATA_PROCESSING_ROOT/$VAST_WORKING_DIR_FILENAME/transient_report/" > "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/results_url.txt"
 echo "$URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/" > "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/results_url.txt"
 
 
@@ -326,52 +395,74 @@ UNIXSEC_START=`date +%s`
 ########################## ACTUAL WORK ##########################
 util/transients/transient_factory_test31.sh "$ABSOLUTE_PATH_TO_IMAGES"
 SCRIPT_EXIT_CODE=$?
+echo "SCRIPT_EXIT_CODE=$SCRIPT_EXIT_CODE"
 #################################################################
-## Check for extra bright transients
-cat "transient_report/index.html" | grep -B1 'galactic' | grep -v -e 'galactic' -e '--' | while read A ;do   
- echo $A | awk '{if ( $5<9.5 && $5>-5.0 ) print "FOUND"}' | grep --quiet "FOUND" 
- if [ $? -eq 0 ];then
-  N_NOT_FOUND_IN_CATALOGS=`grep -A4 "$A" "transient_report/index.html" | grep -c 'not found'`
-  if [ $N_NOT_FOUND_IN_CATALOGS -ge 3 ];then
-   BRIGHT_TRANSIENT_NAME=`grep -B17 "$A" "transient_report/index.html" | grep 'a name=' | awk -F"'" '{print $2}'`
-   MSG="A bright candidate transient is found
+if [ ! -f transient_report/index.html ];then
+ ERROR_MSG="no transient_report/index.html"
+ echo "ERROR: $ERROR_MSG"
+ MSG="A VaST error occured: $ERROR_MSG
+Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
+ # Just send this to kirx
+ #if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+ # curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+ #fi
+elif [ ! -s transient_report/index.html ];then
+ ERROR_MSG="empty transient_report/index.html"
+ echo "ERROR: $ERROR_MSG"
+ MSG="A VaST error occured: $ERROR_MSG
+Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
+ # Just send this to kirx
+ #if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+ # curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+ #fi
+else
+ # nonempty 'transient_report/index.html' is found
+ ## Check for extra bright transients and send a special e-mail message
+ cat "transient_report/index.html" | grep -B1 'galactic' | grep -v -e 'galactic' -e '--' | while read A ;do   
+  echo $A | awk '{if ( $5<9.5 && $5>-5.0 ) print "FOUND"}' | grep --quiet "FOUND" 
+  if [ $? -eq 0 ];then
+   N_NOT_FOUND_IN_CATALOGS=`grep -A4 "$A" "transient_report/index.html" | grep -c 'not found'`
+   if [ $N_NOT_FOUND_IN_CATALOGS -ge 3 ];then
+    BRIGHT_TRANSIENT_NAME=`grep -B17 "$A" "transient_report/index.html" | grep 'a name=' | awk -F"'" '{print $2}'`
+    MSG="A bright candidate transient is found
 
 $A
 
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/#$BRIGHT_TRANSIENT_NAME"
-   # Just send this to kirx
-   if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
-    curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW bright candidate] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+    # Just send this to kirx
+    if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+     curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW bright candidate] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+    fi
    fi
-  fi
- fi  
-done # Check for extra bright transients
-#############
-# Check for errors
-### Check for the stuck camera
-grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
-if [ $? -eq 0 ];then
- FIELD=`grep 'Processing fields' transient_report/index.html | sed 's:Processing:processing:g' | sed 's:<br>::g'`
- MSG="A camera error occured while $FIELD
+  fi  
+ done # Check for extra bright transients
+ #############
+ # Check for errors
+ ### Check for the stuck camera
+ grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
+ if [ $? -eq 0 ];then
+  FIELD=`grep 'Processing fields' transient_report/index.html | sed 's:Processing:processing:g' | sed 's:<br>::g'`
+  MSG="A camera error occured while $FIELD
 The cmaera seems to be repeatedly writing the same image!!!
 The detailed log output is at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
- if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
-  curl --silent "$CURL_USERNAME_URL_TO_EMAIL_TEAM" --data-urlencode "name=[NMW ERROR] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
- fi
-else
- ### Check for all other errors
- grep --quiet 'ERROR' "transient_report/index.html"
- if [ $? -eq 0 ] || [ $SCRIPT_EXIT_CODE -ne 0 ] ;then
-  ERROR_MSG=`grep --max-count=1 'ERROR' "transient_report/index.html"`
-  FIELD=`grep 'Processing fields' transient_report/index.html | sed 's:Processing:processing:g' | sed 's:<br>::g'`
-  MSG="An error occured while $FIELD
+  if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
+   curl --silent "$CURL_USERNAME_URL_TO_EMAIL_TEAM" --data-urlencode "name=[NMW ERROR] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+  fi
+ else
+  ### Check for all other errors
+  grep --quiet 'ERROR' "transient_report/index.html"
+  if [ $? -eq 0 ] || [ $SCRIPT_EXIT_CODE -ne 0 ] ;then
+   ERROR_MSG=`grep --max-count=1 'ERROR' "transient_report/index.html"`
+   FIELD=`grep 'Processing fields' transient_report/index.html | sed 's:Processing:processing:g' | sed 's:<br>::g'`
+   MSG="An error occured while $FIELD
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
-  # Just send this to kirx
-  #if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
-  # curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
-  #fi
- fi
-fi
+   # Just send this to kirx
+   #if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+   # curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+   #fi
+  fi
+ fi # grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
+fi # if [ ! -f transient_report/index.html ];then
 ##
 UNIXSEC_STOP=`date +%s`
 ############################################################################
@@ -404,7 +495,7 @@ PROCESSING_TIME_TOTAL=`echo "$UNIXSEC_STOP $UNIXSEC_START_TOTAL" | awk '{printf 
 DATETIME=`LANG=C date --utc`
 
 # report end of work
-echo "Reporting the start of work" 
+echo "Reporting the end of work" 
 MSG="The script $0 has finished work on $DATETIME at $PWD with the following parameters:
 IMAGE_DATA_ROOT=$IMAGE_DATA_ROOT
 DATA_PROCESSING_ROOT=$DATA_PROCESSING_ROOT

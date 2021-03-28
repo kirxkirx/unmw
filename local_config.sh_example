@@ -1,0 +1,3 @@
+export IMAGE_DATA_ROOT="/home/NMW_web_upload"
+export DATA_PROCESSING_ROOT="/home/NMW_web_upload"
+export URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
