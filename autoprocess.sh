@@ -386,7 +386,7 @@ if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workstartemail" ];then
  fi
 fi
 WORKENDEMAIL="off"
-if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workstartemail" ];then
+if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workendemail" ];then
  WORKENDEMAIL="on"
 fi
 ############################################################################
