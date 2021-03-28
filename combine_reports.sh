@@ -126,7 +126,7 @@ Reports on the individual fields may be found at http://vast.sai.msu.ru/unmw/upl
 (TEST!) The modified observing plan is at http://vast.sai.msu.ru/unmw/uploads/plan.txt
 The original observing plan is at http://vast.sai.msu.ru/unmw/uploads/plan_in.txt"
  if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
-  curl --silent "$CURL_USERNAME_URL_TO_EMAIL_TEAM" --data-urlencode "name=[NMW combined list] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+  curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=[NMW combined list] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
 fi
 
@@ -183,7 +183,7 @@ is too large -- $INPUT_HTML_FILE_SIZE_MB MB. This is very-very wrong!
 
 Reports on the individual fields may be found at http://vast.sai.msu.ru/unmw/uploads/autoprocess.txt"
    if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
-    curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW ERROR: large HTML file] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+    curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR: large HTML file] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
    fi
    exit 1
   fi

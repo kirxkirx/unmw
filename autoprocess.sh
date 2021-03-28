@@ -382,7 +382,7 @@ $MSG
 " 
 if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workstartemail" ];then
  if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
-  curl --silent "$CURL_USERNAME_URL_TO_EMAIL_TEAM" --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+  curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
 fi
 WORKENDEMAIL="off"
@@ -404,7 +404,7 @@ if [ ! -f transient_report/index.html ];then
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
  # Just send this to kirx
  #if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
- # curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+ # curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  #fi
 elif [ ! -s transient_report/index.html ];then
  ERROR_MSG="empty transient_report/index.html"
@@ -413,7 +413,7 @@ elif [ ! -s transient_report/index.html ];then
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
  # Just send this to kirx
  #if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
- # curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+ # curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  #fi
 else
  # nonempty 'transient_report/index.html' is found
@@ -431,7 +431,7 @@ $A
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/#$BRIGHT_TRANSIENT_NAME"
     # Just send this to kirx
     if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
-     curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW bright candidate] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+     curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW bright candidate] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
     fi
    fi
   fi  
@@ -446,7 +446,7 @@ Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/#$BRI
 The cmaera seems to be repeatedly writing the same image!!!
 The detailed log output is at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
   if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
-   curl --silent "$CURL_USERNAME_URL_TO_EMAIL_TEAM" --data-urlencode "name=[NMW ERROR] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=[NMW ERROR] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
   fi
  else
   ### Check for all other errors
@@ -458,7 +458,7 @@ The detailed log output is at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FIL
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
    # Just send this to kirx
    #if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
-   # curl --silent "$CURL_USERNAME_URL_TO_EMAIL_KIRX" --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+   # curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
    #fi
   fi
  fi # grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
@@ -523,7 +523,7 @@ $MSG
 "
 if [ "$WORKENDEMAIL" = "on" ];then
  if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
-  curl --silent "$CURL_USERNAME_URL_TO_EMAIL_TEAM" --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+  curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
 fi
 
