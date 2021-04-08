@@ -88,7 +88,7 @@ def filter_report(path_to_report):
 
 if __name__ == '__main__':
     if len(sys.argv) == 1 or len(sys.argv) > 2 or sys.argv[1] in ['-h', '--help']:
-        print('Usage: `python filter_report.py path/to/report.html`')
+        print('Usage: `python3 filter_report.py path/to/report.html`')
         exit(1)
     try:
         filter_report(sys.argv[1])
