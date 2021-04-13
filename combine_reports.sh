@@ -34,6 +34,7 @@ if [ $HOUR -lt 17 ];then
  EVENING_OR_MORNING="morning"
 fi
 OUTPUT_COMBINED_HTML_NAME=$DAY"_"$EVENING_OR_MORNING"_"$CAMERA".html"
+OUTPUT_FILTERED_HTML_NAME=$DAY"_"$EVENING_OR_MORNING"_"$CAMERA"_filtered.html"
 OUTPUT_PROCESSING_SUMMARY_HTML_NAME=$DAY"_"$EVENING_OR_MORNING"_summary.html"
 
 #INPUT_LIST_OF_RESULT_DIRS=`find -maxdepth 1 -type d -mtime -1 -name 'results*'`
