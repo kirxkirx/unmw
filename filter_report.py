@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys
 from os.path import splitext
 
@@ -5,17 +7,17 @@ from bs4 import BeautifulSoup
 
 # CONSTANTS
 MAX_MAG = 40
-AST_MAG = 1
-AST_1 = 10
-AST_2 = 10
-MAX_ARCSEC = 10
+AST_MAG_DIF_PREDICTED_OBSERVED = 1
+AST_1_RA_DIST_PREDICTED_OBSERVED_ARCSEC = 10
+AST_2_RA_DIST_PREDICTED_OBSERVED_ARCSEC = 10
+VAR_MAX_DIST_ARCSEC = 10
 
 
 def is_asteroid(pre_el_text):
     if 'The object was found in astcheck' in pre_el_text:
         pre_text_split = pre_el_text.split('\n')
 
-        obj_mag = float(pre_text_split[1].strip().split()[4])
+        obj_mag = float(pre_text_split[2].strip().split()[4])
         assert obj_mag < MAX_MAG
 
         for idx, el in enumerate(pre_text_split):
@@ -24,14 +26,14 @@ def is_asteroid(pre_el_text):
                 break
 
         ast_split = pre_text_split[ast_idx].strip().split()
-        ast_1 = float(ast_split[2])
-        ast_2 = float(ast_split[3])
+        ast_1 = float(ast_split[3])
+        ast_2 = float(ast_split[4])
         ast_mag = float(ast_split[5])
         assert ast_mag < MAX_MAG
 
-        return (abs(obj_mag - ast_mag) <= AST_MAG and
-                ast_1 <= AST_1 and
-                ast_2 <= AST_2)
+        return (abs(obj_mag - ast_mag) <= AST_MAG_DIF_PREDICTED_OBSERVED and
+                ast_1 <= AST_1_RA_DIST_PREDICTED_OBSERVED_ARCSEC and
+                ast_2 <= AST_2_RA_DIST_PREDICTED_OBSERVED_ARCSEC )
     else:
         return False
 
@@ -46,7 +48,7 @@ def is_variable_star(pre_el_text):
                 break
 
         vs_arcsec = int(pre_text_split[vs_idx].strip().split()[0][:-1])
-        return vs_arcsec <= MAX_ARCSEC
+        return vs_arcsec <= VAR_MAX_DIST_ARCSEC
     else:
         return False
 
@@ -66,11 +68,13 @@ def filter_report(path_to_report):
         return
     
     head = content[: a_name_first_occurance]
-    transients = content[a_name_first_occurance:].split('<hr>')[:-1]
+    #transients = content[a_name_first_occurance:].split('<hr>')[:-1]
+    transients = content[a_name_first_occurance:].split('<HR>')[:-1]
 
     ast_or_vs_s = []
     for transient in transients:
         ast_or_vs_s.append(is_ast_or_vs(BeautifulSoup(transient, features="lxml").pre.text))
+        #print(transient)
 
     not_ast_and_not_vs = []
     for transient, ast_or_vs_ in zip(transients, ast_or_vs_s):
@@ -80,7 +84,8 @@ def filter_report(path_to_report):
     if len(not_ast_and_not_vs) == 0:
         output = head + '\nSeems like every transient is the known object.\n</body></html>'
     else:
-        output = head + '<hr>'.join(not_ast_and_not_vs) + '\n<hr></body></html>'
+        #output = head + '<hr>'.join(not_ast_and_not_vs) + '\n<hr></body></html>'
+        output = head + '<HR>'.join(not_ast_and_not_vs) + '\n<HR></body></html>'
 
     with open(splitext(path_to_report)[0] + '_filtered.html', 'w') as f:
         f.write(output)

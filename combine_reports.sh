@@ -109,7 +109,10 @@ if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
  OUTPUT_COMBINED_HTML_NAME_FOR_THE_TABLE=`basename $OUTPUT_COMBINED_HTML_NAME .html`
  OUTPUT_COMBINED_HTML_NAME_FOR_THE_TABLE="${OUTPUT_COMBINED_HTML_NAME_FOR_THE_TABLE//_/ }"
  echo "<tr><td><a href='$OUTPUT_COMBINED_HTML_NAME' target='_blank'>$OUTPUT_COMBINED_HTML_NAME_FOR_THE_TABLE</a></td></tr>" >> index.html
-
+ #
+ OUTPUT_FILTERED_HTML_NAME_FOR_THE_TABLE=`basename $OUTPUT_FILTERED_HTML_NAME .html`
+ OUTPUT_FILTERED_HTML_NAME_FOR_THE_TABLE="${OUTPUT_FILTERED_HTML_NAME_FOR_THE_TABLE//_/ }"
+ echo "<tr><td><a href='$OUTPUT_FILTERED_HTML_NAME' target='_blank'>$OUTPUT_FILTERED_HTML_NAME_FOR_THE_TABLE</a></td></tr>" >> index.html
  ################
   
  # report that we are writing a new file 
@@ -238,6 +241,9 @@ Reports on the individual fields may be found at http://vast.sai.msu.ru/unmw/upl
     echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='http://vast.sai.msu.ru/unmw/uploads/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$ERROR_MSG</td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
    else
     echo "<td><font color='green'>OK</font></td><td><a href='http://vast.sai.msu.ru/unmw/uploads/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    ####
+    # Create filtered list of candidates (no asteroids, no known variables)
+    "$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME"
     ####
     # Remove this field from the observing plan
     export N_FIELD_FOUND_IN_PLAN=0 
