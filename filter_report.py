@@ -38,7 +38,7 @@ def is_asteroid(pre_el_text):
         return False
 
 
-def is_variable_star(pre_el_text):
+def is_variable_star_vsx(pre_el_text):
     if 'The object was found in VSX' in pre_el_text:
         pre_text_split = pre_el_text.split('\n')
 
@@ -52,9 +52,23 @@ def is_variable_star(pre_el_text):
     else:
         return False
 
+def is_variable_star_asassn(pre_el_text):
+    if 'The object was found in ASASSN-V' in pre_el_text:
+        pre_text_split = pre_el_text.split('\n')
+
+        for idx, el in enumerate(pre_text_split):
+            if 'ASASSN-V' in el:
+                vs_idx = idx + 1
+                break
+
+        vs_arcsec = int(pre_text_split[vs_idx].strip().split()[0][:-1])
+        return vs_arcsec <= VAR_MAX_DIST_ARCSEC
+    else:
+        return False
+
 
 def is_ast_or_vs(pre_el_text):
-    return is_asteroid(pre_el_text) or is_variable_star(pre_el_text)
+    return is_asteroid(pre_el_text) or is_variable_star_vsx(pre_el_text) or is_variable_star_asassn(pre_el_text)
 
 
 def filter_report(path_to_report):
