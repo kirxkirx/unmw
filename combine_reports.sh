@@ -121,14 +121,46 @@ if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
  NAME="$USER$HOST"
  DATETIME=`LANG=C date --utc`                                                                                 
  SCRIPTNAME=`basename $0`
- MSG="Creating a new combined list of candidates at http://vast.sai.msu.ru/unmw/uploads/$OUTPUT_COMBINED_HTML_NAME
+ # Yes, I'm being silly
+ # Generate a wish-you-well string
+ WISHWELLSTRING="Happy observing!"
+ MONTECARLO=$[ $RANDOM % 10 ]
+ if [ $MONTECARLO -gt 8 ];then
+  WISHWELLSTRING="Have fun observing!"
+ elif [ $MONTECARLO -gt 7 ];then
+  WISHWELLSTRING="Watch the Skies!"
+ elif [ $MONTECARLO -gt 6 ];then
+  WISHWELLSTRING="Good luck with the observations!"
+ elif [ $MONTECARLO -gt 5 ];then
+  WISHWELLSTRING="Clear Skies!"
+ elif [ $MONTECARLO -gt 4 ];then
+  WISHWELLSTRING="Enjoy observing!"
+ elif [ $MONTECARLO -gt 3 ];then
+  WISHWELLSTRING="Have fun!"
+ elif [ $MONTECARLO -gt 2 ];then
+  WISHWELLSTRING="Good luck searching for a Nova!"
+ elif [ $MONTECARLO -gt 1 ];then
+  WISHWELLSTRING="Don't miss a Nova!"
+ fi
+ #
+ MSG="Creating a new combined list of candidates at 
+http://vast.sai.msu.ru/unmw/uploads/$OUTPUT_COMBINED_HTML_NAME
 
-The corresponding processing summary page is at http://vast.sai.msu.ru/unmw/uploads/$OUTPUT_PROCESSING_SUMMARY_HTML_NAME
+The filtered version of that list (no known variables and asteroids) is at
+http://vast.sai.msu.ru/unmw/uploads/$OUTPUT_FILTERED_HTML_NAME
 
-Reports on the individual fields may be found at http://vast.sai.msu.ru/unmw/uploads/autoprocess.txt
+The corresponding processing summary page: 
+http://vast.sai.msu.ru/unmw/uploads/$OUTPUT_PROCESSING_SUMMARY_HTML_NAME
 
-(TEST!) The modified observing plan is at http://vast.sai.msu.ru/unmw/uploads/plan.txt
-The original observing plan is at http://vast.sai.msu.ru/unmw/uploads/plan_in.txt"
+Processing logs for the individual fields:
+http://vast.sai.msu.ru/unmw/uploads/autoprocess.txt
+
+$WISHWELLSTRING
+$SCRIPTNAME @ $HOST
+"
+
+#"(TEST!) The modified observing plan is at http://vast.sai.msu.ru/unmw/uploads/plan.txt
+#The original observing plan is at http://vast.sai.msu.ru/unmw/uploads/plan_in.txt"
  if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=[NMW combined list] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
