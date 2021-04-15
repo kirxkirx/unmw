@@ -23,6 +23,13 @@ if [ ! -z "$DATA_PROCESSING_ROOT" ];then
   cd "$DATA_PROCESSING_ROOT"
  fi
 fi
+#
+# URL_OF_DATA_PROCESSING_ROOT specifies where the data processing root is accessible online
+# URL_OF_DATA_PROCESSING_ROOT may be exported in local_config.sh
+if [ ! -z "$URL_OF_DATA_PROCESSING_ROOT" ];then
+ # if it is not set, go with the default valeu
+ URL_OF_DATA_PROCESSING_ROOT="http://vast.sai.msu.ru/unmw/uploads"
+fi
 
 # loop through the cameras
 for CAMERA in Stas Nazar ;do
@@ -144,23 +151,23 @@ if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
  fi
  #
  MSG="Creating a new combined list of candidates at 
-http://vast.sai.msu.ru/unmw/uploads/$OUTPUT_COMBINED_HTML_NAME
+$URL_OF_DATA_PROCESSING_ROOT/$OUTPUT_COMBINED_HTML_NAME
 
 The filtered version of that list (no known variables and asteroids) is at
-http://vast.sai.msu.ru/unmw/uploads/$OUTPUT_FILTERED_HTML_NAME
+$URL_OF_DATA_PROCESSING_ROOT/$OUTPUT_FILTERED_HTML_NAME
 
 The corresponding processing summary page: 
-http://vast.sai.msu.ru/unmw/uploads/$OUTPUT_PROCESSING_SUMMARY_HTML_NAME
+$URL_OF_DATA_PROCESSING_ROOT/$OUTPUT_PROCESSING_SUMMARY_HTML_NAME
 
 Processing logs for the individual fields:
-http://vast.sai.msu.ru/unmw/uploads/autoprocess.txt
+$URL_OF_DATA_PROCESSING_ROOT/autoprocess.txt
 
 $WISHWELLSTRING
 $SCRIPTNAME @ $HOST
 "
 
-#"(TEST!) The modified observing plan is at http://vast.sai.msu.ru/unmw/uploads/plan.txt
-#The original observing plan is at http://vast.sai.msu.ru/unmw/uploads/plan_in.txt"
+#"(TEST!) The modified observing plan is at $URL_OF_DATA_PROCESSING_ROOT/plan.txt
+#The original observing plan is at $URL_OF_DATA_PROCESSING_ROOT/plan_in.txt"
  if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=[NMW combined list] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
@@ -214,10 +221,10 @@ for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
    NAME="$USER$HOST"
    DATETIME=`LANG=C date --utc`                                                                                 
    SCRIPTNAME=`basename $0`
-   MSG="The combined list of candidates at http://vast.sai.msu.ru/unmw/uploads/$OUTPUT_COMBINED_HTML_NAME
+   MSG="The combined list of candidates at $URL_OF_DATA_PROCESSING_ROOT/$OUTPUT_COMBINED_HTML_NAME
 is too large -- $INPUT_HTML_FILE_SIZE_MB MB. This is very-very wrong!
 
-Reports on the individual fields may be found at http://vast.sai.msu.ru/unmw/uploads/autoprocess.txt"
+Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/autoprocess.txt"
    if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
     curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR: large HTML file] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
    fi
@@ -245,7 +252,7 @@ Reports on the individual fields may be found at http://vast.sai.msu.ru/unmw/upl
   NAME="$USER$HOST"
   DATETIME=`LANG=C date --utc`                                                                                 
   SCRIPTNAME=`basename $0`
-  MSG="Too mnay candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) in http://vast.sai.msu.ru/unmw/uploads/$INPUT_DIR/"
+  MSG="Too mnay candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
   INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"
  fi
  echo "$INPUT_DIR/index.html" >> combine_reports.log
@@ -259,20 +266,20 @@ Reports on the individual fields may be found at http://vast.sai.msu.ru/unmw/upl
  IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=`grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | sed 's:deg.::g' | tail -n1 | awk '{print $7}'`
  echo -n "<tr><td>$CAMERA</td><td>$LAST_IMAGE_DATE</td><td><font color='teal'> $FIELD </font></td><td>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  if [ "$INCLUDE_REPORT_IN_COMBINED_LIST" != "OK" ];then
-  echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='http://vast.sai.msu.ru/unmw/uploads/$INPUT_DIR/' target='_blank'>log</a></td><td></td><td>too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) to include in the combined list ("`basename $0`")</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+  echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td></td><td>too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) to include in the combined list ("`basename $0`")</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  else
   grep --quiet 'ERROR' "$INPUT_DIR/index.html" | grep 'camera is stuck'
   if [ $? -eq 0 ];then
    FIELD=`grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:<br>::g' | awk '{print $1}'`
-   echo "<td><font color='#FF0033'>CAMERA STUCK</font></td><td><a href='http://vast.sai.msu.ru/unmw/uploads/$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+   echo "<td><font color='#FF0033'>CAMERA STUCK</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
   else
    ### Check for all other errors
    grep --quiet 'ERROR' "$INPUT_DIR/index.html"
    if [ $? -eq 0 ] ;then
     ERROR_MSG=`grep --max-count=1 'ERROR' "$INPUT_DIR/index.html"`
-    echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='http://vast.sai.msu.ru/unmw/uploads/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$ERROR_MSG</td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$ERROR_MSG</td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
    else
-    echo "<td><font color='green'>OK</font></td><td><a href='http://vast.sai.msu.ru/unmw/uploads/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    echo "<td><font color='green'>OK</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
     ####
     # Create filtered list of candidates (no asteroids, no known variables)
     "$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME"
