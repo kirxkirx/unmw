@@ -163,7 +163,7 @@ Processing logs for the individual fields:
 $URL_OF_DATA_PROCESSING_ROOT/autoprocess.txt
 
 $WISHWELLSTRING
-$SCRIPTNAME @ $HOST
+$SCRIPTNAME $HOST
 "
 
 #"(TEST!) The modified observing plan is at $URL_OF_DATA_PROCESSING_ROOT/plan.txt
