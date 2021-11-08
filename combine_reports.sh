@@ -32,7 +32,7 @@ if [ ! -z "$URL_OF_DATA_PROCESSING_ROOT" ];then
 fi
 
 # loop through the cameras
-for CAMERA in Stas Nazar ;do
+for CAMERA in Stas Nazar Planeta ;do
 
 DAY=`date +%Y%m%d`
 HOUR=`date +%H`

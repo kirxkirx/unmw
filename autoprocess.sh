@@ -320,6 +320,13 @@ for i in *-SF* ;do
   mv "$i" "${i/-SF/}"
  fi 
 done
+#
+echo "Renaming the 2021_ field name files (should be 2021-)"
+for i in *"2021_"* ;do 
+ if [ -f "$i" ];then
+  mv "$i" "${i/2021_/2021-}" 
+ fi
+done
 
 # make a VaST Copy
 echo "Changing directory to $DATA_PROCESSING_ROOT" 
