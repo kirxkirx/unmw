@@ -61,6 +61,9 @@ for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
  if [ $? -eq 0 ];then
   continue
  fi
+ if [ -f $INPUT_DIR/index.html.combine_reports_lock ];then
+  continue
+ fi
  LIST_OF_FILES="$LIST_OF_FILES $INPUT_DIR/index.html"
 done
 
@@ -77,6 +80,9 @@ for FILE in $SORTED_LIST_OF_FILES ;do
  if [ $? -ne 0 ];then
   continue
  fi
+ # lock the directory in case second instance of combine_reports.sh will start before we finish
+ touch $INPUT_DIR/index.html.combine_reports_lock
+ #
  INPUT_LIST_OF_RESULT_DIRS="$INPUT_LIST_OF_RESULT_DIRS "`dirname $FILE`
 done
 
