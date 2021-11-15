@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 
 # You probably want to add this script to /etc/crontab
-#*/4     *       *       *       *       www-data        /dataX/cgi-bin/unmw/combine_reports.sh &> /dev/null
+#*/8     *       *       *       *       www-data        /dataX/cgi-bin/unmw/combine_reports.sh &> /dev/null
+
+# Check that no other instances of the script are running
+N_RUN=`ps ax | grep combine_reports.sh | grep -v grep | grep bash | grep -c combine_reports.sh`
+if [ $N_RUN -gt 1 ];then
+ exit 0
+fi
 
 # change to the work directory
 SCRIPTDIR=`readlink -f $0`
