@@ -5,7 +5,10 @@
 
 # Check that no other instances of the script are running
 N_RUN=`ps ax | grep combine_reports.sh | grep -v grep | grep bash | grep -c combine_reports.sh`
-if [ $N_RUN -gt 1 ];then
+# This is conter-intuitive but the use of the construct N_RUN=`` will create a second copy of "bash ./combine_reports.sh" in the ps output
+# So one running copy of the script corresponds to N_RUN=2
+if [ $N_RUN -gt 2 ];then
+# echo "DEBUG DA"
  exit 0
 fi
 
@@ -40,6 +43,8 @@ fi
 # loop through the cameras
 for CAMERA in Stas Nazar Planeta ;do
 
+#echo "DEBUG CAMERA=$CAMERA"
+
 DAY=`date +%Y%m%d`
 HOUR=`date +%H`
 EVENING_OR_MORNING="evening"
@@ -72,6 +77,8 @@ for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
  fi
  LIST_OF_FILES="$LIST_OF_FILES $INPUT_DIR/index.html"
 done
+
+#echo "DEBUG000 #$LIST_OF_FILES#"
 
 if [ -z "$LIST_OF_FILES" ];then
  # nothing to process, continue to the next camera
@@ -209,6 +216,8 @@ fi
 
 # make body
 for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
+
+# echo "DEBUG001 $INPUT_DIR"
 
  if [ ! -d "$INPUT_DIR" ];then
   echo "ERROR: there is no directory $INPUT_DIR"
