@@ -49,18 +49,34 @@ if [ -z "$INPUT_ZIP_ARCHIVE" ];then
  echo "ERROR: no input ZIP archive $INPUT_ZIP_ARCHIVE" 
  exit 1
 fi
-if [ ! -f "$INPUT_ZIP_ARCHIVE" ];then
- echo "ERROR: input ZIP archive $INPUT_ZIP_ARCHIVE does not exist" 
- exit 1
-fi
-if [ ! -s "$INPUT_ZIP_ARCHIVE" ];then
- echo "ERROR: input ZIP archive $INPUT_ZIP_ARCHIVE is empty" 
- exit 1
-fi
+
+INPUT_DIR_NOT_ZIP_ARCHIVE=0
 if [ -d "$INPUT_ZIP_ARCHIVE" ];then
- echo "ERROR: input $INPUT_ZIP_ARCHIVE is a directory, not a ZIP archive" 
- exit 1
+ echo "The input is a directory $INPUT_ZIP_ARCHIVE"
+ N_FITS_FILES=`ls "$INPUT_ZIP_ARCHIVE"/*.fts | wc -l`
+ if [ $N_FITS_FILES -ge 2 ];then
+  INPUT_DIR_NOT_ZIP_ARCHIVE=1
+  echo "The input contains at lest 2 FITS files "
+  ls "$INPUT_ZIP_ARCHIVE"/*.fts
+  INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE="$INPUT_ZIP_ARCHIVE"
+ fi
 fi
+
+if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
+ if [ ! -f "$INPUT_ZIP_ARCHIVE" ];then
+  echo "ERROR: input ZIP archive $INPUT_ZIP_ARCHIVE does not exist" 
+  exit 1
+ fi
+ if [ ! -s "$INPUT_ZIP_ARCHIVE" ];then
+  echo "ERROR: input ZIP archive $INPUT_ZIP_ARCHIVE is empty" 
+  exit 1
+ fi
+ if [ -d "$INPUT_ZIP_ARCHIVE" ];then
+  echo "ERROR: input $INPUT_ZIP_ARCHIVE is a directory, not a ZIP archive" 
+  exit 1
+ fi
+fi
+###
 if [ ! -d "$IMAGE_DATA_ROOT" ];then
  mkdir "$IMAGE_DATA_ROOT"
  if [ $? -ne 0 ];then
@@ -207,18 +223,25 @@ SESSION_KEY=$(set_session_key) # or SESSION_KEY=`set_session_key`
 ZIP_ARCHIVE_FILENAME=`basename "$INPUT_ZIP_ARCHIVE"`
 DATASET_NAME=`basename $ZIP_ARCHIVE_FILENAME .zip`
 DATASET_NAME=`basename $DATASET_NAME .rar`
+if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 1 ];then
+ DATASET_NAME="reprocess_$DATASET_NAME"
+fi
 VAST_WORKING_DIR_FILENAME="vast_$DATASET_NAME"_"$SESSION_KEY"
 VAST_RESULTS_DIR_FILENAME="results_"`date +"%Y%m%d_%H%M%S"`_"$DATASET_NAME"_"$SESSION_KEY"
 LOCAL_PATH_TO_IMAGES="img_$DATASET_NAME"_"$SESSION_KEY"
 
 
-# First copy and ZIP archive with second-epoch images to the $IMAGE_DATA_ROOT
-PATH_TO_ZIP_ARCHIVE=`dirname "$INPUT_ZIP_ARCHIVE"`
-if [ "$PATH_TO_ZIP_ARCHIVE" != "$IMAGE_DATA_ROOT" ];then
- cp -vf "$INPUT_ZIP_ARCHIVE" "$IMAGE_DATA_ROOT"
+if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
+ # First copy ZIP archive with second-epoch images to the $IMAGE_DATA_ROOT
+ PATH_TO_ZIP_ARCHIVE=`dirname "$INPUT_ZIP_ARCHIVE"`
+ if [ "$PATH_TO_ZIP_ARCHIVE" != "$IMAGE_DATA_ROOT" ];then
+  cp -vf "$INPUT_ZIP_ARCHIVE" "$IMAGE_DATA_ROOT"
+ fi
+ # We'll need ABSOLUTE_PATH_TO_ZIP_ARCHIVE to write out the results URL
+ ABSOLUTE_PATH_TO_ZIP_ARCHIVE=`readlink -f "$PATH_TO_ZIP_ARCHIVE"`
+else
+ ABSOLUTE_PATH_TO_ZIP_ARCHIVE=""
 fi
-# We'll need ABSOLUTE_PATH_TO_ZIP_ARCHIVE to write out the results URL
-ABSOLUTE_PATH_TO_ZIP_ARCHIVE=`readlink -f "$PATH_TO_ZIP_ARCHIVE"`
 
 echo "Changing directory to $IMAGE_DATA_ROOT" 
 cd "$IMAGE_DATA_ROOT"
@@ -237,12 +260,19 @@ sudo chown -R $USER $PWD"
 fi
 #
 
-# Remove image directory with the same name if exist
-if [ -d "$LOCAL_PATH_TO_IMAGES" ];then
- rm -rf "$LOCAL_PATH_TO_IMAGES"
-fi
-mkdir "$LOCAL_PATH_TO_IMAGES"
-ABSOLUTE_PATH_TO_IMAGES="$IMAGE_DATA_ROOT/$LOCAL_PATH_TO_IMAGES"
+if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
+ # Remove image directory with the same name if exist
+ if [ -d "$LOCAL_PATH_TO_IMAGES" ];then
+  rm -rf "$LOCAL_PATH_TO_IMAGES"
+ fi
+ mkdir "$LOCAL_PATH_TO_IMAGES"
+ ABSOLUTE_PATH_TO_IMAGES="$IMAGE_DATA_ROOT/$LOCAL_PATH_TO_IMAGES"
+ echo "Setting archive directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
+else
+ INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE=`basename $INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE`
+ ABSOLUTE_PATH_TO_IMAGES=`readlink -f $INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE`
+ echo "Setting input directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
+fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 if [ ! -d "$ABSOLUTE_PATH_TO_IMAGES" ];then
  echo "ERROR: cannot find directory $ABSOLUTE_PATH_TO_IMAGES " 
  exit 1
@@ -253,49 +283,52 @@ if [ -d "$VAST_RESULTS_DIR_FILENAME" ];then
 fi
 mkdir "$VAST_RESULTS_DIR_FILENAME"
 
+if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
+ mv -v "$ZIP_ARCHIVE_FILENAME" "$LOCAL_PATH_TO_IMAGES"
 
-mv -v "$ZIP_ARCHIVE_FILENAME" "$LOCAL_PATH_TO_IMAGES"
+ echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
+ cd "$ABSOLUTE_PATH_TO_IMAGES"
+ if [ ! -f "$ZIP_ARCHIVE_FILENAME" ];then
+  echo "ERROR: cannot find $ABSOLUTE_PATH_TO_IMAGES/$ZIP_ARCHIVE_FILENAME" 
+  exit 1
+ fi
 
-echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
-cd "$ABSOLUTE_PATH_TO_IMAGES"
-if [ ! -f "$ZIP_ARCHIVE_FILENAME" ];then
- echo "ERROR: cannot find $ABSOLUTE_PATH_TO_IMAGES/$ZIP_ARCHIVE_FILENAME" 
- exit 1
-fi
-
-# Check if this is a RAR archive
-if file "$ZIP_ARCHIVE_FILENAME" | grep --quiet 'RAR archive' ;then
- command -v rar &> /dev/null
- if [ $? -eq 0 ];then
-  rar e "$ZIP_ARCHIVE_FILENAME"
+ # Check if this is a RAR archive
+ if file "$ZIP_ARCHIVE_FILENAME" | grep --quiet 'RAR archive' ;then
+  command -v rar &> /dev/null
+  if [ $? -eq 0 ];then
+   rar e "$ZIP_ARCHIVE_FILENAME"
+   if [ $? -ne 0 ];then
+    echo "ERROR: cannot extradct the RAR archive $ZIP_ARCHIVE_FILENAME" 
+    exit 1
+   fi
+  else
+   command -v unrar &> /dev/null
+   if [ $? -ne 0 ];then
+    echo "ERROR: cannot extradct the RAR archive $ZIP_ARCHIVE_FILENAME" 
+    exit 1
+   else
+    unrar e "$ZIP_ARCHIVE_FILENAME"
+    if [ $? -ne 0 ];then
+     echo "ERROR: cannot extradct the RAR archive - please install rar or unrar" 
+     exit 1
+    fi
+   fi
+  fi
+ elif file "$ZIP_ARCHIVE_FILENAME" | grep --quiet 'Zip archive' ;then
+  unzip -j "$ZIP_ARCHIVE_FILENAME"
   if [ $? -ne 0 ];then
-   echo "ERROR: cannot extradct the RAR archive $ZIP_ARCHIVE_FILENAME" 
+   echo "ERROR: cannot extradct the ZIP archive $ZIP_ARCHIVE_FILENAME" 
    exit 1
   fi
  else
-  command -v unrar &> /dev/null
-  if [ $? -ne 0 ];then
-   echo "ERROR: cannot extradct the RAR archive $ZIP_ARCHIVE_FILENAME" 
-   exit 1
-  else
-   unrar e "$ZIP_ARCHIVE_FILENAME"
-   if [ $? -ne 0 ];then
-    echo "ERROR: cannot extradct the RAR archive - please install rar or unrar" 
-    exit 1
-   fi
-  fi
- fi
-elif file "$ZIP_ARCHIVE_FILENAME" | grep --quiet 'Zip archive' ;then
- unzip -j "$ZIP_ARCHIVE_FILENAME"
- if [ $? -ne 0 ];then
-  echo "ERROR: cannot extradct the ZIP archive $ZIP_ARCHIVE_FILENAME" 
+  echo "ERROR: unrecognized archive type $ZIP_ARCHIVE_FILENAME" 
   exit 1
  fi
-else
- echo "ERROR: unrecognized archive type $ZIP_ARCHIVE_FILENAME" 
- exit 1
-fi
-rm -f "$ZIP_ARCHIVE_FILENAME"
+ rm -f "$ZIP_ARCHIVE_FILENAME"
+fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
+
+##### At this point we have input directory with images at $ABSOLUTE_PATH_TO_IMAGES #####
 
 # Rename SF files
 echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
@@ -359,9 +392,10 @@ if [ -d transient_report ];then
 fi
 ln -s ../"$VAST_RESULTS_DIR_FILENAME" transient_report
 
-# Place the redirect link
-echo "$URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/" > "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/results_url.txt"
-
+if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
+ # Place the redirect link
+ echo "$URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/" > "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/results_url.txt"
+fi
 
 # Report that we are ready to go
 echo "Reporting the start of work" 
@@ -483,13 +517,15 @@ if [ $SCRIPT_EXIT_CODE -eq 0 ];then
    fi
   fi
  fi
- if [ ! -z "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
-  if [ -d "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
-   if [ ! -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/DO_NOT_DELETE_THIS_DIR" ];then
-    rm -rf "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE"
+ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
+  if [ ! -z "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
+   if [ -d "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
+    if [ ! -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/DO_NOT_DELETE_THIS_DIR" ];then
+     rm -rf "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE"
+    fi
    fi
   fi
- fi
+ fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 else
  echo "Skip cleanup for non-zero script exit code"
 fi
