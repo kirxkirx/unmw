@@ -289,7 +289,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  if [ "$INCLUDE_REPORT_IN_COMBINED_LIST" != "OK" ];then
   echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td></td><td>too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) to include in the combined list ("`basename $0`")</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  else
-  grep --quiet 'ERROR' "$INPUT_DIR/index.html" | grep 'camera is stuck'
+  grep --quiet 'ERROR' "$INPUT_DIR/index.html" | grep 'stuck camera'
   if [ $? -eq 0 ];then
    FIELD=`grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:<br>::g' | awk '{print $1}'`
    echo "<td><font color='#FF0033'>CAMERA STUCK</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
