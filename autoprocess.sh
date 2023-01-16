@@ -379,11 +379,23 @@ fi
 #
 
 echo "Making a copy of "`readlink -f "$VAST_REFERENCE_COPY"`" to $VAST_WORKING_DIR_FILENAME" 
-# P is to copy symlinks as symlinks
-cp -rP `readlink -f "$VAST_REFERENCE_COPY"` "$VAST_WORKING_DIR_FILENAME"
+## P is to copy symlinks as symlinks
+#cp -rP `readlink -f "$VAST_REFERENCE_COPY"` "$VAST_WORKING_DIR_FILENAME"
+# use rsync to ignore large and unneeded files
+# '/' tells rsync we want the content of the directory, not the directory itself
+rsync -avz --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' `readlink -f "$VAST_REFERENCE_COPY"`/ "$VAST_WORKING_DIR_FILENAME"
+cd "$VAST_WORKING_DIR_FILENAME"
+# create symlinks
+ln -s `readlink -f "$VAST_REFERENCE_COPY"`/astorb.dat
+cd lib/
+ln -s `readlink -f "$VAST_REFERENCE_COPY"`/lib/catalogs
+cd ..
+#
+
 #
 echo "Changing directory to $VAST_WORKING_DIR_FILENAME" 
 cd "$VAST_WORKING_DIR_FILENAME"
+
 
 #
 if [ -d transient_report ];then
