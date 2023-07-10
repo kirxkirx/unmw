@@ -11,7 +11,7 @@ if [ -z "$IMAGE_DATA_ROOT" ] || [ -z "$DATA_PROCESSING_ROOT" ] || [ -z "$URL_OF_
  DATA_PROCESSING_ROOT="$IMAGE_DATA_ROOT"
  URL_OF_DATA_PROCESSING_ROOT="http://vast.sai.msu.ru/unmw/uploads"
 
- if [ `hostname` == "scan" ];then
+ if [ $(hostname) = "scan" ];then
   IMAGE_DATA_ROOT="/home/NMW_web_upload"
   DATA_PROCESSING_ROOT="/home/NMW_web_upload"
   URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
@@ -23,23 +23,25 @@ fi
 VAST_REFERENCE_COPY="$DATA_PROCESSING_ROOT"/vast
 INPUT_ZIP_ARCHIVE=$1
 
-UNIXSEC_START_TOTAL=`date +%s`
+UNIXSEC_START_TOTAL=$(date +%s)
 
 ## This function will set the random session key in attempt to avoid 
 ## file collisions if other instances of the script are running at the same time.
 function set_session_key {
+ local RANDOMFILE
  if [ -r /dev/urandom ];then
-  local RANDOMFILE=/dev/urandom
+  RANDOMFILE=/dev/urandom
  elif [ -r /dev/random ];then
-  local RANDOMFILE=/dev/random
+  RANDOMFILE=/dev/random
  else
   echo "ERROR: cannot find /dev/random" 
-  local RANDOMFILE=""
+  RANDOMFILE=""
  fi
+ local SESSION_KEY
  if [ "$RANDOMFILE" != "" ];then
-  local SESSION_KEY="$$"_`tr -cd a-zA-Z0-9 < $RANDOMFILE | head -c 8`
+  SESSION_KEY="$$"_$(tr -cd a-zA-Z0-9 < $RANDOMFILE | head -c 8)
  else
-  local SESSION_KEY="$$"
+  SESSION_KEY="$$"
  fi
  echo "$SESSION_KEY"
 }
@@ -53,7 +55,7 @@ fi
 INPUT_DIR_NOT_ZIP_ARCHIVE=0
 if [ -d "$INPUT_ZIP_ARCHIVE" ];then
  echo "The input is a directory $INPUT_ZIP_ARCHIVE"
- N_FITS_FILES=`ls "$INPUT_ZIP_ARCHIVE"/*.fts | wc -l`
+ N_FITS_FILES=$(ls "$INPUT_ZIP_ARCHIVE"/*.fts | wc -l)
  if [ $N_FITS_FILES -ge 2 ];then
   INPUT_DIR_NOT_ZIP_ARCHIVE=1
   echo "The input contains at lest 2 FITS files "
@@ -117,7 +119,7 @@ sudo chown -R $USER $PWD"
  fi
  touch "$VAST_REFERENCE_COPY".lock
  echo "Trying to install VaST in directory $VAST_REFERENCE_COPY" 
- cd "$VAST_REFERENCE_COPY"
+ cd "$VAST_REFERENCE_COPY" || exit 1
  git checkout https://github.com/kirxkirx/vast.git .
  # compile VaST
  make
@@ -126,27 +128,27 @@ sudo chown -R $USER $PWD"
   lib/update_offline_catalogs.sh all
   # manually update the two big ones
   # Tycho-2
-  cd `dirname "$VAST_REFERENCE_COPY"`
+  cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
   if [ ! -d tycho2 ];then
    mkdir tycho2
-   cd tycho2
+   cd tycho2 || exit 1
    wget -nH --cut-dirs=4 --no-parent -r -l0 -c -A 'ReadMe,*.gz,robots.txt' "http://scan.sai.msu.ru/~kirx/data/tycho2/"
    for i in tyc2.dat.*gz ;do
-    gunzip $i
+    gunzip "$i"
    done
-   cd `dirname "$VAST_REFERENCE_COPY"`
+   cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
   fi
   # and UCAC5
   cd `dirname "$VAST_REFERENCE_COPY"`
   if [ ! -d UCAC5 ];then
    mkdir UCAC5
-   cd UCAC5
+   cd UCAC5 || exit 1
    wget -r -Az* -c --no-dir "http://scan.sai.msu.ru/~kirx/data/ucac5"
-   cd `dirname "$VAST_REFERENCE_COPY"`
+   cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
   fi
  fi
- cd `dirname "$VAST_REFERENCE_COPY"`
- BASENAME_VAST_REFERENCE_COPY=`basename $VAST_REFERENCE_COPY`
+ cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
+ BASENAME_VAST_REFERENCE_COPY=$(basename $VAST_REFERENCE_COPY)
  if [ "$BASENAME_VAST_REFERENCE_COPY" != "vast" ];then
   mv "vast" "$BASENAME_VAST_REFERENCE_COPY"
  fi
@@ -176,20 +178,20 @@ fi
 ##########
 
 # Set random delays
-RANDOM_TWO_DIGIT_NUMBER=`tr -cd 0-9 < /dev/urandom | head -c 2`
+RANDOM_TWO_DIGIT_NUMBER=$(tr -cd 0-9 < /dev/urandom | head -c 2)
 NUMBER_OF_ITERATIONS=30
 if [ $RANDOM_TWO_DIGIT_NUMBER -gt $NUMBER_OF_ITERATIONS ];then
  NUMBER_OF_ITERATIONS=$RANDOM_TWO_DIGIT_NUMBER
 fi
-RANDOM_TWO_DIGIT_NUMBER=`tr -cd 0-9 < /dev/urandom | head -c 2`
+RANDOM_TWO_DIGIT_NUMBER=$(tr -cd 0-9 < /dev/urandom | head -c 2)
 if [ $RANDOM_TWO_DIGIT_NUMBER -lt 10 ];then
  RANDOM_TWO_DIGIT_NUMBER=$[$RANDOM_TWO_DIGIT_NUMBER+10]
 fi 
 
 # Delay processing if the server load is high
-UNIXSEC_START_WAITLOAD=`date +%s`
-for LOADWAITITERATION in `seq 1 $NUMBER_OF_ITERATIONS` ;do
- ONEMINUTELOADTIMES100=`uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1*100}'`
+UNIXSEC_START_WAITLOAD=$(date +%s)
+for LOADWAITITERATION in $(seq 1 $NUMBER_OF_ITERATIONS) ;do
+ ONEMINUTELOADTIMES100=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1*100}')
  if [ -z "$ONEMINUTELOADTIMES100" ];then
   echo "ERROR: getting the load"
   break
@@ -216,24 +218,24 @@ for LOADWAITITERATION in `seq 1 $NUMBER_OF_ITERATIONS` ;do
  fi
 done
 echo "Done sleeping"
-UNIXSEC_STOP_WAITLOAD=`date +%s`
+UNIXSEC_STOP_WAITLOAD=$(date +%s)
 
 # Make up file names
 SESSION_KEY=$(set_session_key) # or SESSION_KEY=`set_session_key`
-ZIP_ARCHIVE_FILENAME=`basename "$INPUT_ZIP_ARCHIVE"`
-DATASET_NAME=`basename $ZIP_ARCHIVE_FILENAME .zip`
-DATASET_NAME=`basename $DATASET_NAME .rar`
+ZIP_ARCHIVE_FILENAME=$(basename "$INPUT_ZIP_ARCHIVE")
+DATASET_NAME=$(basename "$ZIP_ARCHIVE_FILENAME" .zip)
+DATASET_NAME=$(basename "$DATASET_NAME" .rar)
 if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 1 ];then
  DATASET_NAME="reprocess_$DATASET_NAME"
 fi
 VAST_WORKING_DIR_FILENAME="vast_$DATASET_NAME"_"$SESSION_KEY"
-VAST_RESULTS_DIR_FILENAME="results_"`date +"%Y%m%d_%H%M%S"`_"$DATASET_NAME"_"$SESSION_KEY"
+VAST_RESULTS_DIR_FILENAME="results_"$(date +"%Y%m%d_%H%M%S")_"$DATASET_NAME"_"$SESSION_KEY"
 LOCAL_PATH_TO_IMAGES="img_$DATASET_NAME"_"$SESSION_KEY"
 
 
 if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  # First copy ZIP archive with second-epoch images to the $IMAGE_DATA_ROOT
- PATH_TO_ZIP_ARCHIVE=`dirname "$INPUT_ZIP_ARCHIVE"`
+ PATH_TO_ZIP_ARCHIVE=$(dirname "$INPUT_ZIP_ARCHIVE")
  if [ "$PATH_TO_ZIP_ARCHIVE" != "$IMAGE_DATA_ROOT" ];then
   cp -vf "$INPUT_ZIP_ARCHIVE" "$IMAGE_DATA_ROOT"
  fi
@@ -244,7 +246,7 @@ else
 fi
 
 echo "Changing directory to $IMAGE_DATA_ROOT" 
-cd "$IMAGE_DATA_ROOT"
+cd "$IMAGE_DATA_ROOT" || exit 1
 #
 echo -n "Checking write permissions for the current directory ( $PWD ) ... "
 touch testfile$$.tmp
@@ -270,7 +272,7 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  echo "Setting archive directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
 else
  INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE=`basename $INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE`
- ABSOLUTE_PATH_TO_IMAGES=`readlink -f $INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE`
+ ABSOLUTE_PATH_TO_IMAGES=$(readlink -f "$INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE")
  echo "Setting input directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 if [ ! -d "$ABSOLUTE_PATH_TO_IMAGES" ];then
@@ -287,7 +289,7 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  mv -v "$ZIP_ARCHIVE_FILENAME" "$LOCAL_PATH_TO_IMAGES"
 
  echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
- cd "$ABSOLUTE_PATH_TO_IMAGES"
+ cd "$ABSOLUTE_PATH_TO_IMAGES" || exit 1
  if [ ! -f "$ZIP_ARCHIVE_FILENAME" ];then
   echo "ERROR: cannot find $ABSOLUTE_PATH_TO_IMAGES/$ZIP_ARCHIVE_FILENAME" 
   exit 1
@@ -332,7 +334,7 @@ fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 
 # Rename SF files
 echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
-cd "$ABSOLUTE_PATH_TO_IMAGES"
+cd "$ABSOLUTE_PATH_TO_IMAGES" || exit 1
 #
 echo -n "Checking write permissions for the current directory ( $PWD ) ... "
 touch testfile$$.tmp
@@ -363,7 +365,7 @@ done
 
 # make a VaST Copy
 echo "Changing directory to $DATA_PROCESSING_ROOT" 
-cd "$DATA_PROCESSING_ROOT"
+cd "$DATA_PROCESSING_ROOT" || exit 1
 #
 echo -n "Checking write permissions for the current directory ( $PWD ) ... "
 touch testfile$$.tmp
@@ -378,23 +380,23 @@ sudo chown -R $USER $PWD"
 fi
 #
 
-echo "Making a copy of "`readlink -f "$VAST_REFERENCE_COPY"`" to $VAST_WORKING_DIR_FILENAME" 
+echo "Making a copy of "$(readlink -f "$VAST_REFERENCE_COPY")" to $VAST_WORKING_DIR_FILENAME" 
 ## P is to copy symlinks as symlinks
 #cp -rP `readlink -f "$VAST_REFERENCE_COPY"` "$VAST_WORKING_DIR_FILENAME"
 # use rsync to ignore large and unneeded files
 # '/' tells rsync we want the content of the directory, not the directory itself
-rsync -avz --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' `readlink -f "$VAST_REFERENCE_COPY"`/ "$VAST_WORKING_DIR_FILENAME"
-cd "$VAST_WORKING_DIR_FILENAME"
+rsync -avz --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' $(readlink -f "$VAST_REFERENCE_COPY")/ "$VAST_WORKING_DIR_FILENAME"
+cd "$VAST_WORKING_DIR_FILENAME" || exit 1
 # create symlinks
-ln -s `readlink -f "$VAST_REFERENCE_COPY"`/astorb.dat
-cd lib/
-ln -s `readlink -f "$VAST_REFERENCE_COPY"`/lib/catalogs
-cd ..
+ln -s $(readlink -f "$VAST_REFERENCE_COPY")/astorb.dat
+cd lib/ || exit 1
+ln -s $(readlink -f "$VAST_REFERENCE_COPY")/lib/catalogs
+cd .. || exit 1
 #
 
 #
 echo "Changing directory to $VAST_WORKING_DIR_FILENAME" 
-cd "$VAST_WORKING_DIR_FILENAME"
+cd "$VAST_WORKING_DIR_FILENAME" || exit 1
 
 
 #
@@ -414,8 +416,8 @@ echo "Reporting the start of work"
 HOST=`hostname`
 HOST="@$HOST"
 NAME="$USER$HOST"
-DATETIME=`LANG=C date --utc`
-SCRIPTNAME=`basename $0`
+DATETIME=$(LANG=C date --utc)
+SCRIPTNAME=$(basename $0)
 MSG="The script $0 has started on $DATETIME at $PWD with the following parameters:
 IMAGE_DATA_ROOT=$IMAGE_DATA_ROOT
 DATA_PROCESSING_ROOT=$DATA_PROCESSING_ROOT
@@ -434,7 +436,7 @@ $MSG
 
 " 
 if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workstartemail" ];then
- if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
+ if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
 fi
@@ -444,7 +446,7 @@ if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workendemail" ];then
 fi
 ############################################################################
 echo "Starting work" 
-UNIXSEC_START=`date +%s`
+UNIXSEC_START=$(date +%s)
 ########################## ACTUAL WORK ##########################
 util/transients/transient_factory_test31.sh "$ABSOLUTE_PATH_TO_IMAGES"
 SCRIPT_EXIT_CODE=$?
@@ -456,7 +458,7 @@ if [ ! -f transient_report/index.html ];then
  MSG="A VaST error occured: $ERROR_MSG
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
  # Just send this to kirx
- #if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+ #if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
  # curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  #fi
 elif [ ! -s transient_report/index.html ];then
@@ -465,7 +467,7 @@ elif [ ! -s transient_report/index.html ];then
  MSG="A VaST error occured: $ERROR_MSG
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
  # Just send this to kirx
- #if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+ #if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
  # curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  #fi
 else
@@ -474,16 +476,16 @@ else
  cat "transient_report/index.html" | grep -B1 'galactic' | grep -v -e 'galactic' -e '--' | while read A ;do   
   echo $A | awk '{if ( $5<9.5 && $5>-5.0 ) print "FOUND"}' | grep --quiet "FOUND" 
   if [ $? -eq 0 ];then
-   N_NOT_FOUND_IN_CATALOGS=`grep -A4 "$A" "transient_report/index.html" | grep -c 'not found'`
+   N_NOT_FOUND_IN_CATALOGS=$(grep -A4 "$A" "transient_report/index.html" | grep -c 'not found')
    if [ $N_NOT_FOUND_IN_CATALOGS -ge 3 ];then
-    BRIGHT_TRANSIENT_NAME=`grep -B17 "$A" "transient_report/index.html" | grep 'a name=' | awk -F"'" '{print $2}'`
+    BRIGHT_TRANSIENT_NAME=$(grep -B17 "$A" "transient_report/index.html" | grep 'a name=' | awk -F"'" '{print $2}')
     MSG="A bright candidate transient is found
 
 $A
 
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/#$BRIGHT_TRANSIENT_NAME"
     # Just send this to kirx
-    if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+    if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
      curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW bright candidate] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
     fi
    fi
@@ -494,35 +496,35 @@ Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/#$BRI
  ### Check for the stuck camera
  grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
  if [ $? -eq 0 ];then
-  FIELD=`grep 'Processing fields' transient_report/index.html | sed 's:Processing:processing:g' | sed 's:<br>::g'`
+  FIELD=$(grep 'Processing fields' transient_report/index.html | sed 's:Processing:processing:g' | sed 's:<br>::g')
   MSG="A camera error occured while $FIELD
 The cmaera seems to be repeatedly writing the same image!!!
 The detailed log output is at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
-  if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
+  if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
    curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=[NMW ERROR] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
   fi
  else
   ### Check for all other errors
   grep --quiet 'ERROR' "transient_report/index.html"
   if [ $? -eq 0 ] || [ $SCRIPT_EXIT_CODE -ne 0 ] ;then
-   ERROR_MSG=`grep --max-count=1 'ERROR' "transient_report/index.html"`
-   FIELD=`grep 'Processing fields' transient_report/index.html | sed 's:Processing:processing:g' | sed 's:<br>::g'`
+   ERROR_MSG=$(grep --max-count=1 'ERROR' "transient_report/index.html")
+   FIELD=$(grep 'Processing fields' transient_report/index.html | sed 's:Processing:processing:g' | sed 's:<br>::g')
    MSG="An error occured while $FIELD
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
    # Just send this to kirx
-   #if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+   #if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
    # curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
    #fi
   fi
  fi # grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
 fi # if [ ! -f transient_report/index.html ];then
 ##
-UNIXSEC_STOP=`date +%s`
+UNIXSEC_STOP=$(date +%s)
 ############################################################################
 cd ..
 if [ $SCRIPT_EXIT_CODE -eq 0 ];then
  echo "Cleaning up"
- if [ ! -z "$VAST_WORKING_DIR_FILENAME" ];then
+ if [ -n "$VAST_WORKING_DIR_FILENAME" ];then
   if [ -d "$VAST_WORKING_DIR_FILENAME" ];then
    if [ ! -f "$VAST_WORKING_DIR_FILENAME/DO_NOT_DELETE_THIS_DIR" ];then
     rm -rf "$VAST_WORKING_DIR_FILENAME"
@@ -530,7 +532,7 @@ if [ $SCRIPT_EXIT_CODE -eq 0 ];then
   fi
  fi
  if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
-  if [ ! -z "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
+  if [ -n "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
    if [ -d "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
     if [ ! -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/DO_NOT_DELETE_THIS_DIR" ];then
      rm -rf "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE"
@@ -543,11 +545,11 @@ else
 fi
 ############################################################################
 
-PROCESSING_TIME=`echo "$UNIXSEC_STOP $UNIXSEC_START" | awk '{printf "%6.2f", ($1-$2)/60 }'`
-PROCESSING_TIME_WAITLOAD=`echo "$UNIXSEC_STOP_WAITLOAD $UNIXSEC_START_WAITLOAD" | awk '{printf "%6.2f", ($1-$2)/60 }'`
-PROCESSING_TIME_UNPACK=`echo "$UNIXSEC_START $UNIXSEC_STOP_WAITLOAD" | awk '{printf "%6.2f", ($1-$2)/60 }'`
-PROCESSING_TIME_TOTAL=`echo "$UNIXSEC_STOP $UNIXSEC_START_TOTAL" | awk '{printf "%6.2f", ($1-$2)/60 }'`
-DATETIME=`LANG=C date --utc`
+PROCESSING_TIME=$(echo "$UNIXSEC_STOP $UNIXSEC_START" | awk '{printf "%6.2f", ($1-$2)/60 }')
+PROCESSING_TIME_WAITLOAD=$(echo "$UNIXSEC_STOP_WAITLOAD $UNIXSEC_START_WAITLOAD" | awk '{printf "%6.2f", ($1-$2)/60 }')
+PROCESSING_TIME_UNPACK=$(echo "$UNIXSEC_START $UNIXSEC_STOP_WAITLOAD" | awk '{printf "%6.2f", ($1-$2)/60 }')
+PROCESSING_TIME_TOTAL=$(echo "$UNIXSEC_STOP $UNIXSEC_START_TOTAL" | awk '{printf "%6.2f", ($1-$2)/60 }')
+DATETIME=$(LANG=C date --utc)
 
 # report end of work
 echo "Reporting the end of work" 
@@ -577,11 +579,11 @@ $MSG
 
 "
 if [ "$WORKENDEMAIL" = "on" ];then
- if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
+ if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
 fi
 
-echo "########################### "`date +"%Y-%m-%d %H:%M:%S %Z"`" ###########################
+echo "###########################" $(date +"%Y-%m-%d %H:%M:%S %Z") "###########################
 $MSG" >> autoprocess.txt
 
