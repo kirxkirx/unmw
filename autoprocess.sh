@@ -228,6 +228,13 @@ DATASET_NAME=$(basename "$DATASET_NAME" .rar)
 if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 1 ];then
  DATASET_NAME="reprocess_$DATASET_NAME"
 fi
+# set the TEST_RUN flag in order not to send emails etc
+TEST_RUN=0
+echo "$DATASET_NAME" | grep --quiet -e 'vast_test' -e 'saturn_test' -e 'test' -e 'Test' -e 'TEST'
+if [ $? -eq 0 ];then
+ TEST_RUN=1
+fi
+#
 VAST_WORKING_DIR_FILENAME="vast_$DATASET_NAME"_"$SESSION_KEY"
 VAST_RESULTS_DIR_FILENAME="results_"$(date +"%Y%m%d_%H%M%S")_"$DATASET_NAME"_"$SESSION_KEY"
 LOCAL_PATH_TO_IMAGES="img_$DATASET_NAME"_"$SESSION_KEY"
@@ -394,10 +401,8 @@ ln -s $(readlink -f "$VAST_REFERENCE_COPY")/lib/catalogs
 cd .. || exit 1
 #
 
-#
-echo "Changing directory to $VAST_WORKING_DIR_FILENAME" 
-cd "$VAST_WORKING_DIR_FILENAME" || exit 1
-
+# We should be at $VAST_WORKING_DIR_FILENAME
+echo "We are currently at $PWD"
 
 #
 if [ -d transient_report ];then
@@ -436,12 +441,12 @@ $MSG
 
 " 
 if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workstartemail" ];then
- if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
+ if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ] && [ $TEST_RUN -eq 0 ] ;then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
 fi
 WORKENDEMAIL="off"
-if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workendemail" ];then
+if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workendemail" ] && [ $TEST_RUN -eq 0 ];then
  WORKENDEMAIL="on"
 fi
 ############################################################################
@@ -485,7 +490,7 @@ $A
 
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/#$BRIGHT_TRANSIENT_NAME"
     # Just send this to kirx
-    if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+    if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ] && [ $TEST_RUN -eq 0 ];then
      curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW bright candidate] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
     fi
    fi
@@ -500,7 +505,7 @@ Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/#$BRI
   MSG="A camera error occured while $FIELD
 The cmaera seems to be repeatedly writing the same image!!!
 The detailed log output is at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
-  if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
+  if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ] && [ $TEST_RUN -eq 0 ];then
    curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=[NMW ERROR] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
   fi
  else
@@ -579,7 +584,7 @@ $MSG
 
 "
 if [ "$WORKENDEMAIL" = "on" ];then
- if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
+ if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ] && [ $TEST_RUN -eq 0 ];then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
 fi
