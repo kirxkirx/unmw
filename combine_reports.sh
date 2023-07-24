@@ -41,7 +41,7 @@ if [ ! -z "$URL_OF_DATA_PROCESSING_ROOT" ];then
 fi
 
 # loop through the cameras
-for CAMERA in Stas Nazar Planeta ;do
+for CAMERA in Stas NMW-STL ;do
 
 #echo "DEBUG CAMERA=$CAMERA"
 
@@ -67,7 +67,11 @@ fi
 # a silly attmpt to make sure files are sorted in time and only completed files are listed
 LIST_OF_FILES=""
 for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
- # check that this reporthas not apeared in a combined report before
+ # check that this report does not look like a test - we don't want them in the ombined list
+ if [[ "$INPUT_DIR" == *"_test"* ]]; then
+  continue
+ fi
+ # check that this report has not apeared in a combined report before
  grep --quiet "$INPUT_DIR/index.html" combine_reports.log
  if [ $? -eq 0 ];then
   continue
