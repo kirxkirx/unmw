@@ -72,9 +72,12 @@ for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
   continue
  fi
  # check that this report has not apeared in a combined report before
- grep --quiet "$INPUT_DIR/index.html" combine_reports.log
- if [ $? -eq 0 ];then
-  continue
+ # combine_reports.log may not exist or be empty if this is the first-ever run of combine_reports.sh
+ if [ -s combine_reports.log ];then
+  grep --quiet "$INPUT_DIR/index.html" combine_reports.log
+  if [ $? -eq 0 ];then
+   continue
+  fi
  fi
  #if [ -f $INPUT_DIR/index.html.combine_reports_lock ];then
  # continue
