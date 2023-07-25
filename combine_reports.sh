@@ -35,7 +35,7 @@ fi
 #
 # URL_OF_DATA_PROCESSING_ROOT specifies where the data processing root is accessible online
 # URL_OF_DATA_PROCESSING_ROOT may be exported in local_config.sh
-if [ ! -z "$URL_OF_DATA_PROCESSING_ROOT" ];then
+if [ -z "$URL_OF_DATA_PROCESSING_ROOT" ];then
  # if it is not set, go with the default valeu
  URL_OF_DATA_PROCESSING_ROOT="http://vast.sai.msu.ru/unmw/uploads"
 fi
