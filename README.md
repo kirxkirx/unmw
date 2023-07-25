@@ -31,3 +31,10 @@ ln -s /home/NMW_web_upload uploads
 ````
  6. go back to the cgi directory and set the data directory path and the URL exposing it in 
 'local_config.sh', see the example in 'local_config.sh_example'
+
+ 7. Add `unmw/combine_reports.sh` to cron for it to be run every few minutes. For example `/etc/crontab` may look like:
+ ````
+*/8     *       *       *       *       www-data        /dataX/cgi-bin/unmw/combine_reports.sh &> /dev/null
+ ````
+where www-data is the apache user, `/dataX/cgi-bin/unmw/combine_reports.sh` is the full path to `combine_reports.sh` (will be different for your system).
+
