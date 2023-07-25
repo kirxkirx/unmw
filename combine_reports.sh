@@ -41,7 +41,7 @@ if [ ! -z "$URL_OF_DATA_PROCESSING_ROOT" ];then
 fi
 
 # loop through the cameras
-for CAMERA in Stas NMW-STL ;do
+for CAMERA in Stas STL-11000M ;do
 
 #echo "DEBUG CAMERA=$CAMERA"
 
