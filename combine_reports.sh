@@ -3,6 +3,8 @@
 # You probably want to add this script to /etc/crontab
 #*/8     *       *       *       *       www-data        /dataX/cgi-bin/unmw/combine_reports.sh &> /dev/null
 
+
+##### This does not work for all systems! On some N_RUN is 3 #####
 # Check that no other instances of the script are running
 N_RUN=`ps ax | grep combine_reports.sh | grep -v grep | grep bash | grep -c combine_reports.sh`
 # This is conter-intuitive but the use of the construct N_RUN=`` will create a second copy of "bash ./combine_reports.sh" in the ps output
@@ -11,6 +13,7 @@ if [ $N_RUN -gt 2 ];then
 # echo "DEBUG DA"
  exit 0
 fi
+##################################################################
 
 # change to the work directory
 SCRIPTDIR=`readlink -f $0`
