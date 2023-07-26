@@ -39,7 +39,7 @@ fi
 # URL_OF_DATA_PROCESSING_ROOT specifies where the data processing root is accessible online
 # URL_OF_DATA_PROCESSING_ROOT may be exported in local_config.sh
 if [ -z "$URL_OF_DATA_PROCESSING_ROOT" ];then
- # if it is not set, go with the default valeu
+ # if it is not set, go with the default value
  URL_OF_DATA_PROCESSING_ROOT="http://vast.sai.msu.ru/unmw/uploads"
 fi
 
@@ -294,7 +294,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  LAST_IMAGE_DATE=`grep 'Last  image' "$INPUT_DIR/index.html" | head -n1 | awk '{print $4" "$5}'`
  TIMESYS_OF_LAST_IMAGE_DATE=`grep 'time system' "$INPUT_DIR/index.html" | head -n1 | awk '{print $5}'`
  LAST_IMAGE_DATE="$LAST_IMAGE_DATE $TIMESYS_OF_LAST_IMAGE_DATE"
- IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=`grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | sed 's:deg.::g' | tail -n1 | awk '{print $7}'`
+ IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=`grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | sed 's:deg.::g' | head -n1 | awk '{print $7}'`
  echo -n "<tr><td>$CAMERA</td><td>$LAST_IMAGE_DATE</td><td><font color='teal'> $FIELD </font></td><td>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  if [ "$INCLUDE_REPORT_IN_COMBINED_LIST" != "OK" ];then
   echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td></td><td>too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) to include in the combined list ("`basename $0`")</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
