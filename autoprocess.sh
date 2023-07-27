@@ -20,7 +20,10 @@ if [ -z "$IMAGE_DATA_ROOT" ] || [ -z "$DATA_PROCESSING_ROOT" ] || [ -z "$URL_OF_
  fi
 fi
 
-VAST_REFERENCE_COPY="$DATA_PROCESSING_ROOT"/vast
+if [ -z "$VAST_REFERENCE_COPY" ];then
+ VAST_REFERENCE_COPY="$DATA_PROCESSING_ROOT"/vast
+fi
+
 INPUT_ZIP_ARCHIVE=$1
 
 UNIXSEC_START_TOTAL=$(date +%s)
@@ -94,9 +97,11 @@ if [ ! -d "$DATA_PROCESSING_ROOT" ];then
  fi
 fi
 
-if [ -f "$VAST_REFERENCE_COPY".lock ];then
- echo "Lock file found $VAST_REFERENCE_COPY.lock - another copy of $0 seems to be installin VaST, so we'll just wait"
- sleep 600
+LOCKFILE="$VAST_REFERENCE_COPY"/autoprocess_install_vast.lock
+
+if [ -e "${LOCKFILE}" ] && kill -0 `cat "${LOCKFILE}"`; then
+  echo "Lock file found $LOCKFILE - another copy of $0 seems to be installin VaST, so we'll just wait"
+  sleep 600
 elif [ ! -d "$VAST_REFERENCE_COPY" ];then
  #
  echo -n "Checking write permissions for the current directory ( $PWD ) ... "
@@ -117,7 +122,9 @@ sudo chown -R $USER $PWD"
   echo "ERROR: cannot create VaST directory $VAST_REFERENCE_COPY"
   exit 1
  fi
- touch "$VAST_REFERENCE_COPY".lock
+ # Make sure the lockfile is removed when we exit and when we receive a signal
+ trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
+ echo $$ > "${LOCKFILE}"
  echo "Trying to install VaST in directory $VAST_REFERENCE_COPY" 
  cd "$VAST_REFERENCE_COPY" || exit 1
  git checkout https://github.com/kirxkirx/vast.git .
@@ -152,7 +159,7 @@ sudo chown -R $USER $PWD"
  if [ "$BASENAME_VAST_REFERENCE_COPY" != "vast" ];then
   mv "vast" "$BASENAME_VAST_REFERENCE_COPY"
  fi
- rm -f "$VAST_REFERENCE_COPY".lock
+ rm -f "${LOCKFILE}"
 fi
 
 if [ ! -d "$VAST_REFERENCE_COPY" ];then
