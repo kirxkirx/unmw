@@ -4,12 +4,14 @@
 #*/8     *       *       *       *       www-data        /dataX/cgi-bin/unmw/combine_reports.sh &> /dev/null
 
 
+## The old way to check if multiple copies of this script are running
 ##### This does not work for all systems! On some N_RUN is 3 #####
 # Check that no other instances of the script are running
 N_RUN=`ps ax | grep combine_reports.sh | grep -v grep | grep bash | grep -c combine_reports.sh`
 # This is conter-intuitive but the use of the construct N_RUN=`` will create a second copy of "bash ./combine_reports.sh" in the ps output
 # So one running copy of the script corresponds to N_RUN=2
-if [ $N_RUN -gt 2 ];then
+#if [ $N_RUN -gt 2 ];then
+if [ $N_RUN -gt 3 ];then
 # echo "DEBUG DA"
  exit 0
 fi
@@ -42,6 +44,23 @@ if [ -z "$URL_OF_DATA_PROCESSING_ROOT" ];then
  # if it is not set, go with the default value
  URL_OF_DATA_PROCESSING_ROOT="http://vast.sai.msu.ru/unmw/uploads"
 fi
+
+
+# This script creates a lock file at $DATA_PROCESSING_ROOT/combine_reports.lock and writes its own process ID into that file.
+# If another instance of the script runs, it checks the lock file, and if it exists,
+# it sends a null signal (kill -0) to the PID contained in the file.
+# If the process is still running, kill -0 will succeed and the script will exit, otherwise,
+# it will assume that the process is no longer running and will continue execution.
+
+# create a lockfile in the DATA_PROCESSING_ROOT
+LOCKFILE="combine_reports.lock"
+if [ -e "${LOCKFILE}" ] && kill -0 `cat "${LOCKFILE}"`; then
+ echo "Already running."
+ exit
+fi
+# Make sure the lockfile is removed when we exit and when we receive a signal
+trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
+echo $$ > "${LOCKFILE}"
 
 # loop through the cameras
 for CAMERA in Stas STL-11000M ;do
@@ -259,6 +278,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
    if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
     curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR: large HTML file] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
    fi
+   rm -f "${LOCKFILE}"
    exit 1
   fi
  fi
@@ -338,3 +358,4 @@ done
 
 done # for CAMERA in Stas Nazar ;do
 
+rm -f "${LOCKFILE}"
