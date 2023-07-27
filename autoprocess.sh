@@ -49,7 +49,74 @@ function set_session_key {
  echo "$SESSION_KEY"
 }
 
+function is_system_load_low {
+ awk -v target=8.00 '{
+         if ($1 < target) {
+          exit 0
+         } else {
+          exit 1
+         }
+        }' /proc/loadavg
+ return $?
+}
+
+function is_temperature_low {
+ command -v sensors &> /dev/null 
+ if [ $? -ne 0 ];then
+  return 0
+ fi
+ sensors 2>&1 | grep --quiet 'No sensors'
+ if [ $? -eq 0 ];then
+  return 0
+ fi
+ TEMPERATURE=$(sensors 2> /dev/null | grep 'Package' | awk -F'+' '{print $2}' | awk -F'.' '{print $1}')
+ if [ -z "$TEMPERATURE" ];then
+  return 0
+ fi
+ if [[ $TEMPERATURE =~ ^[0-9]+$ ]];then
+  # The string is an integer number
+  echo "$TEMPERATURE" |  awk -v target=70.00 '{
+         if ($1 < target) {
+          exit 0
+         } else {
+          exit 1
+         }
+        }'
+  return $?
+ fi
+ # The test didn't work after all - assume everything is fine
+ return 0
+}
+
 function wait_for_our_turn_to_start_processing {
+ # Set base delay
+ DELAY=1
+ MAX_WAIT_ITERATIONS=14
+ # The idea is that DELAY^MAX_WAIT_ITERATIONS will be approximatelky the duration of the imaging session,
+ # so by that time the new images will surely stop coming.
+
+ # exponential backoff
+ for WAIT_ITERATION in $(seq 1 $MAX_WAIT_ITERATIONS) ; do
+  is_system_load_low && is_temperature_low
+  if [ $? -eq 0 ]; then
+   return 0
+  else
+   # Calculate current delay
+   DELAY=$[$DELAY*2]
+
+   echo "Sleeping for $DELAY seconds"
+   sleep $DELAY
+  fi 
+ done
+
+ # If we are still here - wait for a random number of seconds then go
+ RANDOM_NUMBER_OF_SECONDS=$(( RANDOM % 1200 + 1 ))
+ sleep $RANDOM_NUMBER_OF_SECONDS
+
+ return 0
+}
+
+function wait_for_our_turn_to_start_processing_old {
  # Set random delays
  RANDOM_TWO_DIGIT_NUMBER=$(tr -cd 0-9 < /dev/urandom | head -c 2)
  NUMBER_OF_ITERATIONS=30
@@ -62,13 +129,8 @@ function wait_for_our_turn_to_start_processing {
  fi 
 
  for LOADWAITITERATION in $(seq 1 $NUMBER_OF_ITERATIONS) ;do
-  ONEMINUTELOADTIMES100=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1*100}')
-  if [ -z "$ONEMINUTELOADTIMES100" ];then
-   echo "ERROR: getting the load"
-   break
-  fi
-  # if load < 8.00 break
-  if [ $ONEMINUTELOADTIMES100 -lt 800 ];then
+  is_stytem_load_low
+  if [ $? -eq 0 ];then
    break
   else
    #sleep 60
