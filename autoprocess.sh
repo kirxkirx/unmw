@@ -49,6 +49,48 @@ function set_session_key {
  echo "$SESSION_KEY"
 }
 
+function wait_for_our_turn_to_start_processing {
+ # Set random delays
+ RANDOM_TWO_DIGIT_NUMBER=$(tr -cd 0-9 < /dev/urandom | head -c 2)
+ NUMBER_OF_ITERATIONS=30
+ if [ $RANDOM_TWO_DIGIT_NUMBER -gt $NUMBER_OF_ITERATIONS ];then
+  NUMBER_OF_ITERATIONS=$RANDOM_TWO_DIGIT_NUMBER
+ fi
+ RANDOM_TWO_DIGIT_NUMBER=$(tr -cd 0-9 < /dev/urandom | head -c 2)
+ if [ $RANDOM_TWO_DIGIT_NUMBER -lt 10 ];then
+  RANDOM_TWO_DIGIT_NUMBER=$[$RANDOM_TWO_DIGIT_NUMBER+10]
+ fi 
+
+ for LOADWAITITERATION in $(seq 1 $NUMBER_OF_ITERATIONS) ;do
+  ONEMINUTELOADTIMES100=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1*100}')
+  if [ -z "$ONEMINUTELOADTIMES100" ];then
+   echo "ERROR: getting the load"
+   break
+  fi
+  # if load < 8.00 break
+  if [ $ONEMINUTELOADTIMES100 -lt 800 ];then
+   break
+  else
+   #sleep 60
+   echo "sleep $RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
+   sleep $RANDOM_TWO_DIGIT_NUMBER
+   # wait longer if the load is really high
+   if [ $ONEMINUTELOADTIMES100 -gt 1400 ];then
+    #sleep 400
+    echo "sleep 4$RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
+    sleep 4$RANDOM_TWO_DIGIT_NUMBER
+   fi
+   # wait longer if the load is really high
+   if [ $ONEMINUTELOADTIMES100 -gt 2400 ];then
+    #sleep 500
+    echo "sleep 5$RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
+    sleep 5$RANDOM_TWO_DIGIT_NUMBER
+   fi
+  fi
+ done
+
+}
+
 # Check input
 if [ -z "$INPUT_ZIP_ARCHIVE" ];then
  echo "ERROR: no input ZIP archive $INPUT_ZIP_ARCHIVE" 
@@ -184,46 +226,13 @@ if [ ! -x "$VAST_REFERENCE_COPY/util/transients/transient_factory_test31.sh" ];t
 fi
 ##########
 
-# Set random delays
-RANDOM_TWO_DIGIT_NUMBER=$(tr -cd 0-9 < /dev/urandom | head -c 2)
-NUMBER_OF_ITERATIONS=30
-if [ $RANDOM_TWO_DIGIT_NUMBER -gt $NUMBER_OF_ITERATIONS ];then
- NUMBER_OF_ITERATIONS=$RANDOM_TWO_DIGIT_NUMBER
-fi
-RANDOM_TWO_DIGIT_NUMBER=$(tr -cd 0-9 < /dev/urandom | head -c 2)
-if [ $RANDOM_TWO_DIGIT_NUMBER -lt 10 ];then
- RANDOM_TWO_DIGIT_NUMBER=$[$RANDOM_TWO_DIGIT_NUMBER+10]
-fi 
 
 # Delay processing if the server load is high
 UNIXSEC_START_WAITLOAD=$(date +%s)
-for LOADWAITITERATION in $(seq 1 $NUMBER_OF_ITERATIONS) ;do
- ONEMINUTELOADTIMES100=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1*100}')
- if [ -z "$ONEMINUTELOADTIMES100" ];then
-  echo "ERROR: getting the load"
-  break
- fi
- # if load < 8.00 break
- if [ $ONEMINUTELOADTIMES100 -lt 800 ];then
-  break
- else
-  #sleep 60
-  echo "sleep $RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
-  sleep $RANDOM_TWO_DIGIT_NUMBER
-  # wait longer if the load is really high
-  if [ $ONEMINUTELOADTIMES100 -gt 1400 ];then
-   #sleep 400
-   echo "sleep 4$RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
-   sleep 4$RANDOM_TWO_DIGIT_NUMBER
-  fi
-  # wait longer if the load is really high
-  if [ $ONEMINUTELOADTIMES100 -gt 2400 ];then
-   #sleep 500
-   echo "sleep 5$RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
-   sleep 5$RANDOM_TWO_DIGIT_NUMBER
-  fi
- fi
-done
+
+wait_for_our_turn_to_start_processing
+
+
 echo "Done sleeping"
 UNIXSEC_STOP_WAITLOAD=$(date +%s)
 
