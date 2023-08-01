@@ -134,9 +134,24 @@ function wait_for_our_turn_to_start_processing {
    sleep $DELAY
   fi 
  done
+ 
+ # if exponential backoff didn't work - wait impatiently
+ for WAIT_ITERATION in $(seq 1 $MAX_WAIT_ITERATIONS) ; do
+  is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many
+  if [ $? -eq 0 ]; then
+   return 0
+  else
+   # Calculate current delay
+   # system load changes on 1min timescale, so don't re-check too often as it may take time for the load to rise
+   DELAY=$(( RANDOM % 120 + 1 ))
+   echo "Sleeping for $DELAY seconds (impatiently)"
+   sleep $DELAY
+  fi 
+ done
 
  # If we are still here - wait for a random number of seconds then go
  RANDOM_NUMBER_OF_SECONDS=$(( RANDOM % 1200 + 1 ))
+ echo "Sleeping for $RANDOM_NUMBER_OF_SECONDS seconds then going no matter what"
  sleep $RANDOM_NUMBER_OF_SECONDS
 
  return 0
