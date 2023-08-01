@@ -75,7 +75,33 @@ function is_temperature_low {
  fi
  if [[ $TEMPERATURE =~ ^[0-9]+$ ]];then
   # The string is an integer number
-  echo "$TEMPERATURE" |  awk -v target=70.00 '{
+  echo "$TEMPERATURE" |  awk -v target=65 '{
+         if ($1 < target) {
+          exit 0
+         } else {
+          exit 1
+         }
+        }'
+  return $?
+ fi
+ # The test didn't work after all - assume everything is fine
+ return 0
+}
+
+function check_sysrem_processes_are_not_too_many {
+ # Get a list of all processes, filter by "util/sysrem", then count the lines.
+ # The "-a" option to ps lists all processes. 
+ # The "-x" option includes those without a controlling terminal, which could be relevant for some system processes.
+ # The grep command filters this list to only include lines that contain "util/sysrem".
+ # The -v option to grep excludes lines that contain "grep" itself to prevent counting the grep command as a process.
+ # The wc command counts the number of lines.
+ num_processes=$(ps ax | grep "util/sysrem" | grep -v grep | wc -l)
+ if [ -z "$num_processes" ];then
+  return 0
+ fi
+ if [[ $num_processes =~ ^[0-9]+$ ]];then
+  # The string is an integer number
+  echo "$num_processes" |  awk -v target=3 '{
          if ($1 < target) {
           exit 0
          } else {
@@ -91,19 +117,19 @@ function is_temperature_low {
 function wait_for_our_turn_to_start_processing {
  # Set base delay
  DELAY=1
- MAX_WAIT_ITERATIONS=14
+ MAX_WAIT_ITERATIONS=13
  # The idea is that DELAY^MAX_WAIT_ITERATIONS will be approximatelky the duration of the imaging session,
  # so by that time the new images will surely stop coming.
 
  # exponential backoff
  for WAIT_ITERATION in $(seq 1 $MAX_WAIT_ITERATIONS) ; do
-  is_system_load_low && is_temperature_low
+  is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many
   if [ $? -eq 0 ]; then
    return 0
   else
    # Calculate current delay
-   DELAY=$[$DELAY*2]
-
+   # system load changes on 1min timescale, so don't re-check too often as it may take time for the load to rise
+   DELAY=$[$DELAY*2+$(( RANDOM % 120 + 1 ))]
    echo "Sleeping for $DELAY seconds"
    sleep $DELAY
   fi 
