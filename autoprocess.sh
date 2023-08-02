@@ -50,7 +50,7 @@ function set_session_key {
 }
 
 function is_system_load_low {
- awk -v target=8.00 '{
+ awk -v target=4.00 '{
          if ($1 < target) {
           exit 0
          } else {
@@ -101,7 +101,7 @@ function check_sysrem_processes_are_not_too_many {
  fi
  if [[ $num_processes =~ ^[0-9]+$ ]];then
   # The string is an integer number
-  echo "$num_processes" |  awk -v target=3 '{
+  echo "$num_processes" |  awk -v target=1 '{
          if ($1 < target) {
           exit 0
          } else {
@@ -141,9 +141,8 @@ function wait_for_our_turn_to_start_processing {
   if [ $? -eq 0 ]; then
    return 0
   else
-   # Calculate current delay
    # system load changes on 1min timescale, so don't re-check too often as it may take time for the load to rise
-   DELAY=$(( RANDOM % 120 + 1 ))
+   DELAY=$(( RANDOM % 300 + 1 ))
    echo "Sleeping for $DELAY seconds (impatiently)"
    sleep $DELAY
   fi 
@@ -597,7 +596,7 @@ Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
 else
  # nonempty 'transient_report/index.html' is found
  ## Check for extra bright transients and send a special e-mail message
- cat "transient_report/index.html" | grep -B1 'galactic' | grep -v -e 'galactic' -e '--' | while read A ;do   
+ cat "transient_report/index.html" | grep -v 'This object is listed in planets.txt' | grep -B1 'galactic' | grep -v -e 'galactic' -e '--' | while read A ;do   
   echo $A | awk '{if ( $5<9.5 && $5>-5.0 ) print "FOUND"}' | grep --quiet "FOUND" 
   if [ $? -eq 0 ];then
    N_NOT_FOUND_IN_CATALOGS=$(grep -A4 "$A" "transient_report/index.html" | grep -c 'not found')
