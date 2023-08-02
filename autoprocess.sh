@@ -510,8 +510,9 @@ echo "Making a copy of "$(readlink -f "$VAST_REFERENCE_COPY")" to $VAST_WORKING_
 #cp -rP `readlink -f "$VAST_REFERENCE_COPY"` "$VAST_WORKING_DIR_FILENAME"
 # use rsync to ignore large and unneeded files
 # '/' tells rsync we want the content of the directory, not the directory itself
-#rsync -avz --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' $(readlink -f "$VAST_REFERENCE_COPY")/ "$VAST_WORKING_DIR_FILENAME"
-rsync -avz --links --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' $(readlink -f "$VAST_REFERENCE_COPY")/ "$VAST_WORKING_DIR_FILENAME"
+rsync -avz --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' $(readlink -f "$VAST_REFERENCE_COPY")/ "$VAST_WORKING_DIR_FILENAME"
+# no need for --links as it is already included in -a
+#rsync -avz --links --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' $(readlink -f "$VAST_REFERENCE_COPY")/ "$VAST_WORKING_DIR_FILENAME"
 cd "$VAST_WORKING_DIR_FILENAME" || exit 1
 # create symlinks
 ln -s $(readlink -f "$VAST_REFERENCE_COPY")/astorb.dat
