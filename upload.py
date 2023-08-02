@@ -31,8 +31,8 @@ message = 'Starting program ' + sys.argv[0] + ' <br>'
 # Check the system load
 ### These load values are very optiistic and rely on the autoprocess script to handle load balancing
 ### The idea is that we want to download the data now at all cost and then wait for the system load to get reasonably low
-emergency_load = 55.0
-max_load = 35.0
+emergency_load = 75.0
+max_load = 55.0
 load = 99.0
 while load > max_load :
  load = 0.0
