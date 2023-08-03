@@ -129,9 +129,10 @@ function wait_for_our_turn_to_start_processing {
   else
    # Calculate current delay
    # system load changes on 1min timescale, so don't re-check too often as it may take time for the load to rise
-   DELAY=$[$DELAY*2+$(( RANDOM % 120 + 1 ))]
-   echo "Sleeping for $DELAY seconds"
-   sleep $DELAY
+   DELAY=$[$DELAY*2]
+   DELAY_PLUS_RANDOM=$[$DELAY+$(( RANDOM % 120 + 1 ))]
+   echo "Sleeping for $DELAY_PLUS_RANDOM seconds"
+   sleep $DELAY_PLUS_RANDOM
   fi 
  done
  
