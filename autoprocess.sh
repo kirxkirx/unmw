@@ -50,7 +50,7 @@ function set_session_key {
 }
 
 function is_system_load_low {
- awk -v target=4.00 '{
+ awk -v target=3.00 '{
          if ($1 < target) {
           exit 0
          } else {
@@ -75,7 +75,7 @@ function is_temperature_low {
  fi
  if [[ $TEMPERATURE =~ ^[0-9]+$ ]];then
   # The string is an integer number
-  echo "$TEMPERATURE" |  awk -v target=65 '{
+  echo "$TEMPERATURE" |  awk -v target=50 '{
          if ($1 < target) {
           exit 0
          } else {
@@ -114,6 +114,35 @@ function check_sysrem_processes_are_not_too_many {
  return 0
 }
 
+function check_unrar_processes_are_not_too_many {
+ # A running unrar process indicates that another processing instance has just started.
+ # In this case we proabably don't want to start yet another one
+ #
+ # Get a list of all processes, filter by "util/sysrem", then count the lines.
+ # The "-a" option to ps lists all processes. 
+ # The "-x" option includes those without a controlling terminal, which could be relevant for some system processes.
+ # The grep command filters this list to only include lines that contain "util/sysrem".
+ # The -v option to grep excludes lines that contain "grep" itself to prevent counting the grep command as a process.
+ # The wc command counts the number of lines.
+ num_processes=$(ps ax | grep "unrar" | grep -v grep | wc -l)
+ if [ -z "$num_processes" ];then
+  return 0
+ fi
+ if [[ $num_processes =~ ^[0-9]+$ ]];then
+  # The string is an integer number
+  echo "$num_processes" |  awk -v target=1 '{
+         if ($1 < target) {
+          exit 0
+         } else {
+          exit 1
+         }
+        }'
+  return $?
+ fi
+ # The test didn't work after all - assume everything is fine
+ return 0
+}
+
 function wait_for_our_turn_to_start_processing {
  # Set base delay
  DELAY=1
@@ -123,12 +152,13 @@ function wait_for_our_turn_to_start_processing {
 
  # exponential backoff
  for WAIT_ITERATION in $(seq 1 $MAX_WAIT_ITERATIONS) ; do
-  is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many
+  is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many
   if [ $? -eq 0 ]; then
    # it may take another minute for the load and temperature to rise if another copy of this script is starting at the same time
    echo "The load is good but let's wait for another minute and re-check"
-   sleep 60
-   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many
+   A_MINUTE_PLUS_RANDOM=$[60+$(( RANDOM % 60 + 1 ))]
+   sleep $A_MINUTE_PLUS_RANDOM
+   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many
    if [ $? -eq 0 ]; then
     return 0
    else
@@ -147,7 +177,7 @@ function wait_for_our_turn_to_start_processing {
  
  # if exponential backoff didn't work - wait impatiently
  for WAIT_ITERATION in $(seq 1 $MAX_WAIT_ITERATIONS) ; do
-  is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many
+  is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many
   if [ $? -eq 0 ]; then
    return 0
   else

@@ -31,7 +31,7 @@ message = 'Starting program ' + sys.argv[0] + ' <br>'
 # Check the system load
 ### These load values are very optiistic and rely on the autoprocess script to handle load balancing
 ### The idea is that we want to download the data now at all cost and then wait for the system load to get reasonably low
-emergency_load = 55.0
+emergency_load = 50.0
 # The commented-out stuff below is a terrible idea that results in timeout and multiple attempts to upload the smae files
 # Just check the load and if it's not extreme - accept the data
 if True == os.access('/proc/loadavg',os.R_OK):
