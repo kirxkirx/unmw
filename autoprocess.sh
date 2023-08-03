@@ -117,7 +117,7 @@ function check_sysrem_processes_are_not_too_many {
 function wait_for_our_turn_to_start_processing {
  # Set base delay
  DELAY=1
- MAX_WAIT_ITERATIONS=13
+ MAX_WAIT_ITERATIONS=11
  # The idea is that DELAY^MAX_WAIT_ITERATIONS will be approximatelky the duration of the imaging session,
  # so by that time the new images will surely stop coming.
 
@@ -125,7 +125,16 @@ function wait_for_our_turn_to_start_processing {
  for WAIT_ITERATION in $(seq 1 $MAX_WAIT_ITERATIONS) ; do
   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many
   if [ $? -eq 0 ]; then
-   return 0
+   # it may take another minute for the load and temperature to rise if another copy of this script is starting at the same time
+   echo "The load is good but let's wait for another minute and re-check"
+   sleep 60
+   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many
+   if [ $? -eq 0 ]; then
+    return 0
+   else
+    echo "The load is high again"
+    sleep $DELAY
+   fi
   else
    # Calculate current delay
    # system load changes on 1min timescale, so don't re-check too often as it may take time for the load to rise
