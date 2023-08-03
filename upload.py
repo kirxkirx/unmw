@@ -31,24 +31,34 @@ message = 'Starting program ' + sys.argv[0] + ' <br>'
 # Check the system load
 ### These load values are very optiistic and rely on the autoprocess script to handle load balancing
 ### The idea is that we want to download the data now at all cost and then wait for the system load to get reasonably low
-emergency_load = 75.0
-max_load = 55.0
-load = 99.0
-while load > max_load :
- load = 0.0
- if True == os.access('/proc/loadavg',os.R_OK):
-  procload = open('/proc/loadavg','r')
-  loadline = procload.readline()
-  procload.close()
-  load = float(loadline.split()[1])
-  if load > emergency_load :
-   message = message + 'System load is extremely high'
-   sys.exit(1) # Just quit
-  if load > max_load :
-   random.seed() # initialize using current system time, just in case...
-   sleep_time = 120*random.random()  
-   message = message + 'System load is too high: ' + str(load) + ', sleeping for ' + str(sleep_time) + ' seconds! <br> '
-   time.sleep(sleep_time)
+emergency_load = 55.0
+# The commented-out stuff below is a terrible idea that results in timeout and multiple attempts to upload the smae files
+# Just check the load and if it's not extreme - accept the data
+if True == os.access('/proc/loadavg',os.R_OK):
+ procload = open('/proc/loadavg','r')
+ loadline = procload.readline()
+ procload.close()
+ load = float(loadline.split()[1])
+ if load > emergency_load :
+  message = message + 'System load is extremely high'
+  sys.exit(1) # Just quit
+#max_load = 55.0
+#load = 99.0
+#while load > max_load :
+# load = 0.0
+# if True == os.access('/proc/loadavg',os.R_OK):
+#  procload = open('/proc/loadavg','r')
+#  loadline = procload.readline()
+#  procload.close()
+#  load = float(loadline.split()[1])
+#  if load > emergency_load :
+#   message = message + 'System load is extremely high'
+#   sys.exit(1) # Just quit
+#  if load > max_load :
+#   random.seed() # initialize using current system time, just in case...
+#   sleep_time = 120*random.random()  
+#   message = message + 'System load is too high: ' + str(load) + ', sleeping for ' + str(sleep_time) + ' seconds! <br> '
+#   time.sleep(sleep_time)
              
 
 form = cgi.FieldStorage()
