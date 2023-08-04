@@ -191,17 +191,18 @@ function wait_for_our_turn_to_start_processing {
  for WAIT_ITERATION in $(seq 1 $MAX_WAIT_ITERATIONS) ; do
   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many && is_cpu_io_wait_low
   if [ $? -eq 0 ]; then
-   # it may take another minute for the load and temperature to rise if another copy of this script is starting at the same time
-   echo "The load is good but let's wait for another minute and re-check"
-   A_MINUTE_PLUS_RANDOM=$[60+$(( RANDOM % 60 + 1 ))]
-   sleep $A_MINUTE_PLUS_RANDOM
-   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many && is_cpu_io_wait_low
-   if [ $? -eq 0 ]; then
+   # seems like we can't afford that extra minute
+   ## it may take another minute for the load and temperature to rise if another copy of this script is starting at the same time
+   #echo "The load is good but let's wait for another minute and re-check"
+   #A_MINUTE_PLUS_RANDOM=$[60+$(( RANDOM % 60 + 1 ))]
+   #sleep $A_MINUTE_PLUS_RANDOM
+   #is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many && is_cpu_io_wait_low
+   #if [ $? -eq 0 ]; then
     return 0
-   else
-    echo "The load is high again"
-    sleep $DELAY
-   fi
+   #else
+   # echo "The load is high again"
+   # sleep $DELAY
+   #fi
   else
    # Calculate current delay
    # system load changes on 1min timescale, so don't re-check too often as it may take time for the load to rise
@@ -233,42 +234,6 @@ function wait_for_our_turn_to_start_processing {
  return 0
 }
 
-function wait_for_our_turn_to_start_processing_old {
- # Set random delays
- RANDOM_TWO_DIGIT_NUMBER=$(tr -cd 0-9 < /dev/urandom | head -c 2)
- NUMBER_OF_ITERATIONS=30
- if [ $RANDOM_TWO_DIGIT_NUMBER -gt $NUMBER_OF_ITERATIONS ];then
-  NUMBER_OF_ITERATIONS=$RANDOM_TWO_DIGIT_NUMBER
- fi
- RANDOM_TWO_DIGIT_NUMBER=$(tr -cd 0-9 < /dev/urandom | head -c 2)
- if [ $RANDOM_TWO_DIGIT_NUMBER -lt 10 ];then
-  RANDOM_TWO_DIGIT_NUMBER=$[$RANDOM_TWO_DIGIT_NUMBER+10]
- fi 
-
- for LOADWAITITERATION in $(seq 1 $NUMBER_OF_ITERATIONS) ;do
-  is_stytem_load_low
-  if [ $? -eq 0 ];then
-   break
-  else
-   #sleep 60
-   echo "sleep $RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
-   sleep $RANDOM_TWO_DIGIT_NUMBER
-   # wait longer if the load is really high
-   if [ $ONEMINUTELOADTIMES100 -gt 1400 ];then
-    #sleep 400
-    echo "sleep 4$RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
-    sleep 4$RANDOM_TWO_DIGIT_NUMBER
-   fi
-   # wait longer if the load is really high
-   if [ $ONEMINUTELOADTIMES100 -gt 2400 ];then
-    #sleep 500
-    echo "sleep 5$RANDOM_TWO_DIGIT_NUMBER  (ONEMINUTELOADTIMES100=$ONEMINUTELOADTIMES100)"
-    sleep 5$RANDOM_TWO_DIGIT_NUMBER
-   fi
-  fi
- done
-
-}
 
 # Check input
 if [ -z "$INPUT_ZIP_ARCHIVE" ];then
@@ -302,86 +267,97 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
   exit 1
  fi
 fi
-###
+
 if [ ! -d "$IMAGE_DATA_ROOT" ];then
- mkdir "$IMAGE_DATA_ROOT"
- if [ $? -ne 0 ];then
-  echo "ERROR: cannot create the image data directory $IMAGE_DATA_ROOT" 
-  exit 1
- fi
+ echo "ERROR: there is no image data directory $IMAGE_DATA_ROOT"
+ exit 1
 fi
+
 if [ ! -d "$DATA_PROCESSING_ROOT" ];then
- mkdir "$DATA_PROCESSING_ROOT"
- if [ $? -ne 0 ];then
-  echo "ERROR: cannot create the data processing directory $DATA_PROCESSING_ROOT" 
-  exit 1
- fi
+ echo "ERROR: there is no data processing directory $DATA_PROCESSING_ROOT"
+ exit 1
 fi
 
-LOCKFILE="$VAST_REFERENCE_COPY"/autoprocess_install_vast.lock
-
-if [ -e "${LOCKFILE}" ] && kill -0 `cat "${LOCKFILE}"`; then
-  echo "Lock file found $LOCKFILE - another copy of $0 seems to be installin VaST, so we'll just wait"
-  sleep 600
-elif [ ! -d "$VAST_REFERENCE_COPY" ];then
- #
- echo -n "Checking write permissions for the current directory ( $PWD ) ... "
- touch testfile$$.tmp
- if [ $? -eq 0 ];then
-  rm -f testfile$$.tmp
-  echo "OK"
- else
-  echo "ERROR: please make sure you have write permissions for the current directory.
-
-Maybe you need something like:
-sudo chown -R $USER $PWD"
-  exit 1
- fi
- #
- mkdir "$VAST_REFERENCE_COPY"
- if [ $? -ne 0 ];then
-  echo "ERROR: cannot create VaST directory $VAST_REFERENCE_COPY"
-  exit 1
- fi
- # Make sure the lockfile is removed when we exit and when we receive a signal
- trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
- echo $$ > "${LOCKFILE}"
- echo "Trying to install VaST in directory $VAST_REFERENCE_COPY" 
- cd "$VAST_REFERENCE_COPY" || exit 1
- git checkout https://github.com/kirxkirx/vast.git .
- # compile VaST
- make
- if [ $? -eq 0 ];then
-  # update offline catalogs
-  lib/update_offline_catalogs.sh all
-  # manually update the two big ones
-  # Tycho-2
-  cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
-  if [ ! -d tycho2 ];then
-   mkdir tycho2
-   cd tycho2 || exit 1
-   wget -nH --cut-dirs=4 --no-parent -r -l0 -c -A 'ReadMe,*.gz,robots.txt' "http://scan.sai.msu.ru/~kirx/data/tycho2/"
-   for i in tyc2.dat.*gz ;do
-    gunzip "$i"
-   done
-   cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
-  fi
-  # and UCAC5
-  cd `dirname "$VAST_REFERENCE_COPY"`
-  if [ ! -d UCAC5 ];then
-   mkdir UCAC5
-   cd UCAC5 || exit 1
-   wget -r -Az* -c --no-dir "http://scan.sai.msu.ru/~kirx/data/ucac5"
-   cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
-  fi
- fi
- cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
- BASENAME_VAST_REFERENCE_COPY=$(basename $VAST_REFERENCE_COPY)
- if [ "$BASENAME_VAST_REFERENCE_COPY" != "vast" ];then
-  mv "vast" "$BASENAME_VAST_REFERENCE_COPY"
- fi
- rm -f "${LOCKFILE}"
-fi
+###
+#if [ ! -d "$IMAGE_DATA_ROOT" ];then
+# mkdir "$IMAGE_DATA_ROOT"
+# if [ $? -ne 0 ];then
+#  echo "ERROR: cannot create the image data directory $IMAGE_DATA_ROOT" 
+#  exit 1
+# fi
+#fi
+#if [ ! -d "$DATA_PROCESSING_ROOT" ];then
+# mkdir "$DATA_PROCESSING_ROOT"
+# if [ $? -ne 0 ];then
+#  echo "ERROR: cannot create the data processing directory $DATA_PROCESSING_ROOT" 
+#  exit 1
+# fi
+#fi
+#
+#LOCKFILE="$VAST_REFERENCE_COPY"/autoprocess_install_vast.lock
+#
+#if [ -e "${LOCKFILE}" ] && kill -0 `cat "${LOCKFILE}"`; then
+#  echo "Lock file found $LOCKFILE - another copy of $0 seems to be installin VaST, so we'll just wait"
+#  sleep 600
+#elif [ ! -d "$VAST_REFERENCE_COPY" ];then
+# #
+# echo -n "Checking write permissions for the current directory ( $PWD ) ... "
+# touch testfile$$.tmp
+# if [ $? -eq 0 ];then
+#  rm -f testfile$$.tmp
+#  echo "OK"
+# else
+#  echo "ERROR: please make sure you have write permissions for the current directory.
+#
+#Maybe you need something like:
+#sudo chown -R $USER $PWD"
+#  exit 1
+# fi
+# #
+# mkdir "$VAST_REFERENCE_COPY"
+# if [ $? -ne 0 ];then
+#  echo "ERROR: cannot create VaST directory $VAST_REFERENCE_COPY"
+#  exit 1
+# fi
+# # Make sure the lockfile is removed when we exit and when we receive a signal
+# trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
+# echo $$ > "${LOCKFILE}"
+# echo "Trying to install VaST in directory $VAST_REFERENCE_COPY" 
+# cd "$VAST_REFERENCE_COPY" || exit 1
+# git checkout https://github.com/kirxkirx/vast.git .
+# # compile VaST
+# make
+# if [ $? -eq 0 ];then
+#  # update offline catalogs
+#  lib/update_offline_catalogs.sh all
+#  # manually update the two big ones
+#  # Tycho-2
+#  cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
+#  if [ ! -d tycho2 ];then
+#   mkdir tycho2
+#   cd tycho2 || exit 1
+#   wget -nH --cut-dirs=4 --no-parent -r -l0 -c -A 'ReadMe,*.gz,robots.txt' "http://scan.sai.msu.ru/~kirx/data/tycho2/"
+#   for i in tyc2.dat.*gz ;do
+#    gunzip "$i"
+#   done
+#   cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
+#  fi
+#  # and UCAC5
+#  cd `dirname "$VAST_REFERENCE_COPY"`
+#  if [ ! -d UCAC5 ];then
+#   mkdir UCAC5
+#   cd UCAC5 || exit 1
+#   wget -r -Az* -c --no-dir "http://scan.sai.msu.ru/~kirx/data/ucac5"
+#   cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
+#  fi
+# fi
+# cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
+# BASENAME_VAST_REFERENCE_COPY=$(basename $VAST_REFERENCE_COPY)
+# if [ "$BASENAME_VAST_REFERENCE_COPY" != "vast" ];then
+#  mv "vast" "$BASENAME_VAST_REFERENCE_COPY"
+# fi
+# rm -f "${LOCKFILE}"
+#fi
 
 if [ ! -d "$VAST_REFERENCE_COPY" ];then
  echo "ERROR: cannot find VaST installation in directory $VAST_REFERENCE_COPY" 
@@ -406,15 +382,6 @@ fi
 ##########
 
 
-# Delay processing if the server load is high
-UNIXSEC_START_WAITLOAD=$(date +%s)
-
-wait_for_our_turn_to_start_processing
-
-
-echo "Done sleeping"
-UNIXSEC_STOP_WAITLOAD=$(date +%s)
-
 # Make up file names
 SESSION_KEY=$(set_session_key) # or SESSION_KEY=`set_session_key`
 ZIP_ARCHIVE_FILENAME=$(basename "$INPUT_ZIP_ARCHIVE")
@@ -438,13 +405,37 @@ LOCAL_PATH_TO_IMAGES="img_$DATASET_NAME"_"$SESSION_KEY"
 if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  # First copy ZIP archive with second-epoch images to the $IMAGE_DATA_ROOT
  PATH_TO_ZIP_ARCHIVE=$(dirname "$INPUT_ZIP_ARCHIVE")
+ # Moved down as we want to do it after sleep
+ #if [ "$PATH_TO_ZIP_ARCHIVE" != "$IMAGE_DATA_ROOT" ];then
+ # cp -vf "$INPUT_ZIP_ARCHIVE" "$IMAGE_DATA_ROOT"
+ #fi
+ # We'll need ABSOLUTE_PATH_TO_ZIP_ARCHIVE to write out the results URL
+ ABSOLUTE_PATH_TO_ZIP_ARCHIVE=$(readlink -f "$PATH_TO_ZIP_ARCHIVE")
+ #
+ # We need to create results_url.txt ASAP as upload.py is waiting for it
+ # Place the redirect link
+ echo "$URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/" > "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/results_url.txt"
+ #
+else
+ ABSOLUTE_PATH_TO_ZIP_ARCHIVE=""
+fi
+
+# we want this to be after results_url.txt is created
+###########################################################################
+############### Delay processing if the server load is high ###############
+UNIXSEC_START_WAITLOAD=$(date +%s)
+
+wait_for_our_turn_to_start_processing
+
+echo "Done sleeping"
+UNIXSEC_STOP_WAITLOAD=$(date +%s)
+###########################################################################
+
+# moved from above
+if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  if [ "$PATH_TO_ZIP_ARCHIVE" != "$IMAGE_DATA_ROOT" ];then
   cp -vf "$INPUT_ZIP_ARCHIVE" "$IMAGE_DATA_ROOT"
  fi
- # We'll need ABSOLUTE_PATH_TO_ZIP_ARCHIVE to write out the results URL
- ABSOLUTE_PATH_TO_ZIP_ARCHIVE=`readlink -f "$PATH_TO_ZIP_ARCHIVE"`
-else
- ABSOLUTE_PATH_TO_ZIP_ARCHIVE=""
 fi
 
 echo "Changing directory to $IMAGE_DATA_ROOT" 
@@ -583,13 +574,9 @@ fi
 #
 
 echo "Making a copy of "$(readlink -f "$VAST_REFERENCE_COPY")" to $VAST_WORKING_DIR_FILENAME" 
-## P is to copy symlinks as symlinks
-#cp -rP `readlink -f "$VAST_REFERENCE_COPY"` "$VAST_WORKING_DIR_FILENAME"
-# use rsync to ignore large and unneeded files
+# use rsync instead of cp to ignore large and unneeded files
 # '/' tells rsync we want the content of the directory, not the directory itself
 rsync -avz --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' $(readlink -f "$VAST_REFERENCE_COPY")/ "$VAST_WORKING_DIR_FILENAME"
-# no need for --links as it is already included in -a
-#rsync -avz --links --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' $(readlink -f "$VAST_REFERENCE_COPY")/ "$VAST_WORKING_DIR_FILENAME"
 cd "$VAST_WORKING_DIR_FILENAME" || exit 1
 # create symlinks
 ln -s $(readlink -f "$VAST_REFERENCE_COPY")/astorb.dat
@@ -608,10 +595,12 @@ if [ -d transient_report ];then
 fi
 ln -s ../"$VAST_RESULTS_DIR_FILENAME" transient_report
 
-if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
- # Place the redirect link
- echo "$URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/" > "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/results_url.txt"
-fi
+# Moved up
+## We need to create results_url.txt ASAP as upload.py is waiting for it
+#if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
+# # Place the redirect link
+# echo "$URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/" > "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/results_url.txt"
+#fi
 
 # Report that we are ready to go
 echo "Reporting the start of work" 
