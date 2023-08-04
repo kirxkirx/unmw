@@ -146,7 +146,7 @@ function check_unrar_processes_are_not_too_many {
 function wait_for_our_turn_to_start_processing {
  # Set base delay
  DELAY=1
- MAX_WAIT_ITERATIONS=11
+ MAX_WAIT_ITERATIONS=13
  # The idea is that DELAY^MAX_WAIT_ITERATIONS will be approximatelky the duration of the imaging session,
  # so by that time the new images will surely stop coming.
 
@@ -176,7 +176,7 @@ function wait_for_our_turn_to_start_processing {
  done
  
  # if exponential backoff didn't work - wait impatiently
- for WAIT_ITERATION in $(seq 1 $MAX_WAIT_ITERATIONS) ; do
+ for WAIT_ITERATION in $(seq 1 1$MAX_WAIT_ITERATIONS) ; do
   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many
   if [ $? -eq 0 ]; then
    return 0
@@ -189,7 +189,7 @@ function wait_for_our_turn_to_start_processing {
  done
 
  # If we are still here - wait for a random number of seconds then go
- RANDOM_NUMBER_OF_SECONDS=$(( RANDOM % 1200 + 1 ))
+ RANDOM_NUMBER_OF_SECONDS=$(( RANDOM % 3600 + 1 ))
  echo "Sleeping for $RANDOM_NUMBER_OF_SECONDS seconds then going no matter what"
  sleep $RANDOM_NUMBER_OF_SECONDS
 
