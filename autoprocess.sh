@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 
+#################################
+# Set the safe locale that should be available on any POSIX system
+LC_ALL=C
+LANGUAGE=C
+export LANGUAGE LC_ALL
+#################################
+
 
 # Normally $IMAGE_DATA_ROOT $DATA_PROCESSING_ROOT $URL_OF_DATA_PROCESSING_ROOT are 
 # exported in local_config.sh that is sourced by wrapper.sh
@@ -88,6 +95,36 @@ function is_temperature_low {
  return 0
 }
 
+function is_cpu_io_wait_low {
+ # check if iostat is available
+ command -v iostat &> /dev/null 
+ if [ $? -ne 0 ];then
+  return 0
+ fi
+ # check that the output format looks like what we expect
+ iostat -c | grep 'avg-cpu' | awk '{print $5}' | grep --quiet 'iowait'
+ if [ $? -ne 0 ];then
+  return 0
+ fi
+ CPU_IOWAIT_PERCENT=$(iostat -c | grep -A1 'avg-cpu' | grep -v 'avg-cpu' | awk '{print $4}')
+ if [ -z "$CPU_IOWAIT_PERCENT" ];then
+  return 0
+ fi
+ if [[ $CPU_IOWAIT_PERCENT =~ ^[0-9]+$ ]];then
+  # The string is an integer number
+  echo "$CPU_IOWAIT_PERCENT" |  awk -v target=3 '{
+         if ($1 < target) {
+          exit 0
+         } else {
+          exit 1
+         }
+        }'
+  return $?
+ fi
+ # The test didn't work after all - assume everything is fine
+ return 0
+}
+
 function check_sysrem_processes_are_not_too_many {
  # Get a list of all processes, filter by "util/sysrem", then count the lines.
  # The "-a" option to ps lists all processes. 
@@ -152,13 +189,13 @@ function wait_for_our_turn_to_start_processing {
 
  # exponential backoff
  for WAIT_ITERATION in $(seq 1 $MAX_WAIT_ITERATIONS) ; do
-  is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many
+  is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many && is_cpu_io_wait_low
   if [ $? -eq 0 ]; then
    # it may take another minute for the load and temperature to rise if another copy of this script is starting at the same time
    echo "The load is good but let's wait for another minute and re-check"
    A_MINUTE_PLUS_RANDOM=$[60+$(( RANDOM % 60 + 1 ))]
    sleep $A_MINUTE_PLUS_RANDOM
-   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many
+   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many && is_cpu_io_wait_low
    if [ $? -eq 0 ]; then
     return 0
    else
@@ -177,7 +214,7 @@ function wait_for_our_turn_to_start_processing {
  
  # if exponential backoff didn't work - wait impatiently
  for WAIT_ITERATION in $(seq 1 1$MAX_WAIT_ITERATIONS) ; do
-  is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many
+  is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many && is_cpu_io_wait_low
   if [ $? -eq 0 ]; then
    return 0
   else
