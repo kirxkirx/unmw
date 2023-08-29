@@ -303,7 +303,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
   NAME="$USER$HOST"
   DATETIME=`LANG=C date --utc`                                                                                 
   SCRIPTNAME=`basename $0`
-  MSG="Too mnay candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
+  MSG="Too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
   INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"
  fi
  echo "$INPUT_DIR/index.html" >> combine_reports.log
