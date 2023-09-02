@@ -181,6 +181,10 @@ function check_unrar_processes_are_not_too_many {
 }
 
 function wait_for_our_turn_to_start_processing {
+ if [ -n "$AUTOPROCESS_NO_WAIT" ] && [ "$AUTOPROCESS_NO_WAIT" = "yes" ];then
+  return 0
+ fi
+
  # Set base delay
  DELAY=1
  MAX_WAIT_ITERATIONS=13
@@ -244,11 +248,23 @@ fi
 INPUT_DIR_NOT_ZIP_ARCHIVE=0
 if [ -d "$INPUT_ZIP_ARCHIVE" ];then
  echo "The input is a directory $INPUT_ZIP_ARCHIVE"
- N_FITS_FILES=$(ls "$INPUT_ZIP_ARCHIVE"/*.fts | wc -l)
+
+ #
+ # Figure out fits file extension for this dataset
+ FITS_FILE_EXT=$(for POSSIBLE_FITS_FILE_EXT in fts fits fit ;do for IMGFILE in "$INPUT_ZIP_ARCHIVE"/*."$POSSIBLE_FITS_FILE_EXT" ;do if [ -f "$IMGFILE" ];then echo "$POSSIBLE_FITS_FILE_EXT"; break; fi ;done ;done)
+ if [ -z "$FITS_FILE_EXT" ];then
+  FITS_FILE_EXT="fts"
+ fi
+ export FITS_FILE_EXT
+ echo "FITS_FILE_EXT=$FITS_FILE_EXT"
+ #
+
+
+ N_FITS_FILES=$(ls "$INPUT_ZIP_ARCHIVE"/*.$FITS_FILE_EXT | wc -l)
  if [ $N_FITS_FILES -ge 2 ];then
   INPUT_DIR_NOT_ZIP_ARCHIVE=1
   echo "The input contains at lest 2 FITS files "
-  ls "$INPUT_ZIP_ARCHIVE"/*.fts
+  ls "$INPUT_ZIP_ARCHIVE"/*.$FITS_FILE_EXT
   INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE="$INPUT_ZIP_ARCHIVE"
  fi
 fi
@@ -555,6 +571,19 @@ for i in *"2021_"* ;do
   mv "$i" "${i/2021_/2021-}" 
  fi
 done
+
+# If not done above
+if [ -z "$FITS_FILE_EXT" ];then
+ # Figure out fits file extension for this dataset
+ FITS_FILE_EXT=$(for POSSIBLE_FITS_FILE_EXT in fts fits fit ;do for IMGFILE in *."$POSSIBLE_FITS_FILE_EXT" ;do if [ -f "$IMGFILE" ];then echo "$POSSIBLE_FITS_FILE_EXT"; break; fi ;done ;done)
+ if [ -z "$FITS_FILE_EXT" ];then
+  FITS_FILE_EXT="fts"
+ fi
+ export FITS_FILE_EXT
+ echo "FITS_FILE_EXT=$FITS_FILE_EXT"
+fi
+#
+
 
 # make a VaST Copy
 echo "Changing directory to $DATA_PROCESSING_ROOT" 
