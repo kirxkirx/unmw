@@ -6,35 +6,18 @@ from os.path import splitext
 from bs4 import BeautifulSoup
 
 # CONSTANTS
-MAX_MAG = 40
-AST_MAG_DIF_PREDICTED_OBSERVED = 2
-AST_1_RA_DIST_PREDICTED_OBSERVED_ARCSEC = 180
-AST_2_RA_DIST_PREDICTED_OBSERVED_ARCSEC = 180
+#MAX_MAG = 40
+#AST_MAG_DIF_PREDICTED_OBSERVED = 2
+#AST_1_RA_DIST_PREDICTED_OBSERVED_ARCSEC = 180
+#AST_2_RA_DIST_PREDICTED_OBSERVED_ARCSEC = 180
 VAR_MAX_DIST_ARCSEC = 30
 
 
 def is_asteroid(pre_el_text):
     try:
         if 'The object was found in astcheck' in pre_el_text:
-            pre_text_split = pre_el_text.split('\n')
-    
-            obj_mag = float(pre_text_split[2].strip().split()[4])
-            assert obj_mag < MAX_MAG, "Object magnitude exceeds the maximum limit."
-    
-            for idx, el in enumerate(pre_text_split):
-                if 'astcheck' in el:
-                    ast_idx = idx + 1
-                    break
-    
-            ast_split = pre_text_split[ast_idx].strip().split()
-            ast_1 = float(ast_split[3])
-            ast_2 = float(ast_split[4])
-            ast_mag = float(ast_split[5])
-            assert ast_mag < MAX_MAG, "Asteroid magnitude exceeds the maximum limit."
-    
-            return (abs(obj_mag - ast_mag) <= AST_MAG_DIF_PREDICTED_OBSERVED and
-                    ast_1 <= AST_1_RA_DIST_PREDICTED_OBSERVED_ARCSEC and
-                    ast_2 <= AST_2_RA_DIST_PREDICTED_OBSERVED_ARCSEC )
+            # Do not try to parse the asteroid string to get distance as it may take very different shapes
+            return True
         else:
             return False
     except (ValueError, IndexError) as e:
