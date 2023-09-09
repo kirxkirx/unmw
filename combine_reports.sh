@@ -63,7 +63,7 @@ trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
 echo $$ > "${LOCKFILE}"
 
 # loop through the cameras
-for CAMERA in Stas STL-11000M ;do
+for CAMERA in Stas STL-11000M TICA_TESS ;do
 
 #echo "DEBUG CAMERA=$CAMERA"
 
@@ -337,14 +337,17 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
     ####
     # Remove this field from the observing plan
     export N_FIELD_FOUND_IN_PLAN=0 
-    cat plan.txt | dos2unix | dos2unix | while read STR ;do 
-     if [ $N_FIELD_FOUND_IN_PLAN -eq 0 ];then 
-      echo "$STR" | grep --quiet -e "$FIELD"$'\n' -e "$FIELD " && export N_FIELD_FOUND_IN_PLAN=1 && continue 
-     fi 
-     echo $STR 
-    done > plan.tmp
-    cat plan.tmp | unix2dos | unix2dos > plan.txt
-    rm -f plan.tmp
+    command -v dos2unix &>/dev/null && command -v unix2dos &>/dev/null
+    if [ $? -eq 0 ];then
+     cat plan.txt | dos2unix | dos2unix | while read STR ;do 
+      if [ $N_FIELD_FOUND_IN_PLAN -eq 0 ];then 
+       echo "$STR" | grep --quiet -e "$FIELD"$'\n' -e "$FIELD " && export N_FIELD_FOUND_IN_PLAN=1 && continue 
+      fi 
+      echo $STR 
+     done > plan.tmp
+     cat plan.tmp | unix2dos | unix2dos > plan.txt
+     rm -f plan.tmp
+    fi # if [ $? -eq 0 ];then
     ####
    fi # grep --quiet 'ERROR' "$INPUT_DIR/index.html"
   fi # 'camera is stuck'
