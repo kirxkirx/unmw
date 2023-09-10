@@ -12,14 +12,12 @@ N_RUN=`ps ax | grep combine_reports.sh | grep -v grep | grep bash | grep -c comb
 # So one running copy of the script corresponds to N_RUN=2
 #if [ $N_RUN -gt 2 ];then
 if [ $N_RUN -gt 3 ];then
-# echo "DEBUG DA"
  exit 0
 fi
 ##################################################################
 
 # change to the work directory
-SCRIPTDIR=`readlink -f $0`
-SCRIPTDIR=`dirname "$SCRIPTDIR"`
+SCRIPTDIR=$(dirname "$(readlink -f "$0")")
 cd "$SCRIPTDIR"
 # source the local settings file if it exist
 # it may countain curl e-mail and data processing directory settings
@@ -77,9 +75,8 @@ OUTPUT_COMBINED_HTML_NAME=$DAY"_"$EVENING_OR_MORNING"_"$CAMERA".html"
 OUTPUT_FILTERED_HTML_NAME=$DAY"_"$EVENING_OR_MORNING"_"$CAMERA"_filtered.html"
 OUTPUT_PROCESSING_SUMMARY_HTML_NAME=$DAY"_"$EVENING_OR_MORNING"_summary.html"
 
-#INPUT_LIST_OF_RESULT_DIRS=`find -maxdepth 1 -type d -mtime -1 -name 'results*'`
 ######################################################### 12 hours
-INPUT_LIST_OF_RESULT_DIRS=`find -maxdepth 1 -type d -mmin -720 -name "results*$CAMERA*"`
+INPUT_LIST_OF_RESULT_DIRS=$(find -maxdepth 1 -type d -mmin -720 -name "results*$CAMERA*")
 
 if [ -z "$INPUT_LIST_OF_RESULT_DIRS" ];then
  # nothing to process, continue to the next camera
@@ -114,18 +111,16 @@ if [ -z "$LIST_OF_FILES" ];then
  continue
 fi
 
-SORTED_LIST_OF_FILES=`ls -tr $LIST_OF_FILES`
+SORTED_LIST_OF_FILES=$(ls -tr $LIST_OF_FILES)
 
 INPUT_LIST_OF_RESULT_DIRS=""
 for FILE in $SORTED_LIST_OF_FILES ;do
- grep --quiet 'Processig complete' $FILE
+ grep --quiet 'Processig complete' "$FILE"
  if [ $? -ne 0 ];then
   continue
  fi
- # lock the directory in case second instance of combine_reports.sh will start before we finish
- #touch $INPUT_DIR/index.html.combine_reports_lock
  #
- INPUT_LIST_OF_RESULT_DIRS="$INPUT_LIST_OF_RESULT_DIRS "`dirname $FILE`
+ INPUT_LIST_OF_RESULT_DIRS="$INPUT_LIST_OF_RESULT_DIRS "$(dirname "$FILE")
 done
 
 if [ -z "$INPUT_LIST_OF_RESULT_DIRS" ];then
@@ -332,8 +327,8 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
    else
     echo "<td><font color='green'>OK</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
     ####
-    # Create filtered list of candidates (no asteroids, no known variables)
-    "$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME"
+    # Re-create filtered list of candidates (no asteroids, no known variables)
+    #"$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME"
     ####
     # Remove this field from the observing plan
     export N_FIELD_FOUND_IN_PLAN=0 
@@ -356,8 +351,10 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  
 done
 
-#echo "</BODY>
-#</HTML>"
+# Try regenerating the filtered report every time
+if [ -s "$OUTPUT_COMBINED_HTML_NAME" ];then
+ "$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME"
+fi
 
 done # for CAMERA in Stas Nazar ;do
 
