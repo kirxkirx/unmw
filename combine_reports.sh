@@ -24,6 +24,12 @@ cd "$SCRIPTDIR"
 if [ -s local_config.sh ];then
  source local_config.sh
 fi
+#####
+# Silly fix for one local problem
+if [ "$HOSTNAME" == "ariel.astro.illinois.edu" ]  && [ "$USER" = "kirill" ] ;then
+ source /home/kirill/.bashrc
+fi
+#####
 # uploads/ is the default location for the processing data (both mages and results)
 if [ -d "uploads" ];then
  cd "uploads"
