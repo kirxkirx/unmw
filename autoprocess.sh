@@ -693,11 +693,18 @@ Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
 else
  # nonempty 'transient_report/index.html' is found
  ## Check for extra bright transients and send a special e-mail message
- cat "transient_report/index.html" | grep -v 'This object is listed in planets.txt' | grep -B1 'galactic' | grep -v -e 'galactic' -e '--' | while read A ;do   
+ cat "transient_report/index.html" | grep -v -e 'This object is listed in planets.txt' -e 'This object is listed in comets.txt' -e 'This object is listed in moons.txt' | grep -B1 'galactic' | grep -v -e 'galactic' -e '--' | while read A ;do   
   echo $A | awk '{if ( $5<9.5 && $5>-5.0 ) print "FOUND"}' | grep --quiet "FOUND" 
   if [ $? -eq 0 ];then
    N_NOT_FOUND_IN_CATALOGS=$(grep -A4 "$A" "transient_report/index.html" | grep -c 'not found')
    if [ $N_NOT_FOUND_IN_CATALOGS -ge 3 ];then
+    # Allow only for new sources, not flares produce the 'bright candidate' alert
+    # (as "flares" are often triggered by misidentification of stars on the reference and new images)
+    grep -B6 "$A" "transient_report/index.html" | grep --quiet 'Discovery image 3'
+    if [ $? -eq 0 ];then
+     continue
+    fi
+    # If we are still here - we want to raise the 'bright candidate' alert
     BRIGHT_TRANSIENT_NAME=$(grep -B17 "$A" "transient_report/index.html" | grep 'a name=' | awk -F"'" '{print $2}')
     MSG="A bright candidate transient is found
 
