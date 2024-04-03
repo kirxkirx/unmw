@@ -39,6 +39,9 @@ for i in uploads/*morning*.html uploads/*evening*.html ;do
   fi
   COMET_MAG=$(echo "$COMET_ID" | awk -F'mag' '{printf "%4.1f", $1}')
   COMET_NAME=$(echo "$COMET_ID" | awk -F'mag' '{print $2}')
-  echo " $MEASUREMENT      $COMET_MAG    $COMET_NAME"
+  #2024 03 25.6986  2460395.1986  7.40  01:40:57.07 +26:33:21.2
+  MEASUREMENT_EDIT=$(echo "$MEASUREMENT" | awk '{printf "%s %s %s  %s  %5.2f  %s %s", $1,$2,$3,$4,$5,$6,$7}')
+  #echo " $MEASUREMENT      $COMET_MAG    $COMET_NAME"
+  echo " $MEASUREMENT_EDIT      $COMET_MAG    $COMET_NAME"
  done
 done | sort -k 9 >> uploads/results_comets.txt
