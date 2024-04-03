@@ -18,7 +18,7 @@ fi
 
 # change to the work directory
 SCRIPTDIR=$(dirname "$(readlink -f "$0")")
-cd "$SCRIPTDIR"
+cd "$SCRIPTDIR" || exit 1
 # source the local settings file if it exist
 # it may countain curl e-mail and data processing directory settings
 if [ -s local_config.sh ];then
@@ -32,13 +32,13 @@ fi
 #####
 # uploads/ is the default location for the processing data (both mages and results)
 if [ -d "uploads" ];then
- cd "uploads"
+ cd "uploads" || exit 1
 fi
 # DATA_PROCESSING_ROOT may be exported in local_config.sh
 # if it is set properly - go there
 if [ ! -z "$DATA_PROCESSING_ROOT" ];then
  if [ -d "$DATA_PROCESSING_ROOT" ];then
-  cd "$DATA_PROCESSING_ROOT"
+  cd "$DATA_PROCESSING_ROOT" || exit 1
  fi
 fi
 #
@@ -89,7 +89,7 @@ if [ -z "$INPUT_LIST_OF_RESULT_DIRS" ];then
  continue
 fi
 
-# a silly attmpt to make sure files are sorted in time and only completed files are listed
+# a silly attempt to make sure files are sorted in time and only completed files are listed
 LIST_OF_FILES=""
 for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
  # check that this report does not look like a test - we don't want them in the ombined list
@@ -160,6 +160,10 @@ if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
    <BODY>
    
    <table align='center' width='50%' border='0' class='main'>" > index.html
+   if [ -s 'results_comets.txt' ];then
+    echo "<tr><td>Summary of comet detections: <a href='results_comets.txt' target='_blank'>results_comets.txt</a></td></tr>" >> index.html
+    echo "<tr><td></td></tr>" >> index.html
+   fi
  fi
  # Add this summary file to the list
  OUTPUT_COMBINED_HTML_NAME_FOR_THE_TABLE=`basename $OUTPUT_COMBINED_HTML_NAME .html`
@@ -364,8 +368,17 @@ done
 
 # Try regenerating the filtered report every time
 if [ -s "$OUTPUT_COMBINED_HTML_NAME" ];then
- "$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME"
+ "$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME" &
 fi
+
+# update results_comets.txt - do the update if we saw a comet that night with this camera
+grep --quiet 'comets.txt' "$OUTPUT_COMBINED_HTML_NAME"
+if [ $? -eq 0 ];then
+ "$SCRIPTDIR"/combine_results_comets.sh &
+fi
+
+# wait for the child processes to complete
+wait
 
 done # for CAMERA in Stas Nazar ;do
 
