@@ -187,7 +187,7 @@ function wait_for_our_turn_to_start_processing {
 
  # Set base delay
  DELAY=1
- MAX_WAIT_ITERATIONS=13
+ MAX_WAIT_ITERATIONS=12
  # The idea is that DELAY^MAX_WAIT_ITERATIONS will be approximatelky the duration of the imaging session,
  # so by that time the new images will surely stop coming.
 
