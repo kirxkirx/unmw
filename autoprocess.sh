@@ -76,7 +76,9 @@ function is_temperature_low {
  if [ $? -eq 0 ];then
   return 0
  fi
- TEMPERATURE=$(sensors 2> /dev/null | grep 'Package' | awk -F'+' '{print $2}' | awk -F'.' '{print $1}')
+ # Every system seem to have its own way of reporting CPU temperature.
+ # Most likely you'll need to tweak the expression below when installing the script on a new machine.
+ TEMPERATURE=$(sensors 2> /dev/null | grep -e 'Package' -e 'Tctl:' -e 'temp1:' | head -n1 | awk -F'+' '{print $2}' | awk -F'.' '{print $1}')
  if [ -z "$TEMPERATURE" ];then
   return 0
  fi
