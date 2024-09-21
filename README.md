@@ -129,8 +129,7 @@ mkdir /data/reference_images
 # Add summary transient report creation and offline catalog updating to corntab.
 # It may look something like
 # */8     *       *       *       *       apache  /data/cgi-bin/unmw/combine_reports.sh &> /data/cgi-bin/unmw/uploads/combine_reports_cronlog.txt
-00      16      *       *       2       apache  /data/cgi-bin/unmw/uploads/vast/lib/update_offline_catalogs.sh force > /data/cgi-bin/unmw/uploads/vast/lib/catalogs/update_offline_catalogs.log
-
+# 00      16      *       *       2       apache  /data/cgi-bin/unmw/uploads/vast/lib/update_offline_catalogs.sh force > /data/cgi-bin/unmw/uploads/vast/lib/catalogs/update_offline_catalogs.log
 nano /etc/crontab
 
 ````
