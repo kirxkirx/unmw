@@ -10,29 +10,19 @@ import string
 import time
 # for sys
 import sys 
-# for Popen
-#import subprocess
 
 # for socket.getfqdn()
 import socket
-
-#try: # Windows needs stdio set for binary mode.
-#    import msvcrt
-#    msvcrt.setmode (0, os.O_BINARY) # stdin  = 0
-#    msvcrt.setmode (1, os.O_BINARY) # stdout = 1
-#except ImportError:
-#    pass
 
 # Start log
 message = 'Starting program ' + sys.argv[0] + ' <br>'
 
 
-#### This is backup - assume the actual high-load handling will be done by the child script
+#### This is a backup plan: normally we assume the actual high-load handling will be done by the child script
 # Check the system load
-### These load values are very optiistic and rely on the autoprocess script to handle load balancing
+### These load values are very optimistic and rely on the autoprocess script to handle load balancing
 ### The idea is that we want to download the data now at all cost and then wait for the system load to get reasonably low
 emergency_load = 50.0
-# The commented-out stuff below is a terrible idea that results in timeout and multiple attempts to upload the smae files
 # Just check the load and if it's not extreme - accept the data
 if True == os.access('/proc/loadavg',os.R_OK):
  procload = open('/proc/loadavg','r')
@@ -42,23 +32,6 @@ if True == os.access('/proc/loadavg',os.R_OK):
  if load > emergency_load :
   message = message + 'System load is extremely high'
   sys.exit(1) # Just quit
-#max_load = 55.0
-#load = 99.0
-#while load > max_load :
-# load = 0.0
-# if True == os.access('/proc/loadavg',os.R_OK):
-#  procload = open('/proc/loadavg','r')
-#  loadline = procload.readline()
-#  procload.close()
-#  load = float(loadline.split()[1])
-#  if load > emergency_load :
-#   message = message + 'System load is extremely high'
-#   sys.exit(1) # Just quit
-#  if load > max_load :
-#   random.seed() # initialize using current system time, just in case...
-#   sleep_time = 120*random.random()  
-#   message = message + 'System load is too high: ' + str(load) + ', sleeping for ' + str(sleep_time) + ' seconds! <br> '
-#   time.sleep(sleep_time)
              
 
 form = cgi.FieldStorage()
@@ -69,7 +42,6 @@ fileupload = 'True'
 if fileupload == "True" :
  message = message + 'Uloading new file <br>'
  # Generator to buffer file chunks
- #def fbuffer(f, chunk_size=10000):
  def fbuffer(f, chunk_size=10000000):
     while True:
        chunk = f.read(chunk_size)
@@ -78,25 +50,13 @@ if fileupload == "True" :
        
  # A nested FieldStorage instance holds the file
  fileitem = form['file']
- # Test if the file was NOT uploaded
-# if not fileitem.filename:
-#  message = 'ERROR!!! No file was uploaded. :('
-#  print """\
-#Content-Type: text/html\n
-#<html><body>
-#<p>%s</p>
-#</body></html>
-#""" % (message,)
-#  sys.exit(0) # Just quit
-#else:
-# message = message + 'Non-interactive mode <br>'   
 
 pid = os.getpid();
 message = message + 'Process ID:  ' + str(pid) + ' <br>'
 
 if fileupload == "True" :
  JobID = 'web_upload_' + str(pid)
- #random.seed() # initialize using current system time, just in case...
+ random.seed() # initialize using current system time, just in case...
  for i in range(8):
   JobID = JobID + random.choice(string.letters)
   
@@ -120,7 +80,6 @@ if fileupload == "True" :
  fn = fn.replace( '..', '_')
  fn = fn.replace( '%', '_')
  ####
- #f = open(dirname + fn, 'wb', 10000)
  f = open(dirname + fn, 'wb', 100000000)
 
  # Read the file in chunks
@@ -155,16 +114,8 @@ results_page_url = 'http://' + fullhostname + '/unmw/' + dirname
 
 
 # Run the actual command
-#syscmd = 'echo \"' + results_page_url + fn + '\" | mail -s \"new NMW images uplaoded" kirx@scan.sai.msu.ru'
-#CmdReturnStatus = os.system(syscmd)   
-#message = message + 'Command return status:  ' + str(CmdReturnStatus) + ' <br>'
-
-# Run the actual command
-#syscmd = './autoprocess.sh ' + dirname + fn + ' &>' + dirname + 'program.log'
 syscmd = './wrapper.sh ' + dirname + fn
 CmdReturnStatus = os.system(syscmd)
-#CmdReturnStatus = subprocess.Popen(syscmd)
-#CmdReturnStatus = subprocess.Popen( './autoprocess.sh', dirname + fn)
 
 time.sleep(10)
 
