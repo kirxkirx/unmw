@@ -3,3 +3,7 @@ export DATA_PROCESSING_ROOT="/home/NMW_web_upload"
 export URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
 
 export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
+
+#ASTROMETRYNET_LOCAL_OR_REMOTE="local"
+#export ASTROMETRYNET_LOCAL_OR_REMOTE="remote"
+#export FORCE_PLATE_SOLVE_SERVER="scan.sai.msu.ru"

@@ -7,7 +7,11 @@ if [ -s local_config.sh ];then
 fi
 
 # You may specify an external plate-solve server here
-export ASTROMETRYNET_LOCAL_OR_REMOTE="remote"
-export FORCE_PLATE_SOLVE_SERVER="scan.sai.msu.ru"
+# but better move it to local_config.sh
+if [ -z "$ASTROMETRYNET_LOCAL_OR_REMOTE" ];then
+ ASTROMETRYNET_LOCAL_OR_REMOTE="local"
+ #export ASTROMETRYNET_LOCAL_OR_REMOTE="remote"
+ #export FORCE_PLATE_SOLVE_SERVER="scan.sai.msu.ru"
+fi
 
 ./autoprocess.sh $1 &>/dev/null &

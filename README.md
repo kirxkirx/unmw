@@ -38,7 +38,7 @@ ln -s /home/NMW_web_upload uploads
  ````
 where www-data is the apache user, `/dataX/cgi-bin/unmw/combine_reports.sh` is the full path to `combine_reports.sh` (will be different for your system).
 
-# An overly-detailed example installation on a fresh AlmaLinux 9
+# An overly-detailed and ugly example installation on a fresh AlmaLinux 9
 ````
 # The following commands should be executed as root
 
@@ -49,6 +49,9 @@ dnf update -y
 dnf install libX11-devel
 dnf install libpng-devel
 dnf install gfortran
+
+# Install packages needed for VaST control scripts
+dnf install unrar zip
 
 # (optional) Install sensors for CPU temperature monitoring
 dnf install sensors
@@ -86,8 +89,13 @@ firewall-cmd --reload
 getenforce
 
 # if Enforcing, configure SElinux to allow CGI scripts
-semanage fcontext -a -t httpd_sys_script_exec_t "/data/cgi-bin(/.*)?"
-restorecon -R /data/cgi-bin
+#semanage fcontext -a -t httpd_sys_script_exec_t "/data/cgi-bin(/.*)?"
+#restorecon -R /data/cgi-bin
+#
+# The overall transient search systems in its current form seems incompatible with SElinux.
+# !!! Disable SElinux permanently !!!
+grubby --update-kernel ALL --args selinux=0
+# then reboot reboot
 
 #### End of Linux distribution related regrets
 
@@ -131,5 +139,39 @@ mkdir /data/reference_images
 # */8     *       *       *       *       apache  /data/cgi-bin/unmw/combine_reports.sh &> /data/cgi-bin/unmw/uploads/combine_reports_cronlog.txt
 # 00      16      *       *       2       apache  /data/cgi-bin/unmw/uploads/vast/lib/update_offline_catalogs.sh force > /data/cgi-bin/unmw/uploads/vast/lib/catalogs/update_offline_catalogs.log
 nano /etc/crontab
+
+
+
+# (optional, but recommended) Install local copy of astrometry.net code
+# the following command are executed as user with sudo for operations requiring root
+sudo dnf install bzip2-devel cfitsio-devel libjpeg-turbo-devel cairo-devel numpy python3-devel
+# The swig package was not tin the available repositories, so had to enable a new one
+# that is called AlmaLinux 9 - CRB
+sudo dnf config-manager --set-enabled crb
+sudo dnf install swig
+# There is no astropy package for Alma Linux 9, so let's use pip
+sudo pip3 install astropy
+# Test that astropy works
+python3 -c "import astropy; print(astropy.__version__)"
+# Now get and compile the actual astrometry.net code
+git clone https://github.com/dstndstn/astrometry.net.git
+cd astrometry.net
+./configure && make
+sudo make install
+# !!! Download the index files from http://data.astrometry.net/ !!!
+# !!! and copy them to /usr/local/astrometry/data/ !!!
+
+# (optional) use VaST test data to check that VaST found the local astrometry.net
+util/wcs_image_calibration.sh ../NMW-STL__find_Neptune_test/second_epoch_images/000_2023-7-19_21-26-29_003.fts
+util/listhead wcs_000_2023-7-19_21-26-29_003.fts | grep VAST
+# The second command should print something like 
+# """"
+# VAST001 = 'wcs_image_calibration.sh' / VaST script name
+# VAST002 = 'local   '           / ASTROMETRYNET_LOCAL_OR_REMOTE
+# VAST003 = 'local   '           / PLATE_SOLVE_SERVER
+# VAST004 = 'iteration02'        / astometry.net run
+# """"
+# Indicating that the local copy of astometry.net code was used, not a remote one
+
 
 ````
