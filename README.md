@@ -51,7 +51,11 @@ dnf install libpng-devel
 dnf install gfortran
 
 # Install packages needed for VaST control scripts
-dnf install unrar zip
+dnf install zip
+# !!! Install rar archiver manually !!!
+# !!! DO NOT USE unrar - it is incompatible with rar version at the NMW camera control computers
+# unrar will produce corrupted files after unpacking. !!!
+# The linux binary rar may be found at https://www.win-rar.com/download.html
 
 # (optional) Install sensors for CPU temperature monitoring
 dnf install sensors
@@ -173,5 +177,21 @@ util/listhead wcs_000_2023-7-19_21-26-29_003.fts | grep VAST
 # """"
 # Indicating that the local copy of astometry.net code was used, not a remote one
 
+# (optional) Install swarp and ImageMagick for the fastplot script
+# swarp
+git clone https://github.com/astromatic/swarp.git
+cd swarp/
+./autogen.sh
+./configure && make
+sudo make install
+# ImageMagick
+dnf install ImageMagick
+
+
+# Final touches
+#
+# Create the candidate exclusion list for the camera
+touch /data/cgi-bin/unmw/uploads/exclusion_list_STL.txt
+chown apache:apache /data/cgi-bin/unmw/uploads/exclusion_list_STL.txt
 
 ````
