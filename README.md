@@ -187,6 +187,8 @@ sudo make install
 # ImageMagick
 dnf install ImageMagick
 
+# Install beautifulsoup4 for preparing filtered combined reports (that exclude known things)
+dnf install python3-beautifulsoup4
 
 # Final touches
 #
