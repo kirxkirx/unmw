@@ -84,7 +84,8 @@ function is_temperature_low {
  fi
  if [[ $TEMPERATURE =~ ^[0-9]+$ ]];then
   # The string is an integer number
-  echo "$TEMPERATURE" |  awk -v target=50 '{
+  #echo "$TEMPERATURE" |  awk -v target=50 '{
+  echo "$TEMPERATURE" |  awk -v target=65 '{
          if ($1 < target) {
           exit 0
          } else {
@@ -262,11 +263,11 @@ if [ -d "$INPUT_ZIP_ARCHIVE" ];then
  #
 
 
- N_FITS_FILES=$(ls "$INPUT_ZIP_ARCHIVE"/*.$FITS_FILE_EXT | wc -l)
+ N_FITS_FILES=$(ls "$INPUT_ZIP_ARCHIVE"/*."$FITS_FILE_EXT" | wc -l)
  if [ $N_FITS_FILES -ge 2 ];then
   INPUT_DIR_NOT_ZIP_ARCHIVE=1
   echo "The input contains at lest 2 FITS files "
-  ls "$INPUT_ZIP_ARCHIVE"/*.$FITS_FILE_EXT
+  ls "$INPUT_ZIP_ARCHIVE"/*."$FITS_FILE_EXT"
   INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE="$INPUT_ZIP_ARCHIVE"
  fi
 fi
@@ -543,6 +544,19 @@ fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 
 ##### At this point we have input directory with images at $ABSOLUTE_PATH_TO_IMAGES #####
 
+
+# If not done above
+if [ -z "$FITS_FILE_EXT" ];then
+ # Figure out fits file extension for this dataset
+ FITS_FILE_EXT=$(for POSSIBLE_FITS_FILE_EXT in fts fits fit ;do for IMGFILE in *."$POSSIBLE_FITS_FILE_EXT" ;do if [ -f "$IMGFILE" ];then echo "$POSSIBLE_FITS_FILE_EXT"; break; fi ;done ;done)
+ if [ -z "$FITS_FILE_EXT" ];then
+  FITS_FILE_EXT="fts"
+ fi
+ export FITS_FILE_EXT
+ echo "FITS_FILE_EXT=$FITS_FILE_EXT"
+fi
+#
+
 # Rename SF files
 echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
 cd "$ABSOLUTE_PATH_TO_IMAGES" || exit 1
@@ -561,30 +575,26 @@ sudo chown -R $USER $PWD"
 fi
 #
 echo "Renaming the SF files" 
-for i in *-SF* ;do 
+for i in *-SF*."$FITS_FILE_EXT" ;do 
  if [ -f "$i" ];then
   mv "$i" "${i/-SF/}"
  fi 
 done
 #
 echo "Renaming the 2021_ field name files (should be 2021-)"
-for i in *"2021_"* ;do 
+for i in *"2021_"*."$FITS_FILE_EXT" ;do 
  if [ -f "$i" ];then
   mv "$i" "${i/2021_/2021-}" 
  fi
 done
-
-# If not done above
-if [ -z "$FITS_FILE_EXT" ];then
- # Figure out fits file extension for this dataset
- FITS_FILE_EXT=$(for POSSIBLE_FITS_FILE_EXT in fts fits fit ;do for IMGFILE in *."$POSSIBLE_FITS_FILE_EXT" ;do if [ -f "$IMGFILE" ];then echo "$POSSIBLE_FITS_FILE_EXT"; break; fi ;done ;done)
- if [ -z "$FITS_FILE_EXT" ];then
-  FITS_FILE_EXT="fts"
+echo "Remofing fd_*.* (old calibrated files)"
+for i in fd_*."$FITS_FILE_EXT" ;do
+ if [ -f "$i" ];then
+  rm -f "$i"
  fi
- export FITS_FILE_EXT
- echo "FITS_FILE_EXT=$FITS_FILE_EXT"
-fi
-#
+done
+
+
 
 
 # make a VaST Copy
