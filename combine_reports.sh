@@ -233,7 +233,7 @@ if [ ! -f "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME" ];then
 <BODY>
 
 <table align='center' width='100%' border='0' class='main'>
-<tr><th>Camera</th><th>Time</th><th>Field</th><th>-</th><th>Status</th><th>Log</th><th>Offset</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+<tr><th>Camera</th><th>Obs. Time</th><th>Field</th><th>-</th><th>Status</th><th>Log</th><th>Offset</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
 
  # Add this summary file to the list
  SUMMARY_FILE_NAME_FOR_THE_TABLE=`basename $OUTPUT_PROCESSING_SUMMARY_HTML_NAME .html`
