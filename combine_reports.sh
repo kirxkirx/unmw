@@ -229,11 +229,16 @@ fi
 # Summary file
 if [ ! -f "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME" ];then
  # make head
- echo "<HTML>
-<BODY>
+ echo "<html>
+<style>
+  .main th, .main td {
+    text-align: center;
+  }
+</style>
+<body>
 
 <table align='center' width='100%' border='0' class='main'>
-<tr><th>Camera</th><th>Obs. Time</th><th>Field</th><th>-</th><th>Status</th><th>Log</th><th>Offset</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+<tr><th>Camera</th><th>Obs.Time</th><th>Field</th><th>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</th><th>Status</th><th>Log</th><th>Offset</th><th>mag.lim.</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
 
  # Add this summary file to the list
  SUMMARY_FILE_NAME_FOR_THE_TABLE=`basename $OUTPUT_PROCESSING_SUMMARY_HTML_NAME .html`
@@ -316,31 +321,34 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  # Summary file
  # FIELD moved up to give special treatment to Sco6
  #FIELD=`grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:processing fields::g' | sed 's:<br>::g'` 
- LAST_IMAGE_DATE=`grep 'Last  image' "$INPUT_DIR/index.html" | head -n1 | awk '{print $4" "$5}'`
+ #LAST_IMAGE_DATE=`grep 'Last  image' "$INPUT_DIR/index.html" | head -n1 | awk '{print $4" "$5}'`
+ # remove .000 seconds
+ LAST_IMAGE_DATE=`grep 'Last  image' "$INPUT_DIR/index.html" | head -n1 | awk '{print $4" "$5}' | sed 's/\.000/ /g'`
  # sed is for the case Record 39: "TIMESYS = 'UTC     '           / Default time system" status=0 to avoid 'UTC
  TIMESYS_OF_LAST_IMAGE_DATE=`grep 'time system' "$INPUT_DIR/index.html" | head -n1 | awk '{print $5}' | sed "s:'::g"`
  LAST_IMAGE_DATE="$LAST_IMAGE_DATE $TIMESYS_OF_LAST_IMAGE_DATE"
  IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=`grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | sed 's:deg.::g' | head -n1 | awk '{print $7}'`
+ MAG_LIMIT=`grep 'All-image limiting magnitude estimate' "$INPUT_DIR/index.html" | tail -n1 | awk '{print $5}'`
  echo -n "<tr><td>$CAMERA</td><td>$LAST_IMAGE_DATE</td><td><font color='teal'> $FIELD </font></td><td>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  if [ "$INCLUDE_REPORT_IN_COMBINED_LIST" != "OK" ];then
 #  echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td></td><td>too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) to include in the combined list ("`basename $0`")</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
-  echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td><td>too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) to include in the combined list ("`basename $0`")</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+  echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td><td>too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) to include in the combined list ("`basename $0`")</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  else
   grep --quiet 'ERROR' "$INPUT_DIR/index.html" | grep 'stuck camera'
   if [ $? -eq 0 ];then
    FIELD=`grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:<br>::g' | awk '{print $1}'`
    #echo "<td><font color='#FF0033'>CAMERA STUCK</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
-   echo "<td><font color='#FF0033'>CAMERA STUCK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+   echo "<td><font color='#FF0033'>CAMERA STUCK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
   else
    ### Check for all other errors
    grep --quiet 'ERROR' "$INPUT_DIR/index.html"
    if [ $? -eq 0 ] ;then
     ERROR_MSG=`grep --max-count=1 'ERROR' "$INPUT_DIR/index.html"`
     #echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$ERROR_MSG</td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
-    echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$ERROR_MSG</td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><td>$ERROR_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
    else
     #echo "<td><font color='green'>OK</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
-    echo "<td><font color='green'>OK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    echo "<td><font color='green'>OK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
     ####
     # Re-create filtered list of candidates (no asteroids, no known variables)
     #"$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME"
