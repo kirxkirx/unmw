@@ -345,12 +345,11 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
    ### Check for all other errors
    grep --quiet 'ERROR' "$INPUT_DIR/index.html"
    if [ $? -eq 0 ] ;then
-    ERROR_MSG=`grep --max-count=1 'ERROR' "$INPUT_DIR/index.html"`
-    #echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$ERROR_MSG</td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    ERROR_MSG=$(grep --max-count=1 'ERROR' "$INPUT_DIR/index.html")
     echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><td>$ERROR_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
    else
-    #echo "<td><font color='green'>OK</font></td><td><a href='$URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
-    echo "<td><font color='green'>OK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | tail -n1)
+    echo "<td><font color='green'>OK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$WARNING_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
     ####
     # Re-create filtered list of candidates (no asteroids, no known variables)
     #"$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME"
