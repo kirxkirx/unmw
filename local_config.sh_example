@@ -7,3 +7,7 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 #ASTROMETRYNET_LOCAL_OR_REMOTE="local"
 #export ASTROMETRYNET_LOCAL_OR_REMOTE="remote"
 #export FORCE_PLATE_SOLVE_SERVER="scan.sai.msu.ru"
+
+# 1 Gb = 1*1024*1024 KB
+#export WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB=1048576
+

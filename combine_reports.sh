@@ -15,7 +15,11 @@ if [ $N_RUN -gt 3 ];then
  exit 0
 fi
 ##################################################################
+# helper functions
 
+# none so far
+
+##################################################################
 # change to the work directory
 SCRIPTDIR=$(dirname "$(readlink -f "$0")")
 cd "$SCRIPTDIR" || exit 1
