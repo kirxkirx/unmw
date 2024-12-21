@@ -25,6 +25,30 @@ if os.access('/proc/loadavg', os.R_OK):
         print(f"<html><body><p>{message}</p></body></html>")
         sys.exit(1)  # Exit with HTML message
 
+# Check if uploads directory exists and check its available disk space
+upload_dir = 'uploads'
+if not os.path.exists(upload_dir):
+    message += f'Error: Upload directory "{upload_dir}" does not exist'
+    print(f"<html><body><p>{message}</p></body></html>")
+    sys.exit(1)
+
+try:
+    # Resolve the real path in case of symbolic links
+    real_upload_dir = os.path.realpath(upload_dir)
+    st = os.statvfs(real_upload_dir)
+    free_space = st.f_bavail * st.f_frsize  # Available space in bytes
+    min_required_space = 500 * 1024 * 1024  # 500MB in bytes
+    
+    if free_space < min_required_space:
+        message += f'Error: Insufficient disk space in upload directory. Available: {free_space / (1024*1024):.2f}MB, Required: 500MB'
+        print(f"<html><body><p>{message}</p></body></html>")
+        sys.exit(1)
+except Exception as e:
+    message += f'Error checking disk space in upload directory: {str(e)}'
+    print(f"<html><body><p>{message}</p></body></html>")
+    sys.exit(1)
+
+
 form = cgi.FieldStorage()
 
 # Get input parameters
@@ -51,7 +75,8 @@ if fileupload == "True":
     JobID = 'web_upload_' + str(pid)
     JobID += ''.join(random.choice(string.ascii_letters) for _ in range(8))
 
-dirname = 'uploads/' + JobID
+#dirname = 'uploads/' + JobID
+dirname = upload_dir + '/' + JobID
 
 if fileupload == "True":
     try:
