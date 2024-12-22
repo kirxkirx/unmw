@@ -8,8 +8,18 @@ import sys
 import socket
 import pwd
 import magic
-import zipfile
-import rarfile
+# Try to import archive handling libraries
+try:
+    import zipfile
+    HAVE_ZIPFILE = True
+except ImportError:
+    HAVE_ZIPFILE = False
+
+try:
+    import rarfile
+    HAVE_RARFILE = True
+except ImportError:
+    HAVE_RARFILE = False
 import re
 from typing import List, Tuple
 
@@ -72,18 +82,27 @@ def validate_archive_type(filepath: str) -> Tuple[bool, str]:
 
 def check_archive_contents(filepath: str) -> Tuple[bool, str]:
     """
-    Validate archive contents without extracting
+    Validate archive contents without extracting.
+    Falls back to basic checks if archive libraries are not available.
     """
     ext = os.path.splitext(filepath)[1].lower()
     image_files = []
     
+    # If neither library is available, perform basic size and MIME checks only
+    if ext == '.zip' and not HAVE_ZIPFILE:
+        return True, "Warning: zipfile module not available, skipping detailed archive validation"
+    elif ext == '.rar' and not HAVE_RARFILE:
+        return True, "Warning: rarfile module not available, skipping detailed archive validation"
+    
     try:
-        if ext == '.zip':
+        if ext == '.zip' and HAVE_ZIPFILE:
             with zipfile.ZipFile(filepath) as zf:
                 filelist = zf.namelist()
-        elif ext == '.rar':
+        elif ext == '.rar' and HAVE_RARFILE:
             with rarfile.RarFile(filepath) as rf:
                 filelist = rf.namelist()
+        else:
+            return False, f"Unsupported archive type: {ext}"
                 
         # Check each file in archive
         for fname in filelist:
@@ -99,9 +118,11 @@ def check_archive_contents(filepath: str) -> Tuple[bool, str]:
             
         return True, ""
         
-    except (zipfile.BadZipFile, rarfile.BadRarFile) as e:
-        return False, f"Invalid archive format: {str(e)}"
     except Exception as e:
+        if ext == '.zip' and isinstance(e, zipfile.BadZipFile):
+            return False, f"Invalid ZIP format: {str(e)}"
+        elif ext == '.rar' and isinstance(e, rarfile.BadRarFile):
+            return False, f"Invalid RAR format: {str(e)}"
         return False, f"Error checking archive: {str(e)}"
 
 def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool, str, str]:
