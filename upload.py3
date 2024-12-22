@@ -1,184 +1,255 @@
 #!/usr/bin/env python3
 import cgi, os
-import cgitb; cgitb.enable()
+import cgitb
 import random
 import string
 import time
 import sys
 import socket
 import pwd
+import magic
+import zipfile
+import rarfile
+import re
+from typing import List, Tuple
 
-# Output the content type header first
-print("Content-Type: text/html\n")
+# Constants for file validation
+MIN_FILE_SIZE = 2 * 1024 * 1024  # 2MB
+MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB
+ALLOWED_EXTENSIONS = {'.zip', '.rar'}
+ALLOWED_IMAGE_EXTENSIONS = {'.fit', '.fits', '.fts'}
+MIN_IMAGE_FILES = 2
 
-# Start logging output for display within the HTML page
-message = 'Starting program ' + sys.argv[0] + ' <br>'
-
-# Check the system load
-emergency_load = 50.0
-if os.access('/proc/loadavg', os.R_OK):
-    with open('/proc/loadavg', 'r') as procload:
-        loadline = procload.readline()
-    load = float(loadline.split()[1])
-    if load > emergency_load:
-        message += 'System load is extremely high'
-        print(f"<html><body><p>{message}</p></body></html>")
-        sys.exit(1)  # Exit with HTML message
-
-# Check if uploads directory exists and check its available disk space
-upload_dir = 'uploads'
-if not os.path.exists(upload_dir):
-    message += f'Error: Upload directory "{upload_dir}" does not exist'
-    print(f"<html><body><p>{message}</p></body></html>")
-    sys.exit(1)
-
-try:
-    # Resolve the real path in case of symbolic links
-    real_upload_dir = os.path.realpath(upload_dir)
-    st = os.statvfs(real_upload_dir)
-    free_space = st.f_bavail * st.f_frsize  # Available space in bytes
-    min_required_space = 500 * 1024 * 1024  # 500MB in bytes
+def is_safe_filename(filename: str) -> bool:
+    """
+    Check if filename is safe - no path traversal, no special chars
+    """
+    # Remove any directory components, keep just filename
+    filename = os.path.basename(filename)
     
-    if free_space < min_required_space:
-        message += f'Error: Insufficient disk space in upload directory. Available: {free_space / (1024*1024):.2f}MB, Required: 500MB'
-        print(f"<html><body><p>{message}</p></body></html>")
-        sys.exit(1)
-except Exception as e:
-    message += f'Error checking disk space in upload directory: {str(e)}'
-    print(f"<html><body><p>{message}</p></body></html>")
-    sys.exit(1)
-
-
-form = cgi.FieldStorage()
-
-# Get input parameters
-fileupload = 'True'
-
-if fileupload == "True":
-    message += 'Uploading new file <br>'
+    # Check for suspicious patterns
+    dangerous_patterns = [
+        r'\.\.',           # Path traversal
+        r'^\..*$',         # Hidden files
+        r'[<>:"|?*]',     # Windows special chars
+        r'[;&|`$]',       # Shell special chars
+        r'[^\w\-\.]'      # Only allow alphanumeric, dash, dot
+    ]
     
-    # Generator to buffer file chunks
-    def fbuffer(f, chunk_size=10000000):
-        while True:
-            chunk = f.read(chunk_size)
-            if not chunk:
-                break
-            yield chunk
-       
-    # A nested FieldStorage instance holds the file
-    fileitem = form['file']
+    return all(not re.search(pattern, filename) for pattern in dangerous_patterns)
 
-pid = os.getpid()
-message += 'Process ID:  ' + str(pid) + ' <br>'
+def validate_archive_size(filesize: int) -> bool:
+    """
+    Validate archive file size is within acceptable range
+    """
+    return MIN_FILE_SIZE <= filesize <= MAX_FILE_SIZE
 
-if fileupload == "True":
-    JobID = 'web_upload_' + str(pid)
-    JobID += ''.join(random.choice(string.ascii_letters) for _ in range(8))
+def get_mime_type(filepath: str) -> str:
+    """
+    Get MIME type of file using python-magic
+    """
+    return magic.Magic(mime=True).from_file(filepath)
 
-#dirname = 'uploads/' + JobID
-dirname = upload_dir + '/' + JobID
-
-if fileupload == "True":
-    try:
-        # Attempt to create the directory
-        os.mkdir(dirname)
-    except PermissionError as e:
-        # Get the current working directory
-        current_working_directory = os.getcwd()
+def validate_archive_type(filepath: str) -> Tuple[bool, str]:
+    """
+    Validate that file is a legitimate archive of allowed type
+    """
+    mime_type = get_mime_type(filepath)
+    ext = os.path.splitext(filepath)[1].lower()
+    
+    if ext not in ALLOWED_EXTENSIONS:
+        return False, f"Invalid file extension: {ext}"
         
-        # Get the user information
-        user_id = os.getuid()
-        user_info = pwd.getpwuid(user_id)
+    valid_mime_types = {
+        '.zip': 'application/zip',
+        '.rar': 'application/x-rar'
+    }
+    
+    if mime_type != valid_mime_types.get(ext):
+        return False, f"MIME type mismatch: {mime_type}"
+        
+    return True, ""
 
-        # Produce a meaningful error message
-        message = (
-            f"Error: Could not create directory '{dirname}'.<br>"
-            f"Current working directory: {current_working_directory}<br>"
-            f"Script is running as user: {user_info.pw_name} (UID: {user_id})<br>"
-            f"Error details: {e}<br>"
-        )
+def check_archive_contents(filepath: str) -> Tuple[bool, str]:
+    """
+    Validate archive contents without extracting
+    """
+    ext = os.path.splitext(filepath)[1].lower()
+    image_files = []
+    
+    try:
+        if ext == '.zip':
+            with zipfile.ZipFile(filepath) as zf:
+                filelist = zf.namelist()
+        elif ext == '.rar':
+            with rarfile.RarFile(filepath) as rf:
+                filelist = rf.namelist()
+                
+        # Check each file in archive
+        for fname in filelist:
+            if not is_safe_filename(fname):
+                return False, f"Unsafe filename in archive: {fname}"
+                
+            file_ext = os.path.splitext(fname)[1].lower()
+            if file_ext in ALLOWED_IMAGE_EXTENSIONS:
+                image_files.append(fname)
+                
+        if len(image_files) < MIN_IMAGE_FILES:
+            return False, f"Not enough image files found. Minimum required: {MIN_IMAGE_FILES}"
+            
+        return True, ""
+        
+    except (zipfile.BadZipFile, rarfile.BadRarFile) as e:
+        return False, f"Invalid archive format: {str(e)}"
+    except Exception as e:
+        return False, f"Error checking archive: {str(e)}"
 
-        # Print the error message in the HTML response and exit
-        print("Content-Type: text/html\n")
-        print(f"<html><body><p>{message}</p></body></html>")
-        sys.exit(1)  # Exit the script with an error
+def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool, str, str]:
+    """
+    Handle file upload with security checks
+    Returns: (success, message, dirname)
+    """
+    try:
+        # Get the uploaded file
+        fileitem = form['file']
+        if not fileitem.filename:
+            return False, "No file uploaded", ""
+            
+        # Generate secure directory name
+        pid = os.getpid()
+        random_str = ''.join(random.choice(string.ascii_letters) for _ in range(8))
+        dirname = os.path.join(upload_dir, f'web_upload_{pid}{random_str}/')
+        
+        # Create upload directory
+        try:
+            os.makedirs(dirname, mode=0o750)  # Restrictive permissions
+        except PermissionError as e:
+            user_info = pwd.getpwuid(os.getuid())
+            return False, f"Permission error creating directory. Running as {user_info.pw_name}", ""
+            
+        # Save file with sanitized name
+        filename = os.path.basename(fileitem.filename)[:256]
+        filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+        filepath = os.path.join(dirname, filename)
+        
+        # Write file in chunks with size validation
+        total_size = 0
+        with open(filepath, 'wb') as f:
+            while True:
+                chunk = fileitem.file.read(8192)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > MAX_FILE_SIZE:
+                    os.unlink(filepath)
+                    os.rmdir(dirname)
+                    return False, f"File too large. Maximum size: {MAX_FILE_SIZE/(1024*1024)}MB", ""
+                f.write(chunk)
+                
+        if not validate_archive_size(total_size):
+            os.unlink(filepath)
+            os.rmdir(dirname)
+            return False, f"File size ({total_size/(1024*1024):.1f}MB) outside allowed range", ""
+            
+        # Validate archive type
+        valid, error_msg = validate_archive_type(filepath)
+        if not valid:
+            os.unlink(filepath)
+            os.rmdir(dirname)
+            return False, error_msg, ""
+            
+        # Check archive contents
+        valid, error_msg = check_archive_contents(filepath)
+        if not valid:
+            os.unlink(filepath)
+            os.rmdir(dirname)
+            return False, error_msg, ""
+            
+        return True, "File uploaded and validated successfully", dirname
+        
+    except Exception as e:
+        if 'dirname' in locals() and os.path.exists(dirname):
+            if 'filepath' in locals() and os.path.exists(filepath):
+                os.unlink(filepath)
+            os.rmdir(dirname)
+        return False, f"Upload error: {str(e)}", ""
 
-dirname = dirname + '/'
+def main():
+    # Enable CGI error reporting
+    cgitb.enable()
+    
+    print("Content-Type: text/html\n")
+    
+    # Check system load
+    try:
+        with open('/proc/loadavg', 'r') as f:
+            load = float(f.readline().split()[1])
+            if load > 50.0:
+                print("<html><body>System load too high</body></html>")
+                sys.exit(1)
+    except Exception as e:
+        print(f"<html><body>Error checking system load: {e}</body></html>")
+        sys.exit(1)
+        
+    # Check upload directory
+    upload_dir = 'uploads'
+    try:
+        if not os.path.exists(upload_dir):
+            print(f"<html><body>Upload directory missing</body></html>")
+            sys.exit(1)
+            
+        st = os.statvfs(os.path.realpath(upload_dir))
+        free_space = st.f_bavail * st.f_frsize
+        if free_space < 500 * 1024 * 1024:  # 500MB
+            print("<html><body>Insufficient disk space</body></html>")
+            sys.exit(1)
+    except Exception as e:
+        print(f"<html><body>Error checking upload directory: {e}</body></html>")
+        sys.exit(1)
+        
+    # Handle upload
+    form = cgi.FieldStorage()
+    success, message, dirname = secure_upload_handler(form, upload_dir)
+    
+    if not success:
+        print(f"<html><body>{message}</body></html>")
+        sys.exit(1)
+        
+    # Handle email notifications
+    if dirname:
+        if form.getvalue('workstartemail'):
+            os.system(f'touch {dirname}workstartemail')
+        if form.getvalue('workendemail'):
+            os.system(f'touch {dirname}workendemail')
+            
+        # Log upload details
+        os.system(f'ls -lh {dirname}* > {dirname}upload.log')
+        
+        # Run processing wrapper
+        os.system(f'./wrapper.sh {dirname}{os.path.basename(form["file"].filename)}')
+        
+        # Wait for results
+        results_url = None
+        for _ in range(4):
+            if os.path.isfile(dirname + "results_url.txt"):
+                with open(dirname + "results_url.txt") as f:
+                    results_url = f.readline().strip()
+                break
+            time.sleep(30)
+            
+        if not results_url:
+            results_url = f'http://{socket.getfqdn()}/unmw/{dirname}'
+            
+        print(f"""
+        <html>
+        <head>
+        <meta http-equiv="Refresh" content="0; url={results_url}">
+        </head>
+        <body>
+        <p>Upload successful. Redirecting to results...</p>
+        </body>
+        </html>
+        """)
 
-# Enable cgitb with logging to the specified directory
-cgitb.enable(display=1, logdir=dirname)
-
-if fileupload == "True":
-    # Strip leading path from file name to avoid directory traversal attacks
-    fn = os.path.basename(fileitem.filename)
-    # Truncate filename at 256 characters just in case
-    fn = fn[:256]
-    # Sanitize the filename
-    fn = fn.replace(' ', '_').replace('..', '_').replace('%', '_')
-
-    # Open file for writing
-    with open(dirname + fn, 'wb', 100000000) as f:
-        # Read the file in chunks
-        for chunk in fbuffer(fileitem.file):
-            f.write(chunk)
-    message += f'The file "{fn}" was uploaded successfully! <br>'
-
-fullhostname = socket.getfqdn()
-message += f'<br><br>The output will be written to <a href="http://{fullhostname}/nmw/proc/upload/{dirname}">http://{fullhostname}/nmw/proc/upload/{dirname}</a><br><br>'
-
-if form.getvalue('workstartemail'):
-    syscmd = f'touch {dirname}workstartemail'
-    CmdReturnStatus = os.system(syscmd)
-    message += f' {syscmd} '
-
-if form.getvalue('workendemail'):
-    syscmd = f'touch {dirname}workendemail'
-    CmdReturnStatus = os.system(syscmd)
-    message += f' {syscmd} '
-
-if form.getvalue('nonexistingfield'):
-    syscmd = f'touch {dirname}nonexistingfield'
-    CmdReturnStatus = os.system(syscmd)
-    message += f' {syscmd} '
-
-syscmd = f'ls -lh {dirname}{fn} > {dirname}upload.log'
-CmdReturnStatus = os.system(syscmd)
-
-results_page_url = f'http://{fullhostname}/unmw/{dirname}'
-
-# Run the wrapper script
-syscmd = f'./wrapper.sh {dirname}{fn}'
-CmdReturnStatus = os.system(syscmd)
-
-time.sleep(10)
-
-# Wait until results file is ready
-if not os.path.isfile(dirname + "results_url.txt"):
-    time.sleep(30)
-if not os.path.isfile(dirname + "results_url.txt"):
-    time.sleep(30)
-if not os.path.isfile(dirname + "results_url.txt"):
-    time.sleep(30)
-if not os.path.isfile(dirname + "results_url.txt"):
-    time.sleep(60)
-
-# Give it a few more seconds to draft the actual HTML page at this URL
-time.sleep(10)
-
-# Open the file with the redirection link if it exists
-if os.path.isfile(dirname + "results_url.txt"):
-    with open(dirname + "results_url.txt", "r") as file1:
-        results_page_url = file1.readline()
-
-# Redirect to results page
-print(f"""\
-<html>
-<head>
-<meta http-equiv="Refresh" content="0; url={results_page_url}"> 
-</head>
-<body>
-<p>{message}</p>   
-</body></html>
-""")
-
-sys.exit(0)
+if __name__ == "__main__":
+    main()
