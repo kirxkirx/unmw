@@ -332,7 +332,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  TIMESYS_OF_LAST_IMAGE_DATE=`grep 'time system' "$INPUT_DIR/index.html" | head -n1 | awk '{print $5}' | sed "s:'::g"`
  LAST_IMAGE_DATE="$LAST_IMAGE_DATE $TIMESYS_OF_LAST_IMAGE_DATE"
  #IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=$(grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | awk '{if($7+0 > max) max=$7} END{print max}')
- IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=$(grep 'Angular distance between the image centers' "index.html" | awk 'BEGIN{max=-1} {if($7+0 > max) max=$7} END{if (max == -1) print "ERROR"; else print max}')
+ IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=$(grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | awk 'BEGIN{max=-1} {if($7+0 > max) max=$7} END{if (max == -1) print "ERROR"; else print max}')
  MAG_LIMIT=`grep 'All-image limiting magnitude estimate' "$INPUT_DIR/index.html" | tail -n1 | awk '{print $5}'`
  # remove "UTC" as we have it in the table header
  echo -n "<tr><td>$CAMERA</td><td>${LAST_IMAGE_DATE/ UTC/}</td><td><font color='teal'> $FIELD </font></td><td>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
