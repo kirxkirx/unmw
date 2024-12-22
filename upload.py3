@@ -56,9 +56,31 @@ def validate_archive_size(filesize: int) -> bool:
 
 def get_mime_type(filepath: str) -> str:
     """
-    Get MIME type of file using python-magic
+    Get MIME type of file using python-magic, handling different implementations
     """
-    return magic.Magic(mime=True).from_file(filepath)
+    try:
+        # Try python-magic implementation
+        import magic
+        try:
+            # Try using mime=True parameter
+            mime = magic.Magic(mime=True)
+            return mime.from_file(filepath)
+        except:
+            # Fall back to older python-magic API
+            mime = magic.open(magic.MAGIC_MIME_TYPE)
+            mime.load()
+            return mime.file(filepath)
+    except:
+        try:
+            # Try direct use of the magic module
+            return magic.from_file(filepath, mime=True)
+        except:
+            # Last resort: try to get MIME type without python-magic
+            import mimetypes
+            mtype, _ = mimetypes.guess_type(filepath)
+            if mtype:
+                return mtype
+            return "application/octet-stream"  # Default MIME type
 
 def validate_archive_type(filepath: str) -> Tuple[bool, str]:
     """
