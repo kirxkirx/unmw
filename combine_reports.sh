@@ -153,7 +153,9 @@ if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
    continue
   fi
 
-  grep --max-count=1 -B10000 '<BODY>' "$INPUT_DIR/index.html" > "$OUTPUT_COMBINED_HTML_NAME" && break
+  # The combined HTML page should have the same HEAD as an individual field results page, so we just copy its head
+  # and -A1 is for the floating button
+  grep --max-count=1 -B10000 '<BODY>' -A1 "$INPUT_DIR/index.html" > "$OUTPUT_COMBINED_HTML_NAME" && break
  
  done
 
