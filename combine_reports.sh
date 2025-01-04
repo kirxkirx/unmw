@@ -308,7 +308,8 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  FIELD=`grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:processing fields::g' | sed 's:<br>::g' | awk '{print $1}'` 
  NUMBER_OF_CANDIDATE_TRANSIENTS=`grep 'script' "$INPUT_DIR/index.html" | grep -c 'printCandidateNameWithAbsLink'`
  # Always include the Galactic Center field Sco6
- if [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 50 ] || [ "$FIELD" = "Sco6" ] ;then
+ #if [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 50 ] || [ "$FIELD" = "Sco6" ] ;then
+ if [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 40 ] || [ "$FIELD" = "Sco6" ] ;then
   grep --max-count=1 -A100000 'Processing fields' "$INPUT_DIR/index.html" | grep -B100000 'Processig complete' | grep -v -e 'Processing fields' -e 'Processig complete' | sed "s:src=\":src=\"$INPUT_DIR/:g" >> "$OUTPUT_COMBINED_HTML_NAME"
   INCLUDE_REPORT_IN_COMBINED_LIST="OK"
  else
