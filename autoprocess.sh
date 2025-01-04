@@ -7,6 +7,27 @@ LANGUAGE=C
 export LANGUAGE LC_ALL
 #################################
 
+# Set max system stress parameters
+#
+if [ -z "$MAX_IOWAIT_PERCENT" ];then
+ MAX_IOWAIT_PERCENT=3.0
+fi
+#
+if [ -z "$MAX_CPU_TEMP_C" ];then
+ MAX_CPU_TEMP_C=65.0
+fi
+#
+if [ -z "$MAX_SYSTEM_LOAD" ];then
+ if [ -f /proc/cpuinfo ];then
+ # Try to guess an appropriate MAX_SYSTEM_LOAD for starting a new process
+  MAX_SYSTEM_LOAD=$(cat /proc/cpuinfo | grep 'processor' | wc -l | awk '{threads=$1; print (threads/2 > 3 ? int(threads/2) : 3)}')
+ fi
+ # fallback
+ if [ -z "$MAX_SYSTEM_LOAD" ];then
+  MAX_SYSTEM_LOAD=3.0
+ fi
+fi
+# 
 
 # Normally $IMAGE_DATA_ROOT $DATA_PROCESSING_ROOT $URL_OF_DATA_PROCESSING_ROOT are 
 # exported in local_config.sh that is sourced by wrapper.sh
@@ -57,7 +78,11 @@ function set_session_key {
 }
 
 function is_system_load_low {
- awk -v target=3.00 '{
+ if [ ! -f /proc/loadavg ];then
+  # test failed - assume things are fine
+  return 0
+ fi
+ awk -v target=$MAX_SYSTEM_LOAD '{
          if ($1 < target) {
           exit 0
          } else {
@@ -84,8 +109,7 @@ function is_temperature_low {
  fi
  if [[ $TEMPERATURE =~ ^[0-9]+$ ]];then
   # The string is an integer number
-  #echo "$TEMPERATURE" |  awk -v target=50 '{
-  echo "$TEMPERATURE" |  awk -v target=65 '{
+  echo "$TEMPERATURE" |  awk -v target=$MAX_CPU_TEMP_C '{
          if ($1 < target) {
           exit 0
          } else {
@@ -113,10 +137,10 @@ function is_cpu_io_wait_low {
  if [ -z "$CPU_IOWAIT_PERCENT" ];then
   return 0
  fi
- if [[ $CPU_IOWAIT_PERCENT =~ ^[0-9]+$ ]];then
-  # The string is an integer number
-  echo "$CPU_IOWAIT_PERCENT" |  awk -v target=3 '{
-         if ($1 < target) {
+ if [[ $CPU_IOWAIT_PERCENT =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+  # The string is a floating point number 
+  echo "$CPU_IOWAIT_PERCENT" |  awk -v max_iowait=$MAX_IOWAIT_PERCENT '{
+         if ($1 < max_iowait) {
           exit 0
          } else {
           exit 1
