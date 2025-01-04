@@ -239,7 +239,7 @@ function wait_for_our_turn_to_start_processing {
    # system load changes on 1min timescale, so don't re-check too often as it may take time for the load to rise
    DELAY=$[$DELAY*2]
    DELAY_PLUS_RANDOM=$[$DELAY+$(( RANDOM % 120 + 1 ))]
-   echo "Sleeping for $DELAY_PLUS_RANDOM seconds"
+   echo "Sleeping for $DELAY_PLUS_RANDOM seconds (WAIT_ITERATION=$WAIT_ITERATION)"
    sleep $DELAY_PLUS_RANDOM
   fi 
  done
@@ -638,7 +638,7 @@ sudo chown -R $USER $PWD"
 fi
 #
 
-echo "Making a copy of "$(readlink -f "$VAST_REFERENCE_COPY")" to $VAST_WORKING_DIR_FILENAME" 
+echo "Making a copy of $(readlink -f "$VAST_REFERENCE_COPY") to $VAST_WORKING_DIR_FILENAME"
 # use rsync instead of cp to ignore large and unneeded files
 # '/' tells rsync we want the content of the directory, not the directory itself
 #rsync -avz --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' $(readlink -f "$VAST_REFERENCE_COPY")/ "$VAST_WORKING_DIR_FILENAME"
@@ -852,6 +852,6 @@ if [ "$WORKENDEMAIL" = "on" ];then
  fi
 fi
 
-echo "###########################" $(date +"%Y-%m-%d %H:%M:%S %Z") "###########################
+echo "########################### $(date +'%Y-%m-%d %H:%M:%S %Z') ###########################
 $MSG" >> autoprocess.txt
 
