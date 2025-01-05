@@ -20,7 +20,7 @@ fi
 if [ -z "$MAX_SYSTEM_LOAD" ];then
  if [ -f /proc/cpuinfo ];then
  # Try to guess an appropriate MAX_SYSTEM_LOAD for starting a new process
-  MAX_SYSTEM_LOAD=$(cat /proc/cpuinfo | grep 'processor' | wc -l | awk '{threads=$1; print (threads/2 > 3 ? int(threads/2) : 3)}')
+  MAX_SYSTEM_LOAD=$(cat /proc/cpuinfo | grep -c 'processor' | awk '{threads=$1; print (threads/2 > 3 ? int(threads/2) : 3)}')
  fi
  # fallback
  if [ -z "$MAX_SYSTEM_LOAD" ];then
@@ -39,7 +39,8 @@ if [ -z "$IMAGE_DATA_ROOT" ] || [ -z "$DATA_PROCESSING_ROOT" ] || [ -z "$URL_OF_
  DATA_PROCESSING_ROOT="$IMAGE_DATA_ROOT"
  URL_OF_DATA_PROCESSING_ROOT="http://vast.sai.msu.ru/unmw/uploads"
 
- if [ $(hostname) = "scan" ];then
+ # Normally, all this should be sourced from local_config.sh
+ if [ "$(hostname)" = "scan" ];then
   IMAGE_DATA_ROOT="/home/NMW_web_upload"
   DATA_PROCESSING_ROOT="/home/NMW_web_upload"
   URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
@@ -222,23 +223,12 @@ function wait_for_our_turn_to_start_processing {
  for WAIT_ITERATION in $(seq 1 $MAX_WAIT_ITERATIONS) ; do
   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many && is_cpu_io_wait_low
   if [ $? -eq 0 ]; then
-   # seems like we can't afford that extra minute
-   ## it may take another minute for the load and temperature to rise if another copy of this script is starting at the same time
-   #echo "The load is good but let's wait for another minute and re-check"
-   #A_MINUTE_PLUS_RANDOM=$[60+$(( RANDOM % 60 + 1 ))]
-   #sleep $A_MINUTE_PLUS_RANDOM
-   #is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many && is_cpu_io_wait_low
-   #if [ $? -eq 0 ]; then
-    return 0
-   #else
-   # echo "The load is high again"
-   # sleep $DELAY
-   #fi
+   return 0
   else
    # Calculate current delay
    # system load changes on 1min timescale, so don't re-check too often as it may take time for the load to rise
-   DELAY=$[$DELAY*2]
-   DELAY_PLUS_RANDOM=$[$DELAY+$(( RANDOM % 120 + 1 ))]
+   DELAY=$((DELAY * 2))
+   DELAY_PLUS_RANDOM=$((DELAY + (RANDOM % 120 + 1)))
    echo "Sleeping for $DELAY_PLUS_RANDOM seconds (WAIT_ITERATION=$WAIT_ITERATION)"
    sleep $DELAY_PLUS_RANDOM
   fi 
@@ -440,9 +430,9 @@ if [ $? -eq 0 ];then
  TEST_RUN=1
 fi
 #
-VAST_WORKING_DIR_FILENAME="vast_$DATASET_NAME"_"$SESSION_KEY"
-VAST_RESULTS_DIR_FILENAME="results_"$(date +"%Y%m%d_%H%M%S")_"$DATASET_NAME"_"$SESSION_KEY"
-LOCAL_PATH_TO_IMAGES="img_$DATASET_NAME"_"$SESSION_KEY"
+VAST_WORKING_DIR_FILENAME="vast_${DATASET_NAME}_${SESSION_KEY}"
+VAST_RESULTS_DIR_FILENAME="results_$(date +'%Y%m%d_%H%M%S')_${DATASET_NAME}_$SESSION_KEY"
+LOCAL_PATH_TO_IMAGES="img_${DATASET_NAME}_${SESSION_KEY}"
 
 
 if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
@@ -507,7 +497,7 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  ABSOLUTE_PATH_TO_IMAGES="$IMAGE_DATA_ROOT/$LOCAL_PATH_TO_IMAGES"
  echo "Setting archive directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
 else
- INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE=`basename $INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE`
+ INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE=$(basename $INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE)
  ABSOLUTE_PATH_TO_IMAGES=$(readlink -f "$INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE")
  echo "Setting input directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
@@ -646,12 +636,12 @@ echo "Making a copy of $(readlink -f "$VAST_REFERENCE_COPY") to $VAST_WORKING_DI
 # --whole-file skips file comparison and increases speed for local transfers
 # --omit-dir-times skipping directory timestamp updates can reduce metadata write
 # --no-times avoid copying file modification times
-rsync -av --whole-file --no-times --omit-dir-times --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' $(readlink -f "$VAST_REFERENCE_COPY")/ "$VAST_WORKING_DIR_FILENAME"
+rsync -av --whole-file --no-times --omit-dir-times --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' "$(readlink -f "$VAST_REFERENCE_COPY")/" "$VAST_WORKING_DIR_FILENAME"
 cd "$VAST_WORKING_DIR_FILENAME" || exit 1
 # create symlinks
-ln -s $(readlink -f "$VAST_REFERENCE_COPY")/astorb.dat
+ln -s "$(readlink -f "$VAST_REFERENCE_COPY")/astorb.dat" astorb.dat
 cd lib/ || exit 1
-ln -s $(readlink -f "$VAST_REFERENCE_COPY")/lib/catalogs
+ln -s "$(readlink -f "$VAST_REFERENCE_COPY")/lib/catalogs" catalogs
 cd .. || exit 1
 #
 
@@ -663,18 +653,11 @@ if [ -d transient_report ];then
  echo "Removing transient_report"
  rm -rf transient_report
 fi
-ln -s ../"$VAST_RESULTS_DIR_FILENAME" transient_report
-
-# Moved up
-## We need to create results_url.txt ASAP as upload.py is waiting for it
-#if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
-# # Place the redirect link
-# echo "$URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/" > "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/results_url.txt"
-#fi
+ln -s "../$VAST_RESULTS_DIR_FILENAME" transient_report
 
 # Report that we are ready to go
 echo "Reporting the start of work" 
-HOST=`hostname`
+HOST=$(hostname)
 HOST="@$HOST"
 NAME="$USER$HOST"
 DATETIME=$(LANG=C date --utc)
