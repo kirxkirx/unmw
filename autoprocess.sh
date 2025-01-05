@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# You may check the scripts with
+# shellcheck -e SC2086,SC2181,SC2002,SC2162,SC2012,SC2009,SC2126,SC1091 autoprocess.sh combine_reports.sh
+
 #################################
 # Set the safe locale that should be available on any POSIX system
 LC_ALL=C
@@ -8,6 +11,7 @@ export LANGUAGE LC_ALL
 #################################
 
 # Set max system stress parameters
+# (normally they should be set in local_config.sh)
 #
 if [ -z "$MAX_IOWAIT_PERCENT" ];then
  MAX_IOWAIT_PERCENT=3.0
