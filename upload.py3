@@ -23,7 +23,6 @@ try:
 except ImportError:
     HAVE_RARFILE = False
 import re
-#from typing import List
 from typing import Tuple
 
 
@@ -177,7 +176,7 @@ def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool
             os.makedirs(dirname, mode=0o750)  # Restrictive permissions
         except PermissionError as e:
             user_info = pwd.getpwuid(os.getuid())
-            return False, f"Permission error creating directory. Running as {user_info.pw_name}", ""
+            return False, f"Permission error creating directory. Running as {user_info.pw_name}. Exception: {e}", ""
             
         # Save file with sanitized name
         filename = os.path.basename(fileitem.filename)[:256]
@@ -308,5 +307,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
