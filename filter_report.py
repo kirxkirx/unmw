@@ -6,17 +6,18 @@ from os.path import splitext
 from bs4 import BeautifulSoup
 
 # CONSTANTS
-#MAX_MAG = 40
-#AST_MAG_DIF_PREDICTED_OBSERVED = 2
-#AST_1_RA_DIST_PREDICTED_OBSERVED_ARCSEC = 180
-#AST_2_RA_DIST_PREDICTED_OBSERVED_ARCSEC = 180
+# MAX_MAG = 40
+# AST_MAG_DIF_PREDICTED_OBSERVED = 2
+# AST_1_RA_DIST_PREDICTED_OBSERVED_ARCSEC = 180
+# AST_2_RA_DIST_PREDICTED_OBSERVED_ARCSEC = 180
 VAR_MAX_DIST_ARCSEC = 30
 
 
 def is_asteroid(pre_el_text):
     try:
         if 'The object was found in astcheck' in pre_el_text:
-            # Do not try to parse the asteroid string to get distance as it may take very different shapes
+            # Do not try to parse the asteroid string to get distance as it may
+            # take very different shapes
             return True
         else:
             return False
@@ -48,7 +49,9 @@ def is_variable_star(pre_el_text, star_type):
 
 
 def is_ast_or_vs(pre_el_text):
-    return is_asteroid(pre_el_text) or is_variable_star(pre_el_text, "VSX") or is_variable_star(pre_el_text, "ASASSN-V")
+    return (is_asteroid(pre_el_text) or 
+            is_variable_star(pre_el_text, "VSX") or 
+            is_variable_star(pre_el_text, "ASASSN-V"))
 
 
 def filter_report(path_to_report):
@@ -67,7 +70,8 @@ def filter_report(path_to_report):
     
         ast_or_vs_s = []
         for transient in transients:
-            ast_or_vs_s.append(is_ast_or_vs(BeautifulSoup(transient, features="lxml").pre.text))
+            soup = BeautifulSoup(transient, features="lxml")
+            ast_or_vs_s.append(is_ast_or_vs(soup.pre.text))
     
         not_ast_and_not_vs = []
         for transient, ast_or_vs_ in zip(transients, ast_or_vs_s):
@@ -77,19 +81,23 @@ def filter_report(path_to_report):
         if len(not_ast_and_not_vs) == 0:
             output = head + '\nSeems like every transient is the known object.\n</body></html>'
         else:
-            output = head + '<HR>'.join(not_ast_and_not_vs) + '\n<HR></body></html>'
+            output = (head + '<HR>'.join(not_ast_and_not_vs) + 
+                     '\n<HR></body></html>')
     
-        with open(splitext(path_to_report)[0] + '_filtered.html', 'w') as f:
+        output_path = splitext(path_to_report)[0] + '_filtered.html'
+        with open(output_path, 'w') as f:
             f.write(output)
     except Exception as e:
         print("Error in filter_report: {}".format(e))
 
         try:
-            content = '<html><body>An error occurred while filtering the `{}` file.</body></html>'.format(sys.argv[1])
-            with open(splitext(sys.argv[1])[0] + '_filtered.html', 'w') as f:
-                f.write(content)
+            error_msg = ('<html><body>An error occurred while filtering the `{}` '
+                        'file.</body></html>'.format(sys.argv[1]))
+            output_path = splitext(sys.argv[1])[0] + '_filtered.html'
+            with open(output_path, 'w') as f:
+                f.write(error_msg)
         except Exception as e:
-            print('An error occurred while writing the error message to the filtered report: {}'.format(e))
+            print('An error occurred while writing the error message: {}'.format(e))
             exit(1)
 
 
