@@ -50,9 +50,7 @@ def is_variable_star(pre_el_text, star_type):
 
 def is_ast_or_vs(pre_el_text):
     return (
-        is_asteroid(pre_el_text)
-        or is_variable_star(pre_el_text, "VSX")
-        or is_variable_star(pre_el_text, "ASASSN-V")
+        is_asteroid(pre_el_text) or is_variable_star(pre_el_text, "VSX") or is_variable_star(pre_el_text, "ASASSN-V")
     )
 
 
@@ -84,9 +82,7 @@ def filter_report(path_to_report):
             output = head + '\nSeems like every transient is the known object.\n</body></html>'
         else:
             output = (
-                head
-                + '<HR>'.join(not_ast_and_not_vs)
-                + '\n<HR></body></html>'
+                head + '<HR>'.join(not_ast_and_not_vs) + '\n<HR></body></html>'
             )
 
         output_path = splitext(path_to_report)[0] + '_filtered.html'
