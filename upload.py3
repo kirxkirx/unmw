@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+# flake8: noqa: W293,W291,E501,E128
+
 import cgi, os
 import cgitb
 import random
@@ -238,7 +241,7 @@ def main():
     upload_dir = 'uploads'
     try:
         if not os.path.exists(upload_dir):
-            print(f"<html><body>Upload directory missing</body></html>")
+            print("<html><body>Upload directory missing</body></html>")
             sys.exit(1)
             
         st = os.statvfs(os.path.realpath(upload_dir))
