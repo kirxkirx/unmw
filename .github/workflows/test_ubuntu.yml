@@ -1,0 +1,18 @@
+name: Ubuntu build and test
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  ubuntuLatestTest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get install shellcheck
+      - name: Shellcheck VaST BASH scripts
+        run: |
+          for i in *sh; do
+            shellcheck --severity=error $i
+          done
