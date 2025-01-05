@@ -3,6 +3,7 @@
 # You probably want to add this script to /etc/crontab
 #*/8     *       *       *       *       www-data        /dataX/cgi-bin/unmw/combine_reports.sh &> /dev/null
 
+# shellcheck disable=SC2086,SC2181,SC2002,SC2162,SC2012,SC2009,SC2126,SC1091  
 
 ## The old way to check if multiple copies of this script are running
 ##### This does not work for all systems! On some N_RUN is 3 #####
