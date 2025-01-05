@@ -80,13 +80,13 @@ def filter_report(path_to_report):
                 not_ast_and_not_vs.append(transient)
     
 	if len(not_ast_and_not_vs) == 0:
-    		output = head + '\nSeems like every transient is the known object.\n</body></html>'
+	    output = head + '\nSeems like every transient is the known object.\n</body></html>'
 	else:
-    		output = (
-        		head
-        		+ '<HR>'.join(not_ast_and_not_vs)
-        		+ '\n<HR></body></html>'
-    		)
+	    output = (
+	                head
+                        + '<HR>'.join(not_ast_and_not_vs)
+                        + '\n<HR></body></html>'
+            )
 	
         output_path = splitext(path_to_report)[0] + '_filtered.html'
         with open(output_path, 'w') as f:
