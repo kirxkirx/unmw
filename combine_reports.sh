@@ -62,7 +62,7 @@ fi
 
 # create a lockfile in the DATA_PROCESSING_ROOT
 LOCKFILE="combine_reports.lock"
-if [ -e "${LOCKFILE}" ] && kill -0 $(cat "${LOCKFILE}"); then
+if [ -e "${LOCKFILE}" ] && kill -0 "$(cat "${LOCKFILE}")"; then
  echo "Already running."
  exit
 fi
@@ -184,28 +184,49 @@ if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
  HOST=$(hostname)
  HOST="@$HOST"
  NAME="$USER$HOST"
- DATETIME=$(LANG=C date --utc)
+ #DATETIME=$(LANG=C date --utc)
  SCRIPTNAME=$(basename $0)
  # Yes, I'm being silly
  # Generate a wish-you-well string
- WISHWELLSTRING="Happy observing!"
- MONTECARLO=$[ $RANDOM % 10 ]
- if [ $MONTECARLO -gt 8 ];then
+ MONTECARLO=$(( RANDOM % 20 ))
+ if [ $MONTECARLO -gt 18 ]; then
   WISHWELLSTRING="Have fun observing!"
- elif [ $MONTECARLO -gt 7 ];then
+ elif [ $MONTECARLO -gt 17 ]; then
   WISHWELLSTRING="Watch the Skies!"
- elif [ $MONTECARLO -gt 6 ];then
-  WISHWELLSTRING="Good luck with the observations!"
- elif [ $MONTECARLO -gt 5 ];then
+ elif [ $MONTECARLO -gt 16 ]; then
+  WISHWELLSTRING="Happy observing!"
+ elif [ $MONTECARLO -gt 15 ]; then
   WISHWELLSTRING="Clear Skies!"
- elif [ $MONTECARLO -gt 4 ];then
+ elif [ $MONTECARLO -gt 14 ]; then
   WISHWELLSTRING="Enjoy observing!"
- elif [ $MONTECARLO -gt 3 ];then
+ elif [ $MONTECARLO -gt 13 ]; then
   WISHWELLSTRING="Have fun!"
- elif [ $MONTECARLO -gt 2 ];then
+ elif [ $MONTECARLO -gt 12 ]; then
   WISHWELLSTRING="Good luck searching for a Nova!"
- elif [ $MONTECARLO -gt 1 ];then
+ elif [ $MONTECARLO -gt 11 ]; then
+  WISHWELLSTRING="Nova or never!"
+ elif [ $MONTECARLO -gt 10 ]; then
   WISHWELLSTRING="Don't miss a Nova!"
+ elif [ $MONTECARLO -gt 9 ]; then
+  WISHWELLSTRING="Catch those cosmic fireworks!"
+ elif [ $MONTECARLO -gt 8 ]; then
+  WISHWELLSTRING="The stars are calling!"
+ elif [ $MONTECARLO -gt 7 ]; then
+  WISHWELLSTRING="Happy hunting in the Milky Way!"
+ elif [ $MONTECARLO -gt 6 ]; then
+  WISHWELLSTRING="May your nights be filled with novae!"
+ elif [ $MONTECARLO -gt 5 ]; then
+  WISHWELLSTRING="Onward to transient treasure!"
+ elif [ $MONTECARLO -gt 4 ]; then
+  WISHWELLSTRING="Keep your eyes on the skies!"
+ elif [ $MONTECARLO -gt 3 ]; then
+  WISHWELLSTRING="Nova seekers unite!"
+ elif [ $MONTECARLO -gt 2 ]; then
+  WISHWELLSTRING="May the novae be with you!"
+ elif [ $MONTECARLO -gt 1 ]; then
+  WISHWELLSTRING="Good luck with the hunt!"
+ else
+  WISHWELLSTRING="Watch for the next cosmic surprise!"
  fi
  #
  MSG="Creating a new combined list of candidates at 
@@ -223,7 +244,7 @@ $URL_OF_DATA_PROCESSING_ROOT/autoprocess.txt
 $WISHWELLSTRING
 $SCRIPTNAME $HOST
 "
- if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
+ if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=[NMW combined list] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
 fi
@@ -275,13 +296,13 @@ for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
    HOST=$(hostname)
    HOST="@$HOST"
    NAME="$USER$HOST"
-   DATETIME=$(LANG=C date --utc)
+   #DATETIME=$(LANG=C date --utc)
    SCRIPTNAME=$(basename $0)
    MSG="The combined list of candidates at $URL_OF_DATA_PROCESSING_ROOT/$OUTPUT_COMBINED_HTML_NAME
 is too large -- $INPUT_HTML_FILE_SIZE_MB MB. This is very-very wrong!
 
 Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/autoprocess.txt"
-   if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+   if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
     curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR: large HTML file] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
    fi
    rm -f "${LOCKFILE}"
@@ -308,7 +329,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
   HOST=$(hostname)
   HOST="@$HOST"
   NAME="$USER$HOST"
-  DATETIME=$(LANG=C date --utc)
+  #DATETIME=$(LANG=C date --utc)
   SCRIPTNAME=$(basename $0)
   MSG="Too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
   INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"
@@ -317,9 +338,9 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  
  # Summary file
  # remove .000 seconds and UTC
- LAST_IMAGE_DATE=`grep 'Last  image' "$INPUT_DIR/index.html" | head -n1 | awk '{print $4" "$5}' | sed 's/\.000/ /g' | sed 's/UTC/ /g'`
+ LAST_IMAGE_DATE=$(grep 'Last  image' "$INPUT_DIR/index.html" | head -n1 | awk '{print $4" "$5}' | sed 's/\.000/ /g' | sed 's/UTC/ /g')
  # sed is for the case Record 39: "TIMESYS = 'UTC     '           / Default time system" status=0 to avoid 'UTC
- TIMESYS_OF_LAST_IMAGE_DATE=`grep 'time system' "$INPUT_DIR/index.html" | head -n1 | awk '{print $5}' | sed "s:'::g"`
+ TIMESYS_OF_LAST_IMAGE_DATE=$(grep 'time system' "$INPUT_DIR/index.html" | head -n1 | awk '{print $5}' | sed "s:'::g")
  LAST_IMAGE_DATE="$LAST_IMAGE_DATE $TIMESYS_OF_LAST_IMAGE_DATE"
  IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=$(grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | awk 'BEGIN{max=-1} {if($7+0 > max) max=$7} END{if (max == -1) print "ERROR"; else print max}')
  MAG_LIMIT=$(grep 'All-image limiting magnitude estimate' "$INPUT_DIR/index.html" | tail -n1 | awk '{print $5}')
