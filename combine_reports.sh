@@ -7,7 +7,7 @@
 ## The old way to check if multiple copies of this script are running
 ##### This does not work for all systems! On some N_RUN is 3 #####
 # Check that no other instances of the script are running
-N_RUN=`ps ax | grep combine_reports.sh | grep -v grep | grep bash | grep -c combine_reports.sh`
+N_RUN=$(ps ax | grep combine_reports.sh | grep -v grep | grep bash | grep -c combine_reports.sh)
 # This is conter-intuitive but the use of the construct N_RUN=`` will create a second copy of "bash ./combine_reports.sh" in the ps output
 # So one running copy of the script corresponds to N_RUN=2
 #if [ $N_RUN -gt 2 ];then
@@ -30,7 +30,7 @@ if [ -s local_config.sh ];then
 fi
 #####
 # Silly fix for one local problem
-if [ "$HOSTNAME" == "ariel.astro.illinois.edu" ]  && [ "$USER" = "kirill" ] ;then
+if [ "$HOSTNAME" == "ariel.astro.illinois.edu" ] && [ "$USER" = "kirill" ] ;then
  source /home/kirill/.bashrc
 fi
 #####
@@ -40,7 +40,7 @@ if [ -d "uploads" ];then
 fi
 # DATA_PROCESSING_ROOT may be exported in local_config.sh
 # if it is set properly - go there
-if [ ! -z "$DATA_PROCESSING_ROOT" ];then
+if [ -n "$DATA_PROCESSING_ROOT" ];then
  if [ -d "$DATA_PROCESSING_ROOT" ];then
   cd "$DATA_PROCESSING_ROOT" || exit 1
  fi
@@ -62,31 +62,30 @@ fi
 
 # create a lockfile in the DATA_PROCESSING_ROOT
 LOCKFILE="combine_reports.lock"
-if [ -e "${LOCKFILE}" ] && kill -0 `cat "${LOCKFILE}"`; then
+if [ -e "${LOCKFILE}" ] && kill -0 $(cat "${LOCKFILE}"); then
  echo "Already running."
  exit
 fi
 # Make sure the lockfile is removed when we exit and when we receive a signal
-trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
+#trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
+trap 'rm -f "${LOCKFILE}"; exit' INT TERM EXIT
 echo $$ > "${LOCKFILE}"
 
 # loop through the cameras
 for CAMERA in Stas STL-11000M TICA_TESS ;do
 
-#echo "DEBUG CAMERA=$CAMERA"
-
-DAY=`date +%Y%m%d`
-HOUR=`date +%H`
+DAY=$(date +%Y%m%d)
+HOUR=$(date +%H)
 EVENING_OR_MORNING="evening"
 if [ $HOUR -lt 17 ];then
  EVENING_OR_MORNING="morning"
 fi
-OUTPUT_COMBINED_HTML_NAME=$DAY"_"$EVENING_OR_MORNING"_"$CAMERA".html"
-OUTPUT_FILTERED_HTML_NAME=$DAY"_"$EVENING_OR_MORNING"_"$CAMERA"_filtered.html"
-OUTPUT_PROCESSING_SUMMARY_HTML_NAME=$DAY"_"$EVENING_OR_MORNING"_summary.html"
+OUTPUT_COMBINED_HTML_NAME="${DAY}_${EVENING_OR_MORNING}_${CAMERA}.html"
+OUTPUT_FILTERED_HTML_NAME="${DAY}_${EVENING_OR_MORNING}_${CAMERA}_filtered.html"
+OUTPUT_PROCESSING_SUMMARY_HTML_NAME="${DAY}_${EVENING_OR_MORNING}_summary.html"
 
 ######################################################### 12 hours
-INPUT_LIST_OF_RESULT_DIRS=$(find -maxdepth 1 -type d -mmin -720 -name "results*$CAMERA*")
+INPUT_LIST_OF_RESULT_DIRS=$(find . -maxdepth 1 -type d -mmin -720 -name "results*$CAMERA*")
 
 if [ -z "$INPUT_LIST_OF_RESULT_DIRS" ];then
  # nothing to process, continue to the next camera
@@ -172,21 +171,21 @@ if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
    fi
  fi
  # Add this summary file to the list
- OUTPUT_COMBINED_HTML_NAME_FOR_THE_TABLE=`basename $OUTPUT_COMBINED_HTML_NAME .html`
+ OUTPUT_COMBINED_HTML_NAME_FOR_THE_TABLE=$(basename $OUTPUT_COMBINED_HTML_NAME .html)
  OUTPUT_COMBINED_HTML_NAME_FOR_THE_TABLE="${OUTPUT_COMBINED_HTML_NAME_FOR_THE_TABLE//_/ }"
  echo "<tr><td><a href='$OUTPUT_COMBINED_HTML_NAME' target='_blank'>$OUTPUT_COMBINED_HTML_NAME_FOR_THE_TABLE</a></td></tr>" >> index.html
  #
- OUTPUT_FILTERED_HTML_NAME_FOR_THE_TABLE=`basename $OUTPUT_FILTERED_HTML_NAME .html`
+ OUTPUT_FILTERED_HTML_NAME_FOR_THE_TABLE=$(basename $OUTPUT_FILTERED_HTML_NAME .html)
  OUTPUT_FILTERED_HTML_NAME_FOR_THE_TABLE="${OUTPUT_FILTERED_HTML_NAME_FOR_THE_TABLE//_/ }"
  echo "<tr><td><a href='$OUTPUT_FILTERED_HTML_NAME' target='_blank'>$OUTPUT_FILTERED_HTML_NAME_FOR_THE_TABLE</a></td></tr>" >> index.html
  ################
   
  # report that we are writing a new file 
- HOST=`hostname`
+ HOST=$(hostname)
  HOST="@$HOST"
  NAME="$USER$HOST"
- DATETIME=`LANG=C date --utc`                                                                                 
- SCRIPTNAME=`basename $0`
+ DATETIME=$(LANG=C date --utc)
+ SCRIPTNAME=$(basename $0)
  # Yes, I'm being silly
  # Generate a wish-you-well string
  WISHWELLSTRING="Happy observing!"
@@ -224,9 +223,6 @@ $URL_OF_DATA_PROCESSING_ROOT/autoprocess.txt
 $WISHWELLSTRING
 $SCRIPTNAME $HOST
 "
-
-#"(TEST!) The modified observing plan is at $URL_OF_DATA_PROCESSING_ROOT/plan.txt
-#The original observing plan is at $URL_OF_DATA_PROCESSING_ROOT/plan_in.txt"
  if [ ! -z "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=[NMW combined list] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
@@ -247,22 +243,15 @@ if [ ! -f "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME" ];then
 <tr><th>Camera</th><th>Obs.Time(UTC)</th><th>Field</th><th>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</th><th>Status</th><th>Log</th><th>Pointing.Offset(&deg;)</th><th>mag.lim.</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
 
  # Add this summary file to the list
- SUMMARY_FILE_NAME_FOR_THE_TABLE=`basename $OUTPUT_PROCESSING_SUMMARY_HTML_NAME .html`
+ SUMMARY_FILE_NAME_FOR_THE_TABLE=$(basename $OUTPUT_PROCESSING_SUMMARY_HTML_NAME .html)
  SUMMARY_FILE_NAME_FOR_THE_TABLE="${SUMMARY_FILE_NAME_FOR_THE_TABLE//_/ }"
  echo "<tr><td><font color='teal'><a href='$OUTPUT_PROCESSING_SUMMARY_HTML_NAME' target='_blank'>$SUMMARY_FILE_NAME_FOR_THE_TABLE</a></font></td></tr>" >> index.html
 
- # Also reset the observing plan if this is evening
- if [ "$EVENING_OR_MORNING" = "evening" ];then
-  cp plan_in.txt plan.txt
- fi
- #
 fi
 
 
 # make body
 for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
-
-# echo "DEBUG001 $INPUT_DIR"
 
  if [ ! -d "$INPUT_DIR" ];then
   echo "ERROR: there is no directory $INPUT_DIR"
@@ -277,16 +266,17 @@ for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
  # check file size before doing any grep
  command -v stat &>/dev/null
  if [ $? -eq 0 ];then
-  INPUT_HTML_FILE_SIZE_BYTES=`stat --format="%s" "$INPUT_DIR/index.html"`
-  INPUT_HTML_FILE_SIZE_MB=`echo "$INPUT_HTML_FILE_SIZE_BYTES" | awk '{printf "%.0f",$1/(1024*1024)}'`
-  TEST=`echo "$INPUT_HTML_FILE_SIZE_MB>100" | bc -ql`
-  if [ $TEST -eq 1 ];then
+  INPUT_HTML_FILE_SIZE_BYTES=$(stat --format="%s" "$INPUT_DIR/index.html")
+  INPUT_HTML_FILE_SIZE_MB=$(echo "$INPUT_HTML_FILE_SIZE_BYTES" | awk '{printf "%.0f",$1/(1024*1024)}')
+  #TEST=$(echo "$INPUT_HTML_FILE_SIZE_MB>100" | bc -ql)
+  #if [ $TEST -eq 1 ];then
+  if echo "$INPUT_HTML_FILE_SIZE_MB" | awk '{ exit ($1 > 100 ? 0 : 1) }'; then
    # too large file error
-   HOST=`hostname`
+   HOST=$(hostname)
    HOST="@$HOST"
    NAME="$USER$HOST"
-   DATETIME=`LANG=C date --utc`                                                                                 
-   SCRIPTNAME=`basename $0`
+   DATETIME=$(LANG=C date --utc)
+   SCRIPTNAME=$(basename $0)
    MSG="The combined list of candidates at $URL_OF_DATA_PROCESSING_ROOT/$OUTPUT_COMBINED_HTML_NAME
 is too large -- $INPUT_HTML_FILE_SIZE_MB MB. This is very-very wrong!
 
@@ -305,8 +295,8 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
   continue
  fi
 
- FIELD=`grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:processing fields::g' | sed 's:<br>::g' | awk '{print $1}'` 
- NUMBER_OF_CANDIDATE_TRANSIENTS=`grep 'script' "$INPUT_DIR/index.html" | grep -c 'printCandidateNameWithAbsLink'`
+ FIELD=$(grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:processing fields::g' | sed 's:<br>::g' | awk '{print $1}')
+ NUMBER_OF_CANDIDATE_TRANSIENTS=$(grep 'script' "$INPUT_DIR/index.html" | grep -c 'printCandidateNameWithAbsLink')
  # Always include the Galactic Center field Sco6
  #if [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 50 ] || [ "$FIELD" = "Sco6" ] ;then
  if [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 40 ] || [ "$FIELD" = "Sco6" ] ;then
@@ -315,36 +305,32 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  else
   echo "ERROR: too many candidates in $INPUT_DIR/index.html"
   # too large file error
-  HOST=`hostname`
+  HOST=$(hostname)
   HOST="@$HOST"
   NAME="$USER$HOST"
-  DATETIME=`LANG=C date --utc`                                                                                 
-  SCRIPTNAME=`basename $0`
+  DATETIME=$(LANG=C date --utc)
+  SCRIPTNAME=$(basename $0)
   MSG="Too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
   INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"
  fi
  echo "$INPUT_DIR/index.html" >> combine_reports.log
  
  # Summary file
- # FIELD moved up to give special treatment to Sco6
- #FIELD=`grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:processing fields::g' | sed 's:<br>::g'` 
- #LAST_IMAGE_DATE=`grep 'Last  image' "$INPUT_DIR/index.html" | head -n1 | awk '{print $4" "$5}'`
  # remove .000 seconds and UTC
  LAST_IMAGE_DATE=`grep 'Last  image' "$INPUT_DIR/index.html" | head -n1 | awk '{print $4" "$5}' | sed 's/\.000/ /g' | sed 's/UTC/ /g'`
  # sed is for the case Record 39: "TIMESYS = 'UTC     '           / Default time system" status=0 to avoid 'UTC
  TIMESYS_OF_LAST_IMAGE_DATE=`grep 'time system' "$INPUT_DIR/index.html" | head -n1 | awk '{print $5}' | sed "s:'::g"`
  LAST_IMAGE_DATE="$LAST_IMAGE_DATE $TIMESYS_OF_LAST_IMAGE_DATE"
- #IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=$(grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | awk '{if($7+0 > max) max=$7} END{print max}')
  IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=$(grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | awk 'BEGIN{max=-1} {if($7+0 > max) max=$7} END{if (max == -1) print "ERROR"; else print max}')
- MAG_LIMIT=`grep 'All-image limiting magnitude estimate' "$INPUT_DIR/index.html" | tail -n1 | awk '{print $5}'`
+ MAG_LIMIT=$(grep 'All-image limiting magnitude estimate' "$INPUT_DIR/index.html" | tail -n1 | awk '{print $5}')
  # remove "UTC" as we have it in the table header
  echo -n "<tr><td>$CAMERA</td><td>${LAST_IMAGE_DATE/ UTC/}</td><td><font color='teal'> $FIELD </font></td><td>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  if [ "$INCLUDE_REPORT_IN_COMBINED_LIST" != "OK" ];then
-  echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE<td></td><td>$MAG_LIMIT</td><td>too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) to include in the combined list ("`basename $0`")</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+  echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE<td></td><td>$MAG_LIMIT</td><td>too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) to include in the combined list ($(basename $0))</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  else
   grep --quiet 'ERROR' "$INPUT_DIR/index.html" | grep 'stuck camera'
   if [ $? -eq 0 ];then
-   FIELD=`grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:<br>::g' | awk '{print $1}'`
+   FIELD=$(grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:<br>::g' | awk '{print $1}')
    echo "<td><font color='#FF0033'>CAMERA STUCK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
   else
    ### Check for all other errors
@@ -355,23 +341,6 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
    else
     WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | tail -n1)
     echo "<td><font color='green'>OK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$WARNING_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
-    ####
-    # Re-create filtered list of candidates (no asteroids, no known variables)
-    #"$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME"
-    ####
-    # Remove this field from the observing plan
-    export N_FIELD_FOUND_IN_PLAN=0 
-    command -v dos2unix &>/dev/null && command -v unix2dos &>/dev/null
-    if [ $? -eq 0 ];then
-     cat plan.txt | dos2unix | dos2unix | while read STR ;do 
-      if [ $N_FIELD_FOUND_IN_PLAN -eq 0 ];then 
-       echo "$STR" | grep --quiet -e "$FIELD"$'\n' -e "$FIELD " && export N_FIELD_FOUND_IN_PLAN=1 && continue 
-      fi 
-      echo $STR 
-     done > plan.tmp
-     cat plan.tmp | unix2dos | unix2dos > plan.txt
-     rm -f plan.tmp
-    fi # if [ $? -eq 0 ];then
     ####
    fi # grep --quiet 'ERROR' "$INPUT_DIR/index.html"
   fi # 'camera is stuck'
