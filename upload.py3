@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-import cgi, os
+import cgi
+import os
 import cgitb
 import random
 import string
