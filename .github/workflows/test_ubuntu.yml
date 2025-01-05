@@ -16,3 +16,5 @@ jobs:
           for i in *sh; do
             shellcheck --severity=error $i
           done
+      - name: Run Flake8 Python linter
+        run: flake8 filter_report.py

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# flake8: noqa: W293,W291,E501,E128
+
 import sys
 from os.path import splitext
 
@@ -49,8 +51,8 @@ def is_variable_star(pre_el_text, star_type):
 
 
 def is_ast_or_vs(pre_el_text):
-    return (is_asteroid(pre_el_text) or 
-            is_variable_star(pre_el_text, "VSX") or 
+    return (is_asteroid(pre_el_text) or
+            is_variable_star(pre_el_text, "VSX") or
             is_variable_star(pre_el_text, "ASASSN-V"))
 
 
