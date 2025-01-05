@@ -270,8 +270,9 @@ def main():
         print(f"<html><body>{message}</body></html>")
         sys.exit(1)
 
-    # Handle email notifications
+    # Run processing
     if dirname:
+        # Handle email notifications
         if form.getvalue('workstartemail'):
             os.system(f'touch {dirname}workstartemail')
         if form.getvalue('workendemail'):
