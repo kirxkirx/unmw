@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-# flake8: noqa: W293,W291,E501,E128
-
 import cgi, os
 import cgitb
 import random
@@ -24,7 +22,8 @@ try:
 except ImportError:
     HAVE_RARFILE = False
 import re
-from typing import List, Tuple
+from typing import List
+from typing import Tuple
 
 # Constants for file validation
 MIN_FILE_SIZE = 2 * 1024 * 1024  # 2MB
@@ -63,7 +62,7 @@ def get_mime_type(filepath: str) -> str:
     """
     try:
         # Try python-magic implementation
-        import magic
+        #import magic
         try:
             # Try using mime=True parameter
             mime = magic.Magic(mime=True)

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-# flake8: noqa: W293,W291,E501,E128
-
 import sys
 from os.path import splitext
 
