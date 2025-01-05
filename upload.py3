@@ -194,13 +194,13 @@ def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool
                 if total_size > MAX_FILE_SIZE:
                     os.unlink(filepath)
                     os.rmdir(dirname)
-                    return False, f"File too large. Maximum size: {MAX_FILE_SIZE/(1024*1024)}MB", ""
+                    return False, f"File too large. Maximum size: {MAX_FILE_SIZE / (1024 * 1024)}MB", ""
                 f.write(chunk)
                 
         if not validate_archive_size(total_size):
             os.unlink(filepath)
             os.rmdir(dirname)
-            return False, f"File size ({total_size/(1024*1024):.1f}MB) outside allowed range", ""
+            return False, f"File size ({total_size / (1024 * 1024):.1f}MB) outside allowed range", ""
             
         # Validate archive type
         valid, error_msg = validate_archive_type(filepath)
