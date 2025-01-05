@@ -30,15 +30,15 @@ def is_variable_star(pre_el_text, star_type):
     try:
         soup = BeautifulSoup(pre_el_text, 'html.parser')
         text_content = soup.get_text()
-        
+
         if 'The object was found in {}'.format(star_type) in text_content:
             lines = text_content.split('\n')
-            
+
             for idx, line in enumerate(lines):
                 if star_type in line:
                     vs_idx = idx + 1
                     break
-            
+
             vs_arcsec = int(lines[vs_idx].split()[0].replace('"', ''))
             return vs_arcsec <= VAR_MAX_DIST_ARCSEC
         else:
@@ -46,6 +46,7 @@ def is_variable_star(pre_el_text, star_type):
     except (ValueError, IndexError) as e:
         print("Error in is_variable_star: {}".format(e))
         return False
+
 
 def is_ast_or_vs(pre_el_text):
     return (
@@ -59,35 +60,35 @@ def filter_report(path_to_report):
     try:
         with open(path_to_report, 'r') as f:
             content = f.read()
-    
+
         a_name_first_occurance = content.find('<a name')
-    
+
         if a_name_first_occurance == -1:
             print('No transients to filter in {}'.format(path_to_report))
             return
-        
+
         head = content[: a_name_first_occurance]
         transients = content[a_name_first_occurance:].split('<HR>')[:-1]
-    
+
         ast_or_vs_s = []
         for transient in transients:
             soup = BeautifulSoup(transient, features="lxml")
             ast_or_vs_s.append(is_ast_or_vs(soup.pre.text))
-    
+
         not_ast_and_not_vs = []
         for transient, ast_or_vs_ in zip(transients, ast_or_vs_s):
             if not ast_or_vs_:
                 not_ast_and_not_vs.append(transient)
-    
-	if len(not_ast_and_not_vs) == 0:
-    		output = head + '\nSeems like every transient is the known object.\n</body></html>'
-	else:
-    		output = (
-        		head
-        		+ '<HR>'.join(not_ast_and_not_vs)
-        		+ '\n<HR></body></html>'
-    		)
-	
+
+        if len(not_ast_and_not_vs) == 0:
+            output = head + '\nSeems like every transient is the known object.\n</body></html>'
+        else:
+            output = (
+                head
+                + '<HR>'.join(not_ast_and_not_vs)
+                + '\n<HR></body></html>'
+            )
+
         output_path = splitext(path_to_report)[0] + '_filtered.html'
         with open(output_path, 'w') as f:
             f.write(output)
@@ -96,7 +97,7 @@ def filter_report(path_to_report):
 
         try:
             error_msg = ('<html><body>An error occurred while filtering the `{}` '
-                        'file.</body></html>'.format(sys.argv[1]))
+                         'file.</body></html>'.format(sys.argv[1]))
             output_path = splitext(sys.argv[1])[0] + '_filtered.html'
             with open(output_path, 'w') as f:
                 f.write(error_msg)
@@ -109,5 +110,5 @@ if __name__ == '__main__':
     if len(sys.argv) == 1 or len(sys.argv) > 2 or sys.argv[1] in ['-h', '--help']:
         print('Usage: `python3 filter_report.py path/to/report.html`')
         exit(1)
-    
+
     filter_report(sys.argv[1])
