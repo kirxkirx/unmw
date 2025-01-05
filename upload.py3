@@ -23,8 +23,9 @@ try:
 except ImportError:
     HAVE_RARFILE = False
 import re
-from typing import List
+#from typing import List
 from typing import Tuple
+
 
 # Constants for file validation
 MIN_FILE_SIZE = 2 * 1024 * 1024  # 2MB
@@ -32,6 +33,7 @@ MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB
 ALLOWED_EXTENSIONS = {'.zip', '.rar'}
 ALLOWED_IMAGE_EXTENSIONS = {'.fit', '.fits', '.fts'}
 MIN_IMAGE_FILES = 2
+
 
 def is_safe_filename(filename: str) -> bool:
     """
@@ -51,11 +53,13 @@ def is_safe_filename(filename: str) -> bool:
     
     return all(not re.search(pattern, filename) for pattern in dangerous_patterns)
 
+
 def validate_archive_size(filesize: int) -> bool:
     """
     Validate archive file size is within acceptable range
     """
     return MIN_FILE_SIZE <= filesize <= MAX_FILE_SIZE
+
 
 def get_mime_type(filepath: str) -> str:
     """
@@ -63,7 +67,6 @@ def get_mime_type(filepath: str) -> str:
     """
     try:
         # Try python-magic implementation
-        #import magic
         try:
             # Try using mime=True parameter
             mime = magic.Magic(mime=True)
@@ -85,6 +88,7 @@ def get_mime_type(filepath: str) -> str:
                 return mtype
             return "application/octet-stream"  # Default MIME type
 
+
 def validate_archive_type(filepath: str) -> Tuple[bool, str]:
     """
     Validate that file is a legitimate archive of allowed type
@@ -104,6 +108,7 @@ def validate_archive_type(filepath: str) -> Tuple[bool, str]:
         return False, f"MIME type mismatch: {mime_type}"
         
     return True, ""
+
 
 def check_archive_contents(filepath: str) -> Tuple[bool, str]:
     """
@@ -149,6 +154,7 @@ def check_archive_contents(filepath: str) -> Tuple[bool, str]:
         elif ext == '.rar' and isinstance(e, rarfile.BadRarFile):
             return False, f"Invalid RAR format: {str(e)}"
         return False, f"Error checking archive: {str(e)}"
+
 
 def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool, str, str]:
     """
@@ -220,7 +226,9 @@ def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool
             os.rmdir(dirname)
         return False, f"Upload error: {str(e)}", ""
 
+
 def main():
+
     # Enable CGI error reporting
     cgitb.enable()
     
@@ -297,5 +305,8 @@ def main():
         </html>
         """)
 
+
 if __name__ == "__main__":
     main()
+
+
