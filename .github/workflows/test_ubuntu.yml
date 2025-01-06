@@ -23,3 +23,8 @@ jobs:
           for i in filter_report.py upload.py3; do
             flake8 --ignore=W293,W291,E501,E128,E722 $i
           done
+      - name: Install VaST dependencies
+        run: sudo apt-get install gfortran libx11-dev libpng-dev 
+      - name: Run self-test script
+        run: bash unmw_selftest.sh
+        

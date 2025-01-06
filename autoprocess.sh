@@ -9,6 +9,16 @@ LANGUAGE=C
 export LANGUAGE LC_ALL
 #################################
 
+# Check the flag that local_config.sh was already sourced
+if [ -z "$UNMW_LOCAL_CONFIG_SOURCED" ];then
+ # if not - source it
+ LOCAL_CONFIG_FILE="$(dirname $(readlink -f "$0"))/local_config.sh"
+ if [ -f "$LOCAL_CONFIG_FILE" ];then
+  echo source "$LOCAL_CONFIG_FILE"
+  source "$LOCAL_CONFIG_FILE"
+ fi
+fi
+
 # Set max system stress parameters
 # (normally they should be set in local_config.sh)
 #
@@ -56,7 +66,21 @@ if [ -z "$VAST_REFERENCE_COPY" ];then
  VAST_REFERENCE_COPY="$DATA_PROCESSING_ROOT"/vast
 fi
 
-INPUT_ZIP_ARCHIVE=$1
+if [ -z "$1" ];then
+ echo "
+Usage: 
+ $0 path_to_archive_or_directory_containing_new_images
+
+Examples:
+ $0 /path/to/images.zip
+or
+ $0 /path/to/images.rar
+or
+ $0 /path/to/images/"
+ exit 1
+fi
+
+INPUT_ZIP_ARCHIVE="$1"
 
 UNIXSEC_START_TOTAL=$(date +%s)
 
@@ -283,7 +307,7 @@ if [ -d "$INPUT_ZIP_ARCHIVE" ];then
  N_FITS_FILES=$(ls "$INPUT_ZIP_ARCHIVE"/*."$FITS_FILE_EXT" | wc -l)
  if [ $N_FITS_FILES -ge 2 ];then
   INPUT_DIR_NOT_ZIP_ARCHIVE=1
-  echo "The input contains at lest 2 FITS files "
+  echo "The input directory contains at lest 2 FITS files "
   ls "$INPUT_ZIP_ARCHIVE"/*."$FITS_FILE_EXT"
   INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE="$INPUT_ZIP_ARCHIVE"
  fi
@@ -313,87 +337,6 @@ if [ ! -d "$DATA_PROCESSING_ROOT" ];then
  echo "ERROR: there is no data processing directory $DATA_PROCESSING_ROOT"
  exit 1
 fi
-
-###
-#if [ ! -d "$IMAGE_DATA_ROOT" ];then
-# mkdir "$IMAGE_DATA_ROOT"
-# if [ $? -ne 0 ];then
-#  echo "ERROR: cannot create the image data directory $IMAGE_DATA_ROOT" 
-#  exit 1
-# fi
-#fi
-#if [ ! -d "$DATA_PROCESSING_ROOT" ];then
-# mkdir "$DATA_PROCESSING_ROOT"
-# if [ $? -ne 0 ];then
-#  echo "ERROR: cannot create the data processing directory $DATA_PROCESSING_ROOT" 
-#  exit 1
-# fi
-#fi
-#
-#LOCKFILE="$VAST_REFERENCE_COPY"/autoprocess_install_vast.lock
-#
-#if [ -e "${LOCKFILE}" ] && kill -0 `cat "${LOCKFILE}"`; then
-#  echo "Lock file found $LOCKFILE - another copy of $0 seems to be installin VaST, so we'll just wait"
-#  sleep 600
-#elif [ ! -d "$VAST_REFERENCE_COPY" ];then
-# #
-# echo -n "Checking write permissions for the current directory ( $PWD ) ... "
-# touch testfile$$.tmp
-# if [ $? -eq 0 ];then
-#  rm -f testfile$$.tmp
-#  echo "OK"
-# else
-#  echo "ERROR: please make sure you have write permissions for the current directory.
-#
-#Maybe you need something like:
-#sudo chown -R $USER $PWD"
-#  exit 1
-# fi
-# #
-# mkdir "$VAST_REFERENCE_COPY"
-# if [ $? -ne 0 ];then
-#  echo "ERROR: cannot create VaST directory $VAST_REFERENCE_COPY"
-#  exit 1
-# fi
-# # Make sure the lockfile is removed when we exit and when we receive a signal
-# trap "rm -f ${LOCKFILE}; exit" INT TERM EXIT
-# echo $$ > "${LOCKFILE}"
-# echo "Trying to install VaST in directory $VAST_REFERENCE_COPY" 
-# cd "$VAST_REFERENCE_COPY" || exit 1
-# git checkout https://github.com/kirxkirx/vast.git .
-# # compile VaST
-# make
-# if [ $? -eq 0 ];then
-#  # update offline catalogs
-#  lib/update_offline_catalogs.sh all
-#  # manually update the two big ones
-#  # Tycho-2
-#  cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
-#  if [ ! -d tycho2 ];then
-#   mkdir tycho2
-#   cd tycho2 || exit 1
-#   wget -nH --cut-dirs=4 --no-parent -r -l0 -c -A 'ReadMe,*.gz,robots.txt' "http://scan.sai.msu.ru/~kirx/data/tycho2/"
-#   for i in tyc2.dat.*gz ;do
-#    gunzip "$i"
-#   done
-#   cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
-#  fi
-#  # and UCAC5
-#  cd `dirname "$VAST_REFERENCE_COPY"`
-#  if [ ! -d UCAC5 ];then
-#   mkdir UCAC5
-#   cd UCAC5 || exit 1
-#   wget -r -Az* -c --no-dir "http://scan.sai.msu.ru/~kirx/data/ucac5"
-#   cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
-#  fi
-# fi
-# cd $(dirname "$VAST_REFERENCE_COPY") || exit 1
-# BASENAME_VAST_REFERENCE_COPY=$(basename $VAST_REFERENCE_COPY)
-# if [ "$BASENAME_VAST_REFERENCE_COPY" != "vast" ];then
-#  mv "vast" "$BASENAME_VAST_REFERENCE_COPY"
-# fi
-# rm -f "${LOCKFILE}"
-#fi
 
 if [ ! -d "$VAST_REFERENCE_COPY" ];then
  echo "ERROR: cannot find VaST installation in directory $VAST_REFERENCE_COPY" 
@@ -500,7 +443,7 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  ABSOLUTE_PATH_TO_IMAGES="$IMAGE_DATA_ROOT/$LOCAL_PATH_TO_IMAGES"
  echo "Setting archive directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
 else
- INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE=$(basename $INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE)
+ #INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE=$(basename $INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE)
  ABSOLUTE_PATH_TO_IMAGES=$(readlink -f "$INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE")
  echo "Setting input directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then

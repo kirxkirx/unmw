@@ -1,11 +1,11 @@
 # Main configuration parameters
-export IMAGE_DATA_ROOT="/home/NMW_web_upload"
-export DATA_PROCESSING_ROOT="/home/NMW_web_upload"
-export VAST_REFERENCE_COPY="$DATA_PROCESSING_ROOT"/vast
+export IMAGE_DATA_ROOT="$PWD/uploads"
+export DATA_PROCESSING_ROOT="$PWD/uploads"
+export VAST_REFERENCE_COPY="$PWD/uploads/vast"
 
-export URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
+export URL_OF_DATA_PROCESSING_ROOT="http://localhost:8080/uploads"
 
-export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
+#export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 
 
 # Specify plate-solve service
