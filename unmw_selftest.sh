@@ -25,6 +25,9 @@ fi
 # Copy the config file
 cp -v local_config.sh_for_test local_config.sh
 
+# Link the python3 version of the upload handler code
+ln -s upload.py3 upload.py
+
 # Create data directory
 if [ ! -d uploads ];then
  mkdir "uploads" || exit 1
@@ -141,10 +144,24 @@ fi
 if ! curl --silent --show-error "http://localhost:8080/$RESULTS_DIR_FROM_URL" | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get manual run results page via the HTTP server"
  exit 1
+else
+ echo "$0 successfully got the manual run results page via the HTTP server"
 fi
 
 # Upload the results file on server
-results_url=$(curl -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py' | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
+if [ ! -f NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
+ echo "$0 test error: canot find NMW__NovaVul24_Stas__WebCheck__NotReal.zip"
+ exit 1
+else
+ echo "$0 test error: double-checking that NMW__NovaVul24_Stas__WebCheck__NotReal.zip is stil here"
+fi
+#results_url=$(curl -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py' | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
+results_server reply=$(curl --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py')
+if [ -z "$results_server" ];then
+ echo "$0 test error: empty HTTP server reply"
+ exit 1
+fi
+results_url=$(echo "$results_server" | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
 if [ -z "$results_url" ];then
  echo "$0 test error: empty results_url after parsing HTTP server reply"
  exit 1
