@@ -6,6 +6,12 @@ if [[ -n "$REQUEST_METHOD" ]]; then
  exit 1
 fi
 
+command -v zip &> /dev/null
+if [ $? -ne 0 ];then
+ echo "$0 test error: 'zip' command not found" 
+ exit 1
+fi
+
 # change to the work directory
 SCRIPTDIR=$(dirname "$(readlink -f "$0")")
 cd "$SCRIPTDIR" || exit 1
@@ -80,17 +86,35 @@ fi
 
 # Start the Python HTTP server in the background
 cd "$SCRIPTDIR" || exit 1
-python3 custom_http_server.py &
+if [ ! -f custom_http_server.py ];then
+ echo "$0 test error: 'custom_http_server.py' not found in '$SCRIPTDIR'"
+ exit 1
+fi
+if [ ! -s custom_http_server.py ];then
+ echo "$0 test error: 'custom_http_server.py' is empty"
+ exit 1
+fi
+python3 custom_http_server.py > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
 SERVER_PID=$!
 
 # Function to clean up (kill the server) on script exit
 cleanup() {
  echo "Stopping the Python HTTP server..."
  kill $SERVER_PID 2>/dev/null
+ echo "Logs of the Python HTTP server..."
+ cat "$UPLOADS_DIR/custom_http_server.log"
+ rm -fv "$UPLOADS_DIR/custom_http_server.log" 
 }
 
 # Trap script exit signals to ensure cleanup is executed
 trap cleanup EXIT INT TERM
+
+sleep 5  # Give the server some time to start
+ps -ef | grep python3 | grep custom_http_server.py  # Check if the server is running
+if [ $? -ne 0 ];then
+ echo "$0 test error: looks like the HTTP server is not running"
+ exit 1
+fi
 
 # Check if the server is working, serving the content of the current directory
 if ! curl --silent --show-error 'http://localhost:8080/' | grep --quiet 'uploads/' ;then
@@ -102,6 +126,21 @@ if ! curl --silent --show-error 'http://localhost:8080/$RESULTS_DIR_FROM_URL' | 
  echo "$0 test error: failed to get manual run results page via the HTTP server"
  exit 1
 fi
+
+# Prepare zip archive with the images for the web upload test
+cd "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/" || exit 1
+cp -r second_epoch_images NMW__NovaVul24_Stas__WebCheck__NotReal
+zip -r NMW__NovaVul24_Stas__WebCheck__NotReal.zip NMW__NovaVul24_Stas__WebCheck__NotReal/
+if [ ! -s NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
+ echo "$0 test error: failed to create a zip archive with the images"
+ exit 1
+fi
+file NMW__NovaVul24_Stas__WebCheck__NotReal.zip | grep --quiet "Zip archive"
+if [ $? -ne 0 ];then
+ echo "$0 test error: NMW__NovaVul24_Stas__WebCheck__NotReal.zip does not look like a ZIP archive"
+ exit 1
+fi
+results_url=$(curl -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py' | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
 
 
 # Go back to the work directory
