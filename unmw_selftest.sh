@@ -163,7 +163,7 @@ fi
 echo "---- Server reply ---
 $results_server_reply
 ---------------------"
-results_url=$(echo "$results_server_reply" | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
+results_url=$(echo "$results_server_reply" | grep 'url=' | head -n1 | awk -F'url=' '{print $2}' | awk -F'"' '{print $1}')
 if [ -z "$results_url" ];then
  echo "$0 test error: empty results_url after parsing HTTP server reply"
  exit 1
@@ -171,11 +171,12 @@ fi
 echo "---- results_url ---
 $results_url
 ---------------------"
-echo "Sleep give the server some time to process the data"
+echo "Sleep to give the server some time to process the data"
 # Wait until no copies of autoprocess.sh are running
 # (this assumes no other copies of the script are running)
+echo "Waiting for autoprocess.sh to finish..."
 while pgrep -f "autoprocess.sh" > /dev/null; do
- echo "Waiting for autoprocess.sh to finish..."
+ echo "."
  sleep 1  # Wait for 1 second before checking again
 done
 #
