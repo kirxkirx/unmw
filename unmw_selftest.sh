@@ -109,6 +109,23 @@ cleanup() {
 # Trap script exit signals to ensure cleanup is executed
 trap cleanup EXIT INT TERM
 
+
+# Prepare zip archive with the images for the web upload test
+cd "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/" || exit 1
+cp -r second_epoch_images NMW__NovaVul24_Stas__WebCheck__NotReal
+zip -r NMW__NovaVul24_Stas__WebCheck__NotReal.zip NMW__NovaVul24_Stas__WebCheck__NotReal/
+if [ ! -s NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
+ echo "$0 test error: failed to create a zip archive with the images"
+ exit 1
+fi
+file NMW__NovaVul24_Stas__WebCheck__NotReal.zip | grep --quiet "Zip archive"
+if [ $? -ne 0 ];then
+ echo "$0 test error: NMW__NovaVul24_Stas__WebCheck__NotReal.zip does not look like a ZIP archive"
+ exit 1
+fi
+
+# Test if HTTP server is running
+# (moved after zip file creation to give the server more time to start)
 sleep 5  # Give the server some time to start
 ps -ef | grep python3 | grep custom_http_server.py  # Check if the server is running
 if [ $? -ne 0 ];then
@@ -127,19 +144,7 @@ if ! curl --silent --show-error 'http://localhost:8080/$RESULTS_DIR_FROM_URL' | 
  exit 1
 fi
 
-# Prepare zip archive with the images for the web upload test
-cd "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/" || exit 1
-cp -r second_epoch_images NMW__NovaVul24_Stas__WebCheck__NotReal
-zip -r NMW__NovaVul24_Stas__WebCheck__NotReal.zip NMW__NovaVul24_Stas__WebCheck__NotReal/
-if [ ! -s NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
- echo "$0 test error: failed to create a zip archive with the images"
- exit 1
-fi
-file NMW__NovaVul24_Stas__WebCheck__NotReal.zip | grep --quiet "Zip archive"
-if [ $? -ne 0 ];then
- echo "$0 test error: NMW__NovaVul24_Stas__WebCheck__NotReal.zip does not look like a ZIP archive"
- exit 1
-fi
+# Upload the results file on server
 results_url=$(curl -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py' | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
 
 
