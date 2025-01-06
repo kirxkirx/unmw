@@ -35,6 +35,7 @@ else
  cd vast || exit 1
 fi
 lib/update_offline_catalogs.sh all || exit 1
+VAST_INSTALL_DIR="$PWD"
 # VaST should be ready for work now
 
 # Download test data
@@ -48,6 +49,7 @@ if [ ! -d "$REFERENCE_IMAGES" ];then
  } || exit 1
 fi
 cd "$SCRIPTDIR" || exit 1
+
 ### Test ./autoprocess.sh without web upload scripts ###
 ./autoprocess.sh "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/second_epoch_images" || exit 1
 RESULTS_DIR_FROM_URL=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F'http://localhost:8080/' '{print $2}')
@@ -63,7 +65,7 @@ if [ ! -f "$RESULTS_DIR_FROM_URL/index.html" ];then
  echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL/index.html is not a file"
  exit 1
 fi
-if ! "$VAST_REFERENCE_COPY"/util/transients/validate_HTML_list_of_candidates.sh "$RESULTS_DIR_FROM_URL" ;then
+if ! "$VAST_INSTALL_DIR"/util/transients/validate_HTML_list_of_candidates.sh "$RESULTS_DIR_FROM_URL" ;then
  echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL/index.html validation failed"
  exit 1
 fi
@@ -76,5 +78,34 @@ if ! grep --quiet 'PNV J19430751+2100204' "$RESULTS_DIR_FROM_URL/index.html" ;th
  exit 1
 fi
 
+# Start the Python HTTP server in the background
+cd "$SCRIPTDIR" || exit 1
+python3 custom_http_server.py &
+SERVER_PID=$!
+
+# Function to clean up (kill the server) on script exit
+cleanup() {
+ echo "Stopping the Python HTTP server..."
+ kill $SERVER_PID 2>/dev/null
+}
+
+# Trap script exit signals to ensure cleanup is executed
+trap cleanup EXIT INT TERM
+
+# Check if the server is working, serving the content of the current directory
+if ! curl --silent --show-error 'http://localhost:8080/' | grep --quiet 'uploads/' ;then
+ echo "$0 test error: something is wrong with the HTTP server"
+ exit 1
+fi
+# Check the results of the previous manual run
+if ! curl --silent --show-error 'http://localhost:8080/$RESULTS_DIR_FROM_URL' | grep --quiet 'V0615 Vul' ;then
+ echo "$0 test error: failed to get manual run results page via the HTTP server"
+ exit 1
+fi
+
+
 # Go back to the work directory
 cd "$SCRIPTDIR" || exit 1
+
+# Stop the server
+cleanup
