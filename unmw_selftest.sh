@@ -67,20 +67,20 @@ if [ ! -d "$RESULTS_DIR_FROM_URL" ];then
  echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL is not a directory"
  exit 1
 fi
-if [ ! -f "$RESULTS_DIR_FROM_URL/index.html" ];then
- echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL/index.html is not a file"
+if [ ! -f "${RESULTS_DIR_FROM_URL}index.html" ];then
+ echo "$0 test error: RESULTS_DIR_FROM_URL=${RESULTS_DIR_FROM_URL}index.html is not a file"
  exit 1
 fi
 if ! "$VAST_INSTALL_DIR"/util/transients/validate_HTML_list_of_candidates.sh "$RESULTS_DIR_FROM_URL" ;then
- echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL/index.html validation failed"
+ echo "$0 test error: RESULTS_DIR_FROM_URL=${RESULTS_DIR_FROM_URL}index.html validation failed"
  exit 1
 fi
-if ! grep --quiet 'V0615 Vul' "$RESULTS_DIR_FROM_URL/index.html" ;then
- echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL/index.html does not have 'V0615 Vul'"
+if ! grep --quiet 'V0615 Vul' "${RESULTS_DIR_FROM_URL}index.html" ;then
+ echo "$0 test error: RESULTS_DIR_FROM_URL=${RESULTS_DIR_FROM_URL}index.html does not have 'V0615 Vul'"
  exit 1
 fi
-if ! grep --quiet 'PNV J19430751+2100204' "$RESULTS_DIR_FROM_URL/index.html" ;then
- echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL/index.html does not have 'PNV J19430751+2100204'"
+if ! grep --quiet 'PNV J19430751+2100204' "${RESULTS_DIR_FROM_URL}index.html" ;then
+ echo "$0 test error: RESULTS_DIR_FROM_URL=${RESULTS_DIR_FROM_URL}index.html does not have 'PNV J19430751+2100204'"
  exit 1
 fi
 
@@ -138,7 +138,7 @@ if ! curl --silent --show-error 'http://localhost:8080/' | grep --quiet 'uploads
  exit 1
 fi
 # Check the results of the previous manual run
-if ! curl --silent --show-error 'http://localhost:8080/$RESULTS_DIR_FROM_URL' | grep --quiet 'V0615 Vul' ;then
+if ! curl --silent --show-error "http://localhost:8080/$RESULTS_DIR_FROM_URL" | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get manual run results page via the HTTP server"
  exit 1
 fi
