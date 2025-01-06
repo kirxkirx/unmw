@@ -1,3 +1,5 @@
+[![test_ubuntu](https://github.com/kirxkirx/unmw/actions/workflows/test_ubuntu.yml/badge.svg)](https://github.com/kirxkirx/unmw/actions/workflows/test_ubuntu.yml)
+
 # unmw
 server-side scripts used to run VaST on NMW survey images
 

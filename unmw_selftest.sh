@@ -153,17 +153,19 @@ if [ ! -f NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
  echo "$0 test error: canot find NMW__NovaVul24_Stas__WebCheck__NotReal.zip"
  exit 1
 else
- echo "$0 test error: double-checking that NMW__NovaVul24_Stas__WebCheck__NotReal.zip is stil here"
+ echo "$0 test: double-checking that NMW__NovaVul24_Stas__WebCheck__NotReal.zip is stil here"
 fi
-#results_url=$(curl -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py' | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
-results_server reply=$(curl --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py')
-if [ -z "$results_server" ];then
+results_server_reply=$(curl --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py')
+if [ -z "$results_server_reply" ];then
  echo "$0 test error: empty HTTP server reply"
  exit 1
 fi
-results_url=$(echo "$results_server" | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
+results_url=$(echo "$results_server_reply" | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
 if [ -z "$results_url" ];then
- echo "$0 test error: empty results_url after parsing HTTP server reply"
+ echo "$0 test error: empty results_url after parsing HTTP server reply
+---- Server reply ---
+$results_server_reply
+---------------------"
  exit 1
 fi
 if ! curl --silent --show-error "$results_url" | grep --quiet 'V0615 Vul' ;then

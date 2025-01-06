@@ -1,4 +1,4 @@
-name: shellcheck test
+name: Ubuntu deploy test
 
 on:
   push:
