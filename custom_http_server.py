@@ -10,6 +10,8 @@ if "REQUEST_METHOD" in os.environ:
     sys.exit(1)
 
 class CustomCGIHTTPRequestHandler(CGIHTTPRequestHandler):
+    cgi_directories = ["/cgi-bin", "/"]  # Add root directory as a CGI directory
+    
     def translate_path(self, path):
         # Get the initial translation (without resolving symlinks)
         untranslated_path = super().translate_path(path)
