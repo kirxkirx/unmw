@@ -118,8 +118,7 @@ if [ ! -s NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
  echo "$0 test error: failed to create a zip archive with the images"
  exit 1
 fi
-file NMW__NovaVul24_Stas__WebCheck__NotReal.zip | grep --quiet "Zip archive"
-if [ $? -ne 0 ];then
+if ! file NMW__NovaVul24_Stas__WebCheck__NotReal.zip | grep --quiet 'Zip archive' ;then
  echo "$0 test error: NMW__NovaVul24_Stas__WebCheck__NotReal.zip does not look like a ZIP archive"
  exit 1
 fi
@@ -127,8 +126,8 @@ fi
 # Test if HTTP server is running
 # (moved after zip file creation to give the server more time to start)
 sleep 5  # Give the server some time to start
-ps -ef | grep python3 | grep custom_http_server.py  # Check if the server is running
-if [ $? -ne 0 ];then
+# Check if the server is running
+if ! ps -ef | grep python3 | grep custom_http_server.py ;then
  echo "$0 test error: looks like the HTTP server is not running"
  exit 1
 fi
@@ -146,7 +145,14 @@ fi
 
 # Upload the results file on server
 results_url=$(curl -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py' | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
-
+if [ -z "$results_url" ];then
+ echo "$0 test error: empty results_url after parsing HTTP server reply"
+ exit 1
+fi
+if ! curl --silent --show-error "$results_url" | grep --quiet 'V0615 Vul' ;then
+ echo "$0 test error: failed to get web run results page via the HTTP server"
+ exit 1
+fi
 
 # Go back to the work directory
 cd "$SCRIPTDIR" || exit 1
