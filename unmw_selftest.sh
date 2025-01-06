@@ -155,19 +155,30 @@ if [ ! -f NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
 else
  echo "$0 test: double-checking that NMW__NovaVul24_Stas__WebCheck__NotReal.zip is stil here"
 fi
-results_server_reply=$(curl --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py')
+results_server_reply=$(curl --max-time 600 --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py')
 if [ -z "$results_server_reply" ];then
  echo "$0 test error: empty HTTP server reply"
  exit 1
 fi
-results_url=$(echo "$results_server_reply" | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
-if [ -z "$results_url" ];then
- echo "$0 test error: empty results_url after parsing HTTP server reply
----- Server reply ---
+echo "---- Server reply ---
 $results_server_reply
 ---------------------"
+results_url=$(echo "$results_server_reply" | grep 'url=' | head -n1 | awk -F'url=' '{print $2}')
+if [ -z "$results_url" ];then
+ echo "$0 test error: empty results_url after parsing HTTP server reply"
  exit 1
 fi
+echo "---- results_url ---
+$results_url
+---------------------"
+echo "Sleep give the server some time to process the data"
+# Wait until no copies of autoprocess.sh are running
+# (this assumes no other copies of the script are running)
+while pgrep -f "autoprocess.sh" > /dev/null; do
+ echo "Waiting for autoprocess.sh to finish..."
+ sleep 1  # Wait for 1 second before checking again
+done
+#
 if ! curl --silent --show-error "$results_url" | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get web run results page via the HTTP server"
  exit 1
