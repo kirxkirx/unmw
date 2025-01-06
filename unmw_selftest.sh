@@ -42,13 +42,39 @@ export REFERENCE_IMAGES="$UPLOADS_DIR/NMW__NovaVul24_Stas_test/reference_images"
 if [ ! -d "$REFERENCE_IMAGES" ];then
  cd "$UPLOADS_DIR" || exit 1
  {
-    curl --silent --show-error -O "http://scan.sai.msu.ru/~kirx/pub/NMW__NovaVul24_Stas_test.tar.bz2" && \
-    tar -xvjf NMW__NovaVul24_Stas_test.tar.bz2 && \
-    rm -f NMW__NovaVul24_Stas_test.tar.bz2
+  curl --silent --show-error -O "http://scan.sai.msu.ru/~kirx/pub/NMW__NovaVul24_Stas_test.tar.bz2" && \
+  tar -xvjf NMW__NovaVul24_Stas_test.tar.bz2 && \
+  rm -f NMW__NovaVul24_Stas_test.tar.bz2
  } || exit 1
 fi
 cd "$SCRIPTDIR" || exit 1
+### Test ./autoprocess.sh without web upload scripts ###
 ./autoprocess.sh "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/second_epoch_images" || exit 1
+RESULTS_DIR_FROM_URL=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F'http://localhost:8080/' '{print $2}')
+if [ -z "$RESULTS_DIR_FROM_URL" ];then
+ echo "$0 test error: RESULTS_DIR_FROM_URL is empty"
+ exit 1
+fi
+if [ ! -d "$RESULTS_DIR_FROM_URL" ];then
+ echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL is not a directory"
+ exit 1
+fi
+if [ ! -f "$RESULTS_DIR_FROM_URL/index.html" ];then
+ echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL/index.html is not a file"
+ exit 1
+fi
+if ! "$VAST_REFERENCE_COPY"/util/transients/validate_HTML_list_of_candidates.sh "$RESULTS_DIR_FROM_URL" ;then
+ echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL/index.html validation failed"
+ exit 1
+fi
+if ! grep --quiet 'V0615 Vul' "$RESULTS_DIR_FROM_URL/index.html" ;then
+ echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL/index.html does not have 'V0615 Vul'"
+ exit 1
+fi
+if ! grep --quiet 'PNV J19430751+2100204' "$RESULTS_DIR_FROM_URL/index.html" ;then
+ echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL/index.html does not have 'PNV J19430751+2100204'"
+ exit 1
+fi
 
 # Go back to the work directory
 cd "$SCRIPTDIR" || exit 1
