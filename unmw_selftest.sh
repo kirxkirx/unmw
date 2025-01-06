@@ -41,7 +41,11 @@ lib/update_offline_catalogs.sh all || exit 1
 export REFERENCE_IMAGES="$UPLOADS_DIR/NMW__NovaVul24_Stas_test/reference_images" 
 if [ ! -d "$REFERENCE_IMAGES" ];then
  cd "$UPLOADS_DIR" || exit 1
- {curl --silent --show-error -O "http://scan.sai.msu.ru/~kirx/pub/NMW__NovaVul24_Stas_test.tar.bz2" && tar -xvjf NMW__NovaVul24_Stas_test.tar.bz2 && rm -f NMW__NovaVul24_Stas_test.tar.bz2 } || exit 1
+ {
+    curl --silent --show-error -O "http://scan.sai.msu.ru/~kirx/pub/NMW__NovaVul24_Stas_test.tar.bz2" && \
+    tar -xvjf NMW__NovaVul24_Stas_test.tar.bz2 && \
+    rm -f NMW__NovaVul24_Stas_test.tar.bz2
+ } || exit 1
 fi
 cd "$SCRIPTDIR" || exit 1
 ./autoprocess.sh "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/second_epoch_images" || exit 1
