@@ -102,6 +102,7 @@ SERVER_PID=$!
 
 # Function to clean up (kill the server) on script exit
 cleanup() {
+ cd "$SCRIPTDIR" || exit 1
  echo "Stopping the Python HTTP server..."
  kill $SERVER_PID 2>/dev/null
  echo "Logs of the Python HTTP server..."
@@ -176,7 +177,7 @@ echo "Sleep to give the server some time to process the data"
 # (this assumes no other copies of the script are running)
 echo "Waiting for autoprocess.sh to finish..."
 while pgrep -f "autoprocess.sh" > /dev/null; do
- echo "."
+ #echo -n "."
  sleep 1  # Wait for 1 second before checking again
 done
 #
@@ -184,6 +185,45 @@ if ! curl --silent --show-error "$results_url" | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get web run results page via the HTTP server"
  exit 1
 fi
+
+# Go back to the work directory
+cd "$SCRIPTDIR" || exit 1
+
+# Test the combine reports script
+if ! ./combine_reports.sh ;then
+ echo "$0 test error: non-zero exit code of combine_reports.sh"
+ exit 1
+fi
+# uploads/ is the default location for the processing data (both images and results)
+cd "$UPLOADS_DIR" || exit 1
+#
+LATEST_COMBINED_HTML_REPORT=$(ls -t *_evening_* *_morning_* 2>/dev/null | grep -v summary | head -n 1)
+if [ -z "$LATEST_COMBINED_HTML_REPORT" ];then
+ echo "$0 test error: empty LATEST_COMBINED_HTML_REPORT"
+ exit 1
+fi
+if ! grep --quiet 'V0615 Vul' "$LATEST_COMBINED_HTML_REPORT" ;then
+ echo "$0 test error: cannot find 'V0615 Vul' in LATEST_COMBINED_HTML_REPORT=$LATEST_COMBINED_HTML_REPORT"
+ exit 1
+fi
+# Check that the png image previews were actually created
+for PNG_FILE_TO_TEST in $(grep 'img src=' "$LATEST_COMBINED_HTML_REPORT" | awk -F"img src=" '{print $2}' | awk -F'"'  '{print $2}' | grep '.png') ;do
+ if [ ! -f "$PNG_FILE_TO_TEST" ];then
+  echo "$0 test error: cannot find the PNG file $PNG_FILE_TO_TEST"
+  exit 1
+ fi
+ if [ ! -s "$PNG_FILE_TO_TEST" ];then
+  echo "$0 test error: empty PNG file $PNG_FILE_TO_TEST"
+  exit 1
+ fi
+ if ! file "$PNG_FILE_TO_TEST" | grep --quiet 'PNG image' ;then
+  echo "$0 test error: not a PNG file $PNG_FILE_TO_TEST"
+  file "$PNG_FILE_TO_TEST"
+  exit 1
+ fi
+done
+
+echo "All tests passed!"
 
 # Go back to the work directory
 cd "$SCRIPTDIR" || exit 1

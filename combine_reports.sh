@@ -24,10 +24,13 @@ fi
 # change to the work directory
 SCRIPTDIR=$(dirname "$(readlink -f "$0")")
 cd "$SCRIPTDIR" || exit 1
-# source the local settings file if it exist
-# it may countain curl e-mail and data processing directory settings
-if [ -s local_config.sh ];then
- source local_config.sh
+# Check the flag that local_config.sh was already sourced
+if [ -z "$UNMW_LOCAL_CONFIG_SOURCED" ];then
+ # source the local settings file if it exist
+ # it may countain curl e-mail and data processing directory settings
+ if [ -s local_config.sh ];then
+  source local_config.sh
+ fi
 fi
 #####
 # Silly fix for one local problem
@@ -35,7 +38,7 @@ if [ "$HOSTNAME" == "ariel.astro.illinois.edu" ] && [ "$USER" = "kirill" ] ;then
  source /home/kirill/.bashrc
 fi
 #####
-# uploads/ is the default location for the processing data (both mages and results)
+# uploads/ is the default location for the processing data (both images and results)
 if [ -d "uploads" ];then
  cd "uploads" || exit 1
 fi
