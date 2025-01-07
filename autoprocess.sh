@@ -463,7 +463,7 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
  cd "$ABSOLUTE_PATH_TO_IMAGES" || exit 1
  if [ ! -f "$ZIP_ARCHIVE_FILENAME" ];then
-  echo "ERROR: cannot find $ABSOLUTE_PATH_TO_IMAGES/$ZIP_ARCHIVE_FILENAME" 
+  echo "ERROR: cannot find $ABSOLUTE_PATH_TO_IMAGES/$ZIP_ARCHIVE_FILENAME" x
   exit 1
  fi
 
@@ -490,7 +490,9 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
    fi
   fi
  elif file "$ZIP_ARCHIVE_FILENAME" | grep --quiet 'Zip archive' ;then
-  unzip -j "$ZIP_ARCHIVE_FILENAME"
+  # -n Never overwrite existing files. If a file with the same name exists, it skips extraction of that file without asking for user input.
+  # -j Junk the paths (extract all files into the current directory without directory structure).
+  unzip -n -j "$ZIP_ARCHIVE_FILENAME"
   if [ $? -ne 0 ];then
    echo "ERROR: cannot extradct the ZIP archive $ZIP_ARCHIVE_FILENAME" 
    exit 1

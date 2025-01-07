@@ -22,8 +22,66 @@ The test script will need to owerwrite this file."
  exit 1
 fi
 
+### Define useful functions
+
+# Function to find a free port for an HTTP server
+get_free_port_for_http_server() {
+    # Define the port range
+    local START_PORT=8080
+    local END_PORT=8090
+
+    # Function to check if a command exists
+    command_exists() {
+        command -v "$1" >/dev/null 2>&1
+    }
+
+    # Function to check if a port is in use
+    is_port_in_use() {
+        local port=$1
+
+        if command_exists ss; then
+            # Use ss if available
+            ss -tuln | grep -q ":$port "
+        elif command_exists netstat; then
+            # Use netstat if ss is not available
+            netstat -tuln | grep -q ":$port "
+        elif command_exists lsof; then
+            # Use lsof if neither ss nor netstat is available
+            lsof -i :$port >/dev/null 2>&1
+        else
+            echo "Error: None of ss, netstat, or lsof is available on this system." >&2
+            return 1
+        fi
+    }
+
+    # Find the first unused port
+    for port in $(seq $START_PORT $END_PORT); do
+        if ! is_port_in_use $port; then
+            echo "$port"
+            return 0
+        fi
+    done
+
+    # If no free port is found
+    echo "Error: No free port found in the range $START_PORT-$END_PORT." >&2
+    return 1
+}
+
+UNMW_FREE_PORT=$(get_free_port_for_http_server)
+if [[ $? -eq 0 ]]; then
+    echo "Free port for HTTP server: $UNMW_FREE_PORT"
+else
+    echo "Failed to find a free port."
+    exit 1
+fi
+# export UNMW_FREE_PORT as local_config.sh needs it
+export UNMW_FREE_PORT
+
+### Start the test
+
 # Copy the config file
 cp -v local_config.sh_for_test local_config.sh
+# local_config.sh could be sourced here, but I'd rather let individual scripts source it on their own for testing
 
 # Link the python3 version of the upload handler code
 ln -s upload.py3 upload.py
@@ -61,7 +119,8 @@ cd "$SCRIPTDIR" || exit 1
 
 ### Test ./autoprocess.sh without web upload scripts ###
 ./autoprocess.sh "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/second_epoch_images" || exit 1
-RESULTS_DIR_FROM_URL=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F'http://localhost:8080/' '{print $2}')
+#RESULTS_DIR_FROM_URL=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F'http://localhost:8080/' '{print $2}')
+RESULTS_DIR_FROM_URL=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F"http://localhost:$UNMW_FREE_PORT/" '{print $2}')
 if [ -z "$RESULTS_DIR_FROM_URL" ];then
  echo "$0 test error: RESULTS_DIR_FROM_URL is empty"
  exit 1
@@ -97,7 +156,8 @@ if [ ! -s custom_http_server.py ];then
  echo "$0 test error: 'custom_http_server.py' is empty"
  exit 1
 fi
-python3 custom_http_server.py > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
+# Explicitly specfy port on which the Python HTTP server should run
+python3 custom_http_server.py "$UNMW_FREE_PORT" > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
 SERVER_PID=$!
 
 # Function to clean up (kill the server) on script exit
@@ -116,7 +176,15 @@ trap cleanup EXIT INT TERM
 
 # Prepare zip archive with the images for the web upload test
 cd "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/" || exit 1
-cp -r second_epoch_images NMW__NovaVul24_Stas__WebCheck__NotReal
+# Clean what might be remaining from a previous test run
+if [ -d NMW__NovaVul24_Stas__WebCheck__NotReal ];then
+ rm -rfv NMW__NovaVul24_Stas__WebCheck__NotReal
+fi
+if [ -f NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
+ rm -fv NMW__NovaVul24_Stas__WebCheck__NotReal.zip
+fi
+#
+cp -rv second_epoch_images NMW__NovaVul24_Stas__WebCheck__NotReal
 zip -r NMW__NovaVul24_Stas__WebCheck__NotReal.zip NMW__NovaVul24_Stas__WebCheck__NotReal/
 if [ ! -s NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
  echo "$0 test error: failed to create a zip archive with the images"
@@ -137,12 +205,12 @@ if ! ps -ef | grep python3 | grep custom_http_server.py ;then
 fi
 
 # Check if the server is working, serving the content of the current directory
-if ! curl --silent --show-error 'http://localhost:8080/' | grep --quiet 'uploads/' ;then
+if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/" | grep --quiet 'uploads/' ;then
  echo "$0 test error: something is wrong with the HTTP server"
  exit 1
 fi
 # Check the results of the previous manual run
-if ! curl --silent --show-error "http://localhost:8080/$RESULTS_DIR_FROM_URL" | grep --quiet 'V0615 Vul' ;then
+if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL" | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get manual run results page via the HTTP server"
  exit 1
 else
@@ -156,7 +224,7 @@ if [ ! -f NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
 else
  echo "$0 test: double-checking that NMW__NovaVul24_Stas__WebCheck__NotReal.zip is stil here"
 fi
-results_server_reply=$(curl --max-time 600 --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' 'http://localhost:8080/upload.py')
+results_server_reply=$(curl --max-time 600 --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' "http://localhost:$UNMW_FREE_PORT/upload.py")
 if [ -z "$results_server_reply" ];then
  echo "$0 test error: empty HTTP server reply"
  exit 1

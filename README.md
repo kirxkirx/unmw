@@ -1,7 +1,8 @@
 [![test_ubuntu](https://github.com/kirxkirx/unmw/actions/workflows/test_ubuntu.yml/badge.svg)](https://github.com/kirxkirx/unmw/actions/workflows/test_ubuntu.yml)
 
 # unmw
-server-side scripts used to run VaST on NMW survey images
+This repository contains server-side scripts for transient search with [VaST](https://github.com/kirxkirx/vast).
+These are the scripts used to analyze the [NMW survey](https://scan.sai.msu.ru/nmw/) images.
 
 This is very much work in progress. You may reach me at kirx[at]kirx.net
 
@@ -16,7 +17,7 @@ git clone https://github.com/kirxkirx/unmw.git
 ````
 mkdir /home/NMW_web_upload
 ````
- 3. create a symlink (or use `mount --bind` if you Apache configuration does
+ 3. create a symlink (or use `mount --bind` if your Apache configuration does
 not allow symlinks) to the data directory
 ````
 cd /var/www/scan.sai.msu.ru/cgi-bin/unmw
@@ -129,7 +130,7 @@ cp /data/cgi-bin/unmw/local_config.sh_example /data/cgi-bin/unmw/local_config.sh
 nano /data/cgi-bin/unmw/local_config.sh
 chmod +x /data/cgi-bin/unmw/local_config.sh
 
-# Install VaST to where the control scrpts will find it
+# Install VaST to where the control scripts will find it
 cd /data/cgi-bin/unmw/uploads/
 sudo -u apache git clone https://github.com/kirxkirx/vast/
 cd /data/cgi-bin/unmw/uploads/vast
@@ -140,7 +141,7 @@ sudo -u apache lib/update_offline_catalogs.sh force
 mkdir /data/reference_images
 # !!! copy the reference images to that directory !!!
 
-# Add summary transient report creation and offline catalog updating to corntab.
+# Add summary transient report creation and offline catalog updating to crontab.
 # It may look something like
 # */8     *       *       *       *       apache  /data/cgi-bin/unmw/combine_reports.sh &> /data/cgi-bin/unmw/uploads/combine_reports_cronlog.txt
 # 00      16      *       *       2       apache  /data/cgi-bin/unmw/uploads/vast/lib/update_offline_catalogs.sh force > /data/cgi-bin/unmw/uploads/vast/lib/catalogs/update_offline_catalogs.log
@@ -175,9 +176,9 @@ util/listhead wcs_000_2023-7-19_21-26-29_003.fts | grep VAST
 # VAST001 = 'wcs_image_calibration.sh' / VaST script name
 # VAST002 = 'local   '           / ASTROMETRYNET_LOCAL_OR_REMOTE
 # VAST003 = 'local   '           / PLATE_SOLVE_SERVER
-# VAST004 = 'iteration02'        / astometry.net run
+# VAST004 = 'iteration02'        / astrometry.net run
 # """"
-# Indicating that the local copy of astometry.net code was used, not a remote one
+# Indicating that the local copy of astrometry.net code was used, not a remote one
 
 # (optional) Install swarp and ImageMagick for the fastplot script
 # swarp
@@ -200,4 +201,9 @@ chown apache:apache /data/cgi-bin/unmw/uploads/exclusion_list_STL.txt
 
 ````
 # Alternatively
-Have a look at [the test script](unmw_selftest.sh) that spins-up a python built-in [HTTP server](custom_http_server.py) at port 8080 and puts a copy of [VaST](https://github.com/kirxkirx/vast) and all the uploaded images and processing results in the `uploads` subdirectory of the current directory.
+Have a look at the [testing script](unmw_selftest.sh) that spins-up a python built-in [HTTP server](custom_http_server.py) at port 8080 (or the next one available) and puts a copy of [VaST](https://github.com/kirxkirx/vast) and all the uploaded images and processing results in the `uploads` subdirectory of the current directory.
+The testing script relies on external services for plate solving and accessing
+the [UCAC5](https://cdsarc.cds.unistra.fr/viz-bin/Cat?I/340) catalog, which is fine for testing but might be too slow or
+unreliable for production. After initial testing, users are encouraged to
+install local copies of [UCAC5](https://cdsarc.cds.unistra.fr/viz-bin/Cat?I/340)
+(you may place its files at `uploads/ucac5` or `$HOME/ucac5`) and [astrometry.net code](https://github.com/dstndstn/astrometry.net) (and its associated [index files](http://data.astrometry.net/)).

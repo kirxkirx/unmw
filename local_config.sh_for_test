@@ -3,7 +3,11 @@ export IMAGE_DATA_ROOT="$PWD/uploads"
 export DATA_PROCESSING_ROOT="$PWD/uploads"
 export VAST_REFERENCE_COPY="$PWD/uploads/vast"
 
-export URL_OF_DATA_PROCESSING_ROOT="http://localhost:8080/uploads"
+if [ -n "$UNMW_FREE_PORT" ];then
+ export URL_OF_DATA_PROCESSING_ROOT="http://localhost:$UNMW_FREE_PORT/uploads"
+else
+ export URL_OF_DATA_PROCESSING_ROOT="http://localhost:8080/uploads"
+fi
 
 #export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 
