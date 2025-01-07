@@ -199,3 +199,5 @@ touch /data/cgi-bin/unmw/uploads/exclusion_list_STL.txt
 chown apache:apache /data/cgi-bin/unmw/uploads/exclusion_list_STL.txt
 
 ````
+# Alternatively
+Have a look at [the test script](unmw_selftest.sh) that spins-up a python built-in [HTTP server](custom_http_server.py) at port 8080 and puts a copy of [VaST](https://github.com/kirxkirx/vast) and all the uploaded images and processing results in the `uploads` subdirectory of the current directory.
