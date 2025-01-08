@@ -119,30 +119,30 @@ cd "$SCRIPTDIR" || exit 1
 
 ### Test ./autoprocess.sh without web upload scripts ###
 ./autoprocess.sh "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/second_epoch_images" || exit 1
-#RESULTS_DIR_FROM_URL=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F'http://localhost:8080/' '{print $2}')
-RESULTS_DIR_FROM_URL=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F"http://localhost:$UNMW_FREE_PORT/" '{print $2}')
-if [ -z "$RESULTS_DIR_FROM_URL" ];then
- echo "$0 test error: RESULTS_DIR_FROM_URL is empty"
+#RESULTS_DIR_FROM_URL__MANUALRUN=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F'http://localhost:8080/' '{print $2}')
+RESULTS_DIR_FROM_URL__MANUALRUN=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F"http://localhost:$UNMW_FREE_PORT/" '{print $2}')
+if [ -z "$RESULTS_DIR_FROM_URL__MANUALRUN" ];then
+ echo "$0 test error: RESULTS_DIR_FROM_URL__MANUALRUN is empty"
  exit 1
 fi
-if [ ! -d "$RESULTS_DIR_FROM_URL" ];then
- echo "$0 test error: RESULTS_DIR_FROM_URL=$RESULTS_DIR_FROM_URL is not a directory"
+if [ ! -d "$RESULTS_DIR_FROM_URL__MANUALRUN" ];then
+ echo "$0 test error: RESULTS_DIR_FROM_URL__MANUALRUN=$RESULTS_DIR_FROM_URL__MANUALRUN is not a directory"
  exit 1
 fi
-if [ ! -f "${RESULTS_DIR_FROM_URL}index.html" ];then
- echo "$0 test error: RESULTS_DIR_FROM_URL=${RESULTS_DIR_FROM_URL}index.html is not a file"
+if [ ! -f "${RESULTS_DIR_FROM_URL__MANUALRUN}index.html" ];then
+ echo "$0 test error: RESULTS_DIR_FROM_URL__MANUALRUN=${RESULTS_DIR_FROM_URL__MANUALRUN}index.html is not a file"
  exit 1
 fi
-if ! "$VAST_INSTALL_DIR"/util/transients/validate_HTML_list_of_candidates.sh "$RESULTS_DIR_FROM_URL" ;then
- echo "$0 test error: RESULTS_DIR_FROM_URL=${RESULTS_DIR_FROM_URL}index.html validation failed"
+if ! "$VAST_INSTALL_DIR"/util/transients/validate_HTML_list_of_candidates.sh "$RESULTS_DIR_FROM_URL__MANUALRUN" ;then
+ echo "$0 test error: RESULTS_DIR_FROM_URL__MANUALRUN=${RESULTS_DIR_FROM_URL__MANUALRUN}index.html validation failed"
  exit 1
 fi
-if ! grep --quiet 'V0615 Vul' "${RESULTS_DIR_FROM_URL}index.html" ;then
- echo "$0 test error: RESULTS_DIR_FROM_URL=${RESULTS_DIR_FROM_URL}index.html does not have 'V0615 Vul'"
+if ! grep --quiet 'V0615 Vul' "${RESULTS_DIR_FROM_URL__MANUALRUN}index.html" ;then
+ echo "$0 test error: RESULTS_DIR_FROM_URL__MANUALRUN=${RESULTS_DIR_FROM_URL__MANUALRUN}index.html does not have 'V0615 Vul'"
  exit 1
 fi
-if ! grep --quiet 'PNV J19430751+2100204' "${RESULTS_DIR_FROM_URL}index.html" ;then
- echo "$0 test error: RESULTS_DIR_FROM_URL=${RESULTS_DIR_FROM_URL}index.html does not have 'PNV J19430751+2100204'"
+if ! grep --quiet 'PNV J19430751+2100204' "${RESULTS_DIR_FROM_URL__MANUALRUN}index.html" ;then
+ echo "$0 test error: RESULTS_DIR_FROM_URL__MANUALRUN=${RESULTS_DIR_FROM_URL__MANUALRUN}index.html does not have 'PNV J19430751+2100204'"
  exit 1
 fi
 
@@ -163,11 +163,20 @@ SERVER_PID=$!
 # Function to clean up (kill the server) on script exit
 cleanup() {
  cd "$SCRIPTDIR" || exit 1
+ #
  echo "Stopping the Python HTTP server..."
  kill $SERVER_PID 2>/dev/null
  echo "Logs of the Python HTTP server..."
  cat "$UPLOADS_DIR/custom_http_server.log"
  rm -fv "$UPLOADS_DIR/custom_http_server.log" 
+ #
+ if [ -f "$UPLOADS_DIR/sthttpd_http_server.log" ];then
+  echo "Stopping the sthttpd HTTP server..."
+  kill $STHTTPD_SERVER_PID 2>/dev/null
+  echo "Logs of the sthttpd HTTP server..."
+  cat "$UPLOADS_DIR/sthttpd_http_server.log"
+  rm -fv "$UPLOADS_DIR/sthttpd_http_server.log" 
+ fi
 }
 
 # Trap script exit signals to ensure cleanup is executed
@@ -213,7 +222,7 @@ if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/" | grep --qui
  exit 1
 fi
 # Check the results of the previous manual run
-if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL" | grep --quiet 'V0615 Vul' ;then
+if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL__MANUALRUN" | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get manual run results page via the HTTP server"
  exit 1
 else
@@ -240,9 +249,9 @@ if [ -z "$results_url" ];then
  echo "$0 test error: empty results_url after parsing HTTP server reply"
  exit 1
 fi
-#echo "---- results_url ---
-#$results_url
-#---------------------"
+echo "---- results_url ---
+$results_url
+---------------------"
 echo "Sleep to give the server some time to process the data"
 # Wait until no copies of autoprocess.sh are running
 # (this assumes no other copies of the script are running)
@@ -252,8 +261,8 @@ while pgrep -f "autoprocess.sh" > /dev/null; do
  sleep 1  # Wait for 1 second before checking again
 done
 #
-#if ! curl --silent --show-error "$results_url" | grep --quiet 'V0615 Vul' ;then
-if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL" | grep --quiet 'V0615 Vul' ;then
+if ! curl --silent --show-error "$results_url" | grep --quiet 'V0615 Vul' ;then
+#if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL__MANUALRUN" | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get web run results page via the HTTP server"
  exit 1
 else
@@ -411,8 +420,133 @@ else
  echo "Found Vul8 ERROR in $LATEST_PROCESSING_SUMMARY_LOG"
 fi
 
+echo "All tests passed with Python HTTP server!"
 
-echo "All tests passed!"
+# Go back to the work directory
+cd "$SCRIPTDIR" || exit 1
+
+echo "Now let's test with sthttpd HTTP server"
+
+echo "Get sthttpd"
+git clone https://github.com/blueness/sthttpd.git
+if [ $? -ne 0 ];then
+ echo "$0 test error: cannot git clone sthttpd"
+ exit 1
+fi
+cd sthttpd || exit 1
+./autogen.sh || exit 1
+./configure || exit 1
+make || exit 1
+if [ ! -x src/thttpd ];then
+ echo "$0 test error: src/thttpd was not created"
+ exit 1
+fi
+
+echo "Run sthttpd"
+# Go back to the work directory
+cd "$SCRIPTDIR" || exit 1
+
+# Yes, we want to put sthttpd on the next available port
+UNMW_FREE_PORT=$(get_free_port_for_http_server)
+if [[ $? -eq 0 ]]; then
+    echo "Free port for HTTP server: $UNMW_FREE_PORT"
+else
+    echo "Failed to find a free port."
+    exit 1
+fi
+# export UNMW_FREE_PORT as local_config.sh needs it
+export UNMW_FREE_PORT
+
+# Run the server - it will run in the background
+sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$(pwd)" -c "upload.py" -f "$UPLOADS_DIR/sthttpd_http_server.log"
+STHTTPD_SERVER_PID=$!
+
+### Repeat the Nova Vul test with sthttpd
+cd "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/" || exit 1
+if [ ! -s NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
+ echo "$0 test error: failed to find a zip archive with the images"
+ exit 1
+fi
+if ! file NMW__NovaVul24_Stas__WebCheck__NotReal.zip | grep --quiet 'Zip archive' ;then
+ echo "$0 test error: NMW__NovaVul24_Stas__WebCheck__NotReal.zip does not look like a ZIP archive"
+ exit 1
+fi
+echo "-- The content of the zip archive --"
+unzip -l NMW__NovaVul24_Stas__WebCheck__NotReal.zip
+echo "------------------------------------"
+
+# Test if sthttpd HTTP server is running
+# (moved after zip file creation to give the server more time to start)
+sleep 5  # Give the server some time to start
+# Check if the server is running
+if ! ps -ef | grep thttpd ;then
+ echo "$0 test error: looks like the HTTP server is not running"
+ exit 1
+fi
+
+# Check if the server is working, serving the content of the current directory
+if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/" | grep --quiet 'uploads/' ;then
+ echo "$0 test error: something is wrong with the HTTP server"
+ exit 1
+fi
+# Check the results of the previous manual run
+if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL__MANUALRUN" | grep --quiet 'V0615 Vul' ;then
+ echo "$0 test error: failed to get manual run results page via the HTTP server"
+ exit 1
+else
+ echo "$0 successfully got the manual run results page via the HTTP server"
+fi
+
+# Upload the results file on server
+if [ ! -f NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
+ echo "$0 test error: canot find NMW__NovaVul24_Stas__WebCheck__NotReal.zip"
+ exit 1
+else
+ echo "$0 test: double-checking that NMW__NovaVul24_Stas__WebCheck__NotReal.zip is stil here"
+fi
+results_server_reply=$(curl --max-time 600 --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' "http://localhost:$UNMW_FREE_PORT/upload.py")
+if [ -z "$results_server_reply" ];then
+ echo "$0 test error: empty HTTP server reply"
+ exit 1
+fi
+echo "---- Server reply ---
+$results_server_reply
+---------------------"
+results_url=$(echo "$results_server_reply" | grep 'url=' | head -n1 | awk -F'url=' '{print $2}' | awk -F'"' '{print $1}')
+if [ -z "$results_url" ];then
+ echo "$0 test error: empty results_url after parsing HTTP server reply"
+ exit 1
+fi
+echo "---- results_url ---
+$results_url
+---------------------"
+echo "Sleep to give the server some time to process the data"
+# Wait until no copies of autoprocess.sh are running
+# (this assumes no other copies of the script are running)
+echo "Waiting for autoprocess.sh to finish..."
+while pgrep -f "autoprocess.sh" > /dev/null; do
+ #echo -n "."
+ sleep 1  # Wait for 1 second before checking again
+done
+#
+if ! curl --silent --show-error "$results_url" | grep --quiet 'V0615 Vul' ;then
+#if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL__MANUALRUN" | grep --quiet 'V0615 Vul' ;then
+ echo "$0 test error: failed to get web run results page via the HTTP server"
+ exit 1
+else
+ echo "V0615 Vul is fond in HTTP-uploaded results"
+fi
+
+###
+
+echo "All tests passed with sthttpd HTTP server!"
+
+
+echo "
+*********************
+* All tests passed! *
+*********************
+"
 
 # Go back to the work directory
 cd "$SCRIPTDIR" || exit 1

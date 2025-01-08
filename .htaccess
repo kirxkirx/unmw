@@ -16,4 +16,5 @@ Options +ExecCGI
 # Block CGI execution in all subdirectories
 <DirectoryMatch "^.*/.+/">
     Options -ExecCGI
+    AllowOverride None
 </DirectoryMatch>
