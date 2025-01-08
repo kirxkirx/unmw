@@ -9,7 +9,6 @@ import time
 import sys
 import socket
 import pwd
-import magic
 # Try to import archive handling libraries
 try:
     import zipfile
@@ -65,6 +64,7 @@ def get_mime_type(filepath: str) -> str:
     Get MIME type of file using python-magic, handling different implementations
     """
     try:
+        import magic
         # Try python-magic implementation
         try:
             # Try using mime=True parameter
@@ -108,11 +108,10 @@ def validate_archive_type(filepath: str) -> Tuple[bool, str]:
 
     return True, ""
 
-
 def check_archive_contents(filepath: str) -> Tuple[bool, str]:
     """
     Validate archive contents without extracting.
-    Falls back to basic checks if archive libraries are not available.
+    Directories are allowed; only file extensions are checked.
     """
     ext = os.path.splitext(filepath)[1].lower()
     image_files = []
@@ -133,8 +132,11 @@ def check_archive_contents(filepath: str) -> Tuple[bool, str]:
         else:
             return False, f"Unsupported archive type: {ext}"
 
-        # Check each file in archive
+        # Check each entry in the archive
         for fname in filelist:
+            if fname.endswith('/'):  # Skip directories
+                continue
+
             if not is_safe_filename(fname):
                 return False, f"Unsafe filename in archive: {fname}"
 
@@ -284,10 +286,28 @@ def main():
         os.system(f'ls -lh {dirname}* > {dirname}upload.log')
 
         # Run processing wrapper
-        os.system(
-            f'./wrapper.sh {dirname}{os.path.basename(form["file"].filename)}')
+        wrapper_command = f'./wrapper.sh {dirname}{os.path.basename(form["file"].filename)}'
+        exit_status = os.system(wrapper_command)
 
+        # Check exit status of wrapper.sh
+        if exit_status != 0:
+            # Cleanup on failure
+            print("<html><body>Error during processing. Cleaning up...</body></html>")
+            try:
+                for root, dirs, files in os.walk(dirname, topdown=False):
+                    for file in files:
+                        os.unlink(os.path.join(root, file))
+                    for directory in dirs:
+                        os.rmdir(os.path.join(root, directory))
+                os.rmdir(dirname)
+            except Exception as e:
+                print(f"<html><body>Error during cleanup: {e}</body></html>")
+                sys.exit(1)
+            sys.exit(1)
+        
         # Wait for autoprocess.sh to create results_url.txt
+        # autoprocess.sh will keep running while wrapper.sh exits
+        time.sleep(5)
         results_url = None
         for _ in range(4):
             if os.path.isfile(dirname + "results_url.txt"):

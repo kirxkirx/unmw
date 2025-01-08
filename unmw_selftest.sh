@@ -194,6 +194,9 @@ if ! file NMW__NovaVul24_Stas__WebCheck__NotReal.zip | grep --quiet 'Zip archive
  echo "$0 test error: NMW__NovaVul24_Stas__WebCheck__NotReal.zip does not look like a ZIP archive"
  exit 1
 fi
+echo "-- The content of the zip archive --"
+unzip -l NMW__NovaVul24_Stas__WebCheck__NotReal.zip
+echo "------------------------------------"
 
 # Test if HTTP server is running
 # (moved after zip file creation to give the server more time to start)
