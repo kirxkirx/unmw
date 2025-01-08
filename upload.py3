@@ -108,6 +108,7 @@ def validate_archive_type(filepath: str) -> Tuple[bool, str]:
 
     return True, ""
 
+
 def check_archive_contents(filepath: str) -> Tuple[bool, str]:
     """
     Validate archive contents without extracting.
