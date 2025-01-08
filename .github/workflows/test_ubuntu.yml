@@ -28,6 +28,11 @@ jobs:
           done
       - name: Install VaST dependencies
         run: sudo apt-get install gfortran libx11-dev libpng-dev 
+      - name: Install rarfile for Python
+        run: |
+          sudo apt-get install -y unrar
+          pip install rarfile
+          python3 -c "import rarfile" 2>/dev/null && echo "rarfile is available" || echo "rarfile is not available"
       - name: Run self-test script
         run: bash unmw_selftest.sh
         
