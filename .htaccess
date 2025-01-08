@@ -1,0 +1,19 @@
+# These are special instructions for Apache web server
+
+# Allow CGI execution in the current directory
+Options +ExecCGI
+
+# Tell Apache it cannot run the shell scripts directly
+<FilesMatch "\.sh$">
+    Require all denied
+</FilesMatch>
+
+# Deny access to filter_report.py specifically
+<Files "filter_report.py">
+    Require all denied
+</Files>
+
+# Block CGI execution in all subdirectories
+<DirectoryMatch "^.*/.+/">
+    Options -ExecCGI
+</DirectoryMatch>
