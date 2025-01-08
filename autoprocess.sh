@@ -503,7 +503,10 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
   echo "ERROR: unrecognized archive type $ZIP_ARCHIVE_FILENAME" 
   exit 1
  fi
+ # remove the archive file
  rm -f "$ZIP_ARCHIVE_FILENAME"
+ # set restricitve permissions to all the extracted files, just in case
+ chmod -R 0644 *
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 
 ##### At this point we have input directory with images at $ABSOLUTE_PATH_TO_IMAGES #####
