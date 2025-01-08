@@ -314,13 +314,16 @@ def main():
         # autoprocess.sh will keep running while wrapper.sh exits
         time.sleep(5)
         results_url = None
-        for _ in range(4):
+        for _ in range(6):
             if os.path.isfile(dirname + "results_url.txt"):
                 with open(dirname + "results_url.txt") as f:
                     results_url = f.readline().strip()
                 break
-            time.sleep(5)
+            time.sleep(4)
 
+        # If results_url.txt was never created 
+        # - point uset to the upload directory where it should appear,
+        # where it may appear... eventually.
         if not results_url:
             results_url = f'http://{socket.getfqdn()}/unmw/{dirname}'
 

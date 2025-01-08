@@ -157,7 +157,7 @@ if [ ! -s custom_http_server.py ];then
  exit 1
 fi
 # Explicitly specfy port on which the Python HTTP server should run
-python3 custom_http_server.py --bind 127.0.0.1 "$UNMW_FREE_PORT" > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
+python3 custom_http_server.py "$UNMW_FREE_PORT" > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
 SERVER_PID=$!
 
 # Function to clean up (kill the server) on script exit
@@ -323,14 +323,15 @@ localhost will no longer work as in the previous test,
 so let's manually reset the url"
 echo "ls -lhdt *"
 ls -lhdt *
-HACK_REPLACE_RESULTS_URL="http://localhost:$UNMW_FREE_PORT/$UPLOADS_DIR/$(ls -dt results_Vul8* 2>/dev/null | head -n 1)"
+HACK_REPLACE_RESULTS_URL="http://localhost:$UNMW_FREE_PORT/$UPLOADS_DIR/$(ls -dt results_*_Vul8_* 2>/dev/null | head -n 1)"
+results_url="$HACK_REPLACE_RESULTS_URL"
 echo "---- hack replaced results_url ---
 $results_url
 ---------------------"
 #
 echo "*** We are at $PWD"
-echo "--- autoprocess.log ---"
-cat autoprocess.log
+echo "--- autoprocess.txt ---"
+cat autoprocess.txt
 echo "-----------------------"
 for WEB_UPLOAD_DIR in web_upload_* ;do
  if [ ! -d "$WEB_UPLOAD_DIR" ];then
