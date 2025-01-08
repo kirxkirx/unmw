@@ -141,6 +141,8 @@ def check_archive_contents(filepath: str) -> Tuple[bool, str]:
             file_ext = os.path.splitext(fname)[1].lower()
             if file_ext in ALLOWED_IMAGE_EXTENSIONS:
                 image_files.append(fname)
+            else:
+                return False, f"Unrecognized file extension in archive: {file_ext}"
 
         if len(image_files) < MIN_IMAGE_FILES:
             return False, f"Not enough image files found. Minimum required: {MIN_IMAGE_FILES}"
