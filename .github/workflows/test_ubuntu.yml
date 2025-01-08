@@ -33,6 +33,17 @@ jobs:
           sudo apt-get install -y unrar
           pip install rarfile
           python3 -c "import rarfile" 2>/dev/null && echo "rarfile is available" || echo "rarfile is not available"
+      - name: Download and install rar as unrar cannot unpack our .rar archives
+        run: |
+          # Define the URL for the RAR package
+          RAR_URL="https://www.rarlab.com/rar/rarlinux-x64-710b2.tar.gz"
+          # Download and extract RAR
+          curl -L "$RAR_URL" | tar -xz -C /tmp
+          # Move the binaries to /usr/local/bin
+          sudo mv /tmp/rar/rar /usr/local/bin/rar
+          sudo mv /tmp/rar/unrar /usr/local/bin/unrar
+      - name: Verify RAR installation
+        run: rar --version           
       - name: Run self-test script
         run: bash unmw_selftest.sh
         
