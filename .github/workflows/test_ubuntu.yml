@@ -43,7 +43,7 @@ jobs:
           sudo mv /tmp/rar/rar /usr/local/bin/rar
           sudo mv /tmp/rar/unrar /usr/local/bin/unrar
       - name: Verify RAR installation
-        run: rar --version           
+        run: rar
       - name: Run self-test script
         run: bash unmw_selftest.sh
         
