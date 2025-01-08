@@ -291,7 +291,9 @@ else
  exit 1
 fi
 echo "------------------------------------"
-$(curl --max-time 600 --silent --show-error -X POST -F 'file=@2025-01-07_Vul8_183150_Stas.rar' -F 'workstartemail=' -F 'workendemail=' "http://localhost:$UNMW_FREE_PORT/upload.py")
+unset results_server_reply
+unset results_url
+results_server_reply=$(curl --max-time 600 --silent --show-error -X POST -F 'file=@2025-01-07_Vul8_183150_Stas.rar' -F 'workstartemail=' -F 'workendemail=' "http://localhost:$UNMW_FREE_PORT/upload.py")
 if [ -z "$results_server_reply" ];then
  echo "$0 test error: empty HTTP server reply"
  exit 1
