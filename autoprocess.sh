@@ -40,6 +40,12 @@ if [ -z "$MAX_SYSTEM_LOAD" ];then
   MAX_SYSTEM_LOAD=3.0
  fi
 fi
+# disable load limit if we are testing in GitHub Actions
+if [ "$GITHUB_ACTIONS" != "true" ];then
+ MAX_IOWAIT_PERCENT=99.0
+ MAX_CPU_TEMP_C=99.0
+ MAX_SYSTEM_LOAD=99.0
+fi
 # 
 
 # Normally $IMAGE_DATA_ROOT $DATA_PROCESSING_ROOT $URL_OF_DATA_PROCESSING_ROOT are 
@@ -216,7 +222,7 @@ function check_unrar_processes_are_not_too_many {
  # The grep command filters this list to only include lines that contain "util/sysrem".
  # The -v option to grep excludes lines that contain "grep" itself to prevent counting the grep command as a process.
  # The wc command counts the number of lines.
- num_processes=$(ps ax | grep "unrar" | grep -v grep | wc -l)
+ num_processes=$(ps ax | grep -e "unrar " -e "rar " | grep -v grep | wc -l)
  if [ -z "$num_processes" ];then
   return 0
  fi
