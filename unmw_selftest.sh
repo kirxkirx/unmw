@@ -318,18 +318,10 @@ while pgrep -f "autoprocess.sh" > /dev/null; do
  sleep 1  # Wait for 1 second before checking again
 done
 #
-echo "GitHub Actions runner keeps changing it's fqdn: 
-localhost will no longer work as in the previous test,
-so let's manually reset the url"
+echo "*** We are at $PWD"
 echo "ls -lhdt *"
 ls -lhdt *
-HACK_REPLACE_RESULTS_URL="http://localhost:$UNMW_FREE_PORT/$UPLOADS_DIR/$(ls -dt results_*_Vul8_* 2>/dev/null | head -n 1)"
-results_url="$HACK_REPLACE_RESULTS_URL"
-echo "---- hack replaced results_url ---
-$results_url
----------------------"
 #
-echo "*** We are at $PWD"
 echo "--- autoprocess.txt ---"
 cat autoprocess.txt
 echo "-----------------------"
