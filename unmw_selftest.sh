@@ -157,7 +157,7 @@ if [ ! -s custom_http_server.py ];then
  exit 1
 fi
 # Explicitly specfy port on which the Python HTTP server should run
-python3 custom_http_server.py "$UNMW_FREE_PORT" > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
+python3 custom_http_server.py --bind 127.0.0.1 "$UNMW_FREE_PORT" > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
 SERVER_PID=$!
 
 # Function to clean up (kill the server) on script exit
