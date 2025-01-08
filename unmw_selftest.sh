@@ -328,14 +328,19 @@ echo "---- hack replaced results_url ---
 $results_url
 ---------------------"
 #
+echo "*** We are at $PWD"
 echo "--- autoprocess.log ---"
 cat autoprocess.log
 echo "-----------------------"
 for WEB_UPLOAD_DIR in web_upload_* ;do
-echo "___ $WEB_UPLOAD_DIR ___"
- for FILE_TO_CAT in *.txt *.log ;do
-  ls "$WEB_UPLOAD_DIR/$FILE_TO_CAT"
-  cat "$WEB_UPLOAD_DIR/$FILE_TO_CAT"
+ if [ ! -d "$WEB_UPLOAD_DIR" ];then
+  echo "No web_upload_* directories found (this is fine)"
+  break
+ fi
+ echo "___ $WEB_UPLOAD_DIR ___"
+ for FILE_TO_CAT in "$WEB_UPLOAD_DIR/"*.txt "$WEB_UPLOAD_DIR/"*.log ;do
+  ls "$FILE_TO_CAT"
+  cat "$FILE_TO_CAT"
  done
 done
 #
