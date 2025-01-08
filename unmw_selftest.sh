@@ -252,6 +252,8 @@ done
 if ! curl --silent --show-error "$results_url" | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get web run results page via the HTTP server"
  exit 1
+else
+ echo "V0615 Vul is fond in HTTP-uploaded results"
 fi
 
 # Go back to the work directory
@@ -261,6 +263,8 @@ cd "$SCRIPTDIR" || exit 1
 if ! ./combine_reports.sh ;then
  echo "$0 test error: non-zero exit code of combine_reports.sh"
  exit 1
+else
+ echo "./combine_reports.sh seems to run fine"
 fi
 # uploads/ is the default location for the processing data (both images and results)
 cd "$UPLOADS_DIR" || exit 1
@@ -269,10 +273,15 @@ LATEST_COMBINED_HTML_REPORT=$(ls -t *_evening_* *_morning_* 2>/dev/null | grep -
 if [ -z "$LATEST_COMBINED_HTML_REPORT" ];then
  echo "$0 test error: empty LATEST_COMBINED_HTML_REPORT"
  exit 1
+else
+ echo "The latest combined report is:"
+ ls -lh "$LATEST_COMBINED_HTML_REPORT"
 fi
 if ! grep --quiet 'V0615 Vul' "$LATEST_COMBINED_HTML_REPORT" ;then
  echo "$0 test error: cannot find 'V0615 Vul' in LATEST_COMBINED_HTML_REPORT=$LATEST_COMBINED_HTML_REPORT"
  exit 1
+else
+ echo "Found V0615 Vul in $LATEST_COMBINED_HTML_REPORT"
 fi
 # Check that the png image previews were actually created
 for PNG_FILE_TO_TEST in $(grep 'img src=' "$LATEST_COMBINED_HTML_REPORT" | awk -F"img src=" '{print $2}' | awk -F'"'  '{print $2}' | grep '.png') ;do
@@ -290,11 +299,14 @@ for PNG_FILE_TO_TEST in $(grep 'img src=' "$LATEST_COMBINED_HTML_REPORT" | awk -
   exit 1
  fi
 done
+echo "PNG files linked in the combined report look fine"
 
 echo "All tests passed!"
 
 # Go back to the work directory
 cd "$SCRIPTDIR" || exit 1
 
+# no need to manually stop the server and remove temporary files as thanks to trap 
+# cleanup will be called automatically on EXIT, which includes normal termination or errors.
 # Stop the server
-cleanup
+#cleanup
