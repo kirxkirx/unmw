@@ -90,7 +90,7 @@ def get_mime_type(filepath: str) -> str:
 
 def validate_archive_type(filepath: str) -> Tuple[bool, str]:
     """
-    Validate that file is a legitimate archive of allowed type
+    Validate that file is a legitimate archive of allowed type.
     """
     mime_type = get_mime_type(filepath)
     ext = os.path.splitext(filepath)[1].lower()
@@ -100,11 +100,15 @@ def validate_archive_type(filepath: str) -> Tuple[bool, str]:
 
     valid_mime_types = {
         '.zip': 'application/zip',
-        '.rar': 'application/x-rar'
+        '.rar': ['application/x-rar', 'application/vnd.rar']
     }
 
-    if mime_type != valid_mime_types.get(ext):
-        return False, f"MIME type mismatch: {mime_type}"
+    if isinstance(valid_mime_types.get(ext), list):
+        if mime_type not in valid_mime_types[ext]:
+            return False, f"MIME type mismatch: {mime_type}"
+    else:
+        if mime_type != valid_mime_types.get(ext):
+            return False, f"MIME type mismatch: {mime_type}"
 
     return True, ""
 

@@ -261,6 +261,70 @@ fi
 
 # Go back to the work directory
 cd "$SCRIPTDIR" || exit 1
+cd "$UPLOADS_DIR" || exit 1
+
+# RAR file with cloudy images test
+if [ ! -f "2025-01-07_Vul8_183150_Stas.rar" ];then
+ {
+  curl --silent --show-error -O "http://scan.sai.msu.ru/~kirx/pub/2025-01-07_Vul8_183150_Stas.rar" 
+ } || exit 1
+fi
+if [ ! -s 2025-01-07_Vul8_183150_Stas.rar ];then
+ echo "$0 test error: failed to download a archive with the images"
+ exit 1
+else
+ echo "Downloaded test file 2025-01-07_Vul8_183150_Stas.rar"
+fi
+if ! file 2025-01-07_Vul8_183150_Stas.rar | grep --quiet 'RAR archive' ;then
+ echo "$0 test error: 2025-01-07_Vul8_183150_Stas.rar does not look like a RAR archive"
+ exit 1
+fi
+echo "-- The content of the rar archive --"
+if command -v rar &> /dev/null ;then
+ echo "Using rar"
+ rar l 2025-01-07_Vul8_183150_Stas.rar
+elif command -v unrar &> /dev/null ;then
+ echo "Using unrar"
+ unrar l 2025-01-07_Vul8_183150_Stas.rar
+else
+ echo "Please install rar or unrar to complete this test"
+ exit 1
+fi
+echo "------------------------------------"
+$(curl --max-time 600 --silent --show-error -X POST -F 'file=@2025-01-07_Vul8_183150_Stas.rar' -F 'workstartemail=' -F 'workendemail=' "http://localhost:$UNMW_FREE_PORT/upload.py")
+if [ -z "$results_server_reply" ];then
+ echo "$0 test error: empty HTTP server reply"
+ exit 1
+fi
+echo "---- Server reply ---
+$results_server_reply
+---------------------"
+results_url=$(echo "$results_server_reply" | grep 'url=' | head -n1 | awk -F'url=' '{print $2}' | awk -F'"' '{print $1}')
+if [ -z "$results_url" ];then
+ echo "$0 test error: empty results_url after parsing HTTP server reply"
+ exit 1
+fi
+echo "---- results_url ---
+$results_url
+---------------------"
+echo "Sleep to give the server some time to process the data"
+# Wait until no copies of autoprocess.sh are running
+# (this assumes no other copies of the script are running)
+echo "Waiting for autoprocess.sh to finish..."
+while pgrep -f "autoprocess.sh" > /dev/null; do
+ sleep 1  # Wait for 1 second before checking again
+done
+#
+if ! curl --silent --show-error "$results_url" | grep --quiet 'ERROR: too few refereence images for the field Vul8' ;then
+ echo "$0 test error: failed to get web run results page via the HTTP server"
+ exit 1
+else
+ echo "Expected error message is fond in HTTP-uploaded results"
+fi
+
+
+# Go back to the work directory
+cd "$SCRIPTDIR" || exit 1
 
 # Test the combine reports script
 if ! ./combine_reports.sh ;then
@@ -303,6 +367,28 @@ for PNG_FILE_TO_TEST in $(grep 'img src=' "$LATEST_COMBINED_HTML_REPORT" | awk -
  fi
 done
 echo "PNG files linked in the combined report look fine"
+#
+LATEST_PROCESSING_SUMMARY_LOG=$(ls -t *_evening_* *_morning_* 2>/dev/null | grep 'summary' | head -n 1)
+if [ -z "$LATEST_PROCESSING_SUMMARY_LOG" ];then
+ echo "$0 test error: empty LATEST_PROCESSING_SUMMARY_LOG"
+ exit 1
+else
+ echo "The latest combined report is:"
+ ls -lh "$LATEST_PROCESSING_SUMMARY_LOG"
+fi
+if ! grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep --quiet 'OK' ;then
+ echo "$0 test error: cannot find Vul3 OK in LATEST_PROCESSING_SUMMARY_LOG=$LATEST_PROCESSING_SUMMARY_LOG"
+ exit 1
+else
+ echo "Found Vul3 OK in $LATEST_PROCESSING_SUMMARY_LOG"
+fi
+if ! grep 'Vul8' "$LATEST_PROCESSING_SUMMARY_LOG" | grep --quiet 'OK' ;then
+ echo "$0 test error: cannot find Vul8 ERROR in LATEST_PROCESSING_SUMMARY_LOG=$LATEST_PROCESSING_SUMMARY_LOG"
+ exit 1
+else
+ echo "Found Vul8 ERROR in $LATEST_PROCESSING_SUMMARY_LOG"
+fi
+
 
 echo "All tests passed!"
 

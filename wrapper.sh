@@ -33,10 +33,11 @@ fi
 
 # Function to list the contents of a rar file using either `rar` or `unrar`
 list_rar_contents() {
+    # actually | grep ' ..:.. ' supposed to leave only the lines with time stamps - that's the ones containing files
     if command -v rar &>/dev/null; then
-        rar l "$1" | awk '{print $NF}' | grep -vE '^Volume|^Name|^Size' | sed '/^$/d'
+        rar l "$1" | grep ' ..:.. ' | awk '{print $NF}' | grep -vE '^Volume|^Name|^Size' | sed '/^$/d'
     elif command -v unrar &>/dev/null; then
-        unrar l "$1" | awk '{print $NF}' | grep -vE '^Volume|^Name|^Size' | sed '/^$/d'
+        unrar l "$1" | grep ' ..:.. ' | awk '{print $NF}' | grep -vE '^Volume|^Name|^Size' | sed '/^$/d'
     else
         echo "Error: Neither rar nor unrar is available to list the archive contents."
         exit 1
