@@ -384,7 +384,7 @@ if ! grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep --quiet 'OK' ;then
 else
  echo "Found Vul3 OK in $LATEST_PROCESSING_SUMMARY_LOG"
 fi
-if ! grep 'Vul8' "$LATEST_PROCESSING_SUMMARY_LOG" | grep --quiet 'OK' ;then
+if ! grep 'Vul8' "$LATEST_PROCESSING_SUMMARY_LOG" | grep --quiet 'ERROR' ;then
  echo "$0 test error: cannot find Vul8 ERROR in LATEST_PROCESSING_SUMMARY_LOG=$LATEST_PROCESSING_SUMMARY_LOG"
  exit 1
 else
