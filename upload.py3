@@ -285,14 +285,14 @@ def main():
         os.system(
             f'./wrapper.sh {dirname}{os.path.basename(form["file"].filename)}')
 
-        # Wait for results
+        # Wait for autoprocess.sh to create results_url.txt
         results_url = None
         for _ in range(4):
             if os.path.isfile(dirname + "results_url.txt"):
                 with open(dirname + "results_url.txt") as f:
                     results_url = f.readline().strip()
                 break
-            time.sleep(30)
+            time.sleep(5)
 
         if not results_url:
             results_url = f'http://{socket.getfqdn()}/unmw/{dirname}'

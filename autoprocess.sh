@@ -27,7 +27,7 @@ if [ -z "$MAX_IOWAIT_PERCENT" ];then
 fi
 #
 if [ -z "$MAX_CPU_TEMP_C" ];then
- MAX_CPU_TEMP_C=65.0
+ MAX_CPU_TEMP_C=70.0
 fi
 #
 if [ -z "$MAX_SYSTEM_LOAD" ];then
@@ -343,22 +343,6 @@ if [ ! -d "$VAST_REFERENCE_COPY" ];then
  exit 1
 fi
 
-##### Check if $VAST_REFERENCE_COPY seems to contain a working copy of VaST #####
-if [ ! -x "$VAST_REFERENCE_COPY/vast" ];then
- echo "ERROR: cannot find the main VaST executable at $VAST_REFERENCE_COPY/vast"
- exit 1
-fi
-# Check if vast actually runs
-"$VAST_REFERENCE_COPY"/vast --help 2>&1 | grep --quiet 'VaST'
-if [ $? -ne 0 ];then
- echo "ERROR: VaST does not seem to run $VAST_REFERENCE_COPY/vast --help"
- exit 1
-fi
-if [ ! -x "$VAST_REFERENCE_COPY/util/transients/transient_factory_test31.sh" ];then 
- echo "ERROR: cannot find the main VaST data processing script at $VAST_REFERENCE_COPY/util/transients/transient_factory_test31.sh"
- exit 1
-fi
-##########
 
 
 # Make up file names
@@ -400,6 +384,24 @@ else
 fi
 
 # we want this to be after results_url.txt is created
+###########################################################################
+# this check is slow an unlikely to fail, OK to put after creating results_url.txt that we want ASASP
+##### Check if $VAST_REFERENCE_COPY seems to contain a working copy of VaST #####
+if [ ! -x "$VAST_REFERENCE_COPY/vast" ];then
+ echo "ERROR: cannot find the main VaST executable at $VAST_REFERENCE_COPY/vast"
+ exit 1
+fi
+# Check if vast actually runs
+"$VAST_REFERENCE_COPY"/vast --help 2>&1 | grep --quiet 'VaST'
+if [ $? -ne 0 ];then
+ echo "ERROR: VaST does not seem to run $VAST_REFERENCE_COPY/vast --help"
+ exit 1
+fi
+if [ ! -x "$VAST_REFERENCE_COPY/util/transients/transient_factory_test31.sh" ];then 
+ echo "ERROR: cannot find the main VaST data processing script at $VAST_REFERENCE_COPY/util/transients/transient_factory_test31.sh"
+ exit 1
+fi
+##########
 ###########################################################################
 ############### Delay processing if the server load is high ###############
 UNIXSEC_START_WAITLOAD=$(date +%s)
