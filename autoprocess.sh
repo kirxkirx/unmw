@@ -41,10 +41,12 @@ if [ -z "$MAX_SYSTEM_LOAD" ];then
  fi
 fi
 # disable load limit if we are testing in GitHub Actions
-if [ "$GITHUB_ACTIONS" = "true" ];then
- MAX_IOWAIT_PERCENT=99.0
- MAX_CPU_TEMP_C=99.0
- MAX_SYSTEM_LOAD=99.0
+if [ -n "$GITHUB_ACTIONS" ];then
+ if [ "$GITHUB_ACTIONS" = "true" ];then
+  MAX_IOWAIT_PERCENT=99.0
+  MAX_CPU_TEMP_C=99.0
+  MAX_SYSTEM_LOAD=99.0
+ fi
 fi
 #
 
