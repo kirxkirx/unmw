@@ -146,31 +146,21 @@ if ! grep --quiet 'PNV J19430751+2100204' "${RESULTS_DIR_FROM_URL__MANUALRUN}ind
  exit 1
 fi
 
-# Start the Python HTTP server in the background
-cd "$SCRIPTDIR" || exit 1
-if [ ! -f custom_http_server.py ];then
- echo "$0 test error: 'custom_http_server.py' not found in '$SCRIPTDIR'"
- exit 1
-fi
-if [ ! -s custom_http_server.py ];then
- echo "$0 test error: 'custom_http_server.py' is empty"
- exit 1
-fi
-# Explicitly specfy port on which the Python HTTP server should run
-python3 custom_http_server.py "$UNMW_FREE_PORT" > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
-SERVER_PID=$!
+######## Prepare to run web servers
 
 # Function to clean up (kill the server) on script exit
 cleanup() {
  cd "$SCRIPTDIR" || exit 1
  #
- echo "____________ cleanup ____________"
- echo "Stopping the Python HTTP server..."
- kill $SERVER_PID 2>/dev/null
- echo "Logs of the Python HTTP server..."
- cat "$UPLOADS_DIR/custom_http_server.log"
- rm -fv "$UPLOADS_DIR/custom_http_server.log" 
- echo "________________________________"
+ if [ -f "$UPLOADS_DIR/custom_http_server.log" ];then
+  echo "____________ cleanup ____________"
+  echo "Stopping the Python HTTP server..."
+  kill $PYTHON_HTTP_SERVER_PID 2>/dev/null
+  echo "Logs of the Python HTTP server..."
+  cat "$UPLOADS_DIR/custom_http_server.log"
+  rm -fv "$UPLOADS_DIR/custom_http_server.log" 
+  echo "________________________________"
+ fi
  #
  if [ -f "$UPLOADS_DIR/sthttpd_http_server.log" ];then
   echo "Stopping the sthttpd HTTP server..."
@@ -184,6 +174,55 @@ cleanup() {
 
 # Trap script exit signals to ensure cleanup is executed
 trap cleanup EXIT INT TERM
+
+
+# Go back to the work directory
+cd "$SCRIPTDIR" || exit 1
+
+echo "Let's test with sthttpd HTTP server"
+
+if [ ! -d sthttpd ];then
+ echo "Get sthttpd"
+ git clone https://github.com/blueness/sthttpd.git
+ if [ $? -ne 0 ];then
+  echo "$0 test error: cannot git clone sthttpd"
+  exit 1
+ fi
+ cd sthttpd || exit 1
+ ./autogen.sh || exit 1
+ ./configure || exit 1
+ make || exit 1
+ if [ ! -x src/thttpd ];then
+  echo "$0 test error: src/thttpd was not created"
+  exit 1
+ fi
+fi
+
+echo "Run sthttpd"
+# Go back to the work directory
+cd "$SCRIPTDIR" || exit 1
+
+# Yes, we want to put sthttpd on the next available port
+UNMW_FREE_PORT=$(get_free_port_for_http_server)
+if [[ $? -eq 0 ]]; then
+    echo "Free port for HTTP server: $UNMW_FREE_PORT"
+else
+    echo "Failed to find a free port."
+    exit 1
+fi
+# export UNMW_FREE_PORT as local_config.sh needs it
+export UNMW_FREE_PORT
+
+# Run the server - it will run in the background
+if [ ! -x sthttpd/src/thttpd ];then
+ echo "$0 test error: sthttpd/src/thttpd was not found"
+ exit 1
+fi
+# by default, sthttpd will not pass UNMW_FREE_PORT to cgi scripts
+sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log"
+STHTTPD_SERVER_PID=$!
+
+
 
 
 # Prepare zip archive with the images for the web upload test
@@ -425,50 +464,29 @@ fi
 
 echo "All tests passed with Python HTTP server!"
 
+
+
+
 # Go back to the work directory
 cd "$SCRIPTDIR" || exit 1
 
-echo "Now let's test with sthttpd HTTP server"
+echo "Now let's test with Python HTTP server"
 
-if [ ! -d sthttpd ];then
- echo "Get sthttpd"
- git clone https://github.com/blueness/sthttpd.git
- if [ $? -ne 0 ];then
-  echo "$0 test error: cannot git clone sthttpd"
-  exit 1
- fi
- cd sthttpd || exit 1
- ./autogen.sh || exit 1
- ./configure || exit 1
- make || exit 1
- if [ ! -x src/thttpd ];then
-  echo "$0 test error: src/thttpd was not created"
-  exit 1
- fi
-fi
-
-echo "Run sthttpd"
-# Go back to the work directory
+# Start the Python HTTP server in the background
 cd "$SCRIPTDIR" || exit 1
-
-# Yes, we want to put sthttpd on the next available port
-UNMW_FREE_PORT=$(get_free_port_for_http_server)
-if [[ $? -eq 0 ]]; then
-    echo "Free port for HTTP server: $UNMW_FREE_PORT"
-else
-    echo "Failed to find a free port."
-    exit 1
-fi
-# export UNMW_FREE_PORT as local_config.sh needs it
-export UNMW_FREE_PORT
-
-# Run the server - it will run in the background
-if [ ! -x sthttpd/src/thttpd ];then
- echo "$0 test error: sthttpd/src/thttpd was not found"
+if [ ! -f custom_http_server.py ];then
+ echo "$0 test error: 'custom_http_server.py' not found in '$SCRIPTDIR'"
  exit 1
 fi
-sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log"
-STHTTPD_SERVER_PID=$!
+if [ ! -s custom_http_server.py ];then
+ echo "$0 test error: 'custom_http_server.py' is empty"
+ exit 1
+fi
+# by default, Python HTTP server will pass UNMW_FREE_PORT to cgi scripts
+# Explicitly specfy port on which the Python HTTP server should run
+python3 custom_http_server.py "$UNMW_FREE_PORT" > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
+PYTHON_HTTP_SERVER_PID=$!
+
 
 ### Repeat the Nova Vul test with sthttpd
 cd "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/" || exit 1
