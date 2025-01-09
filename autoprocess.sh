@@ -225,7 +225,7 @@ function check_unrar_processes_are_not_too_many {
  # The grep command filters this list to only include lines that contain "util/sysrem".
  # The -v option to grep excludes lines that contain "grep" itself to prevent counting the grep command as a process.
  # The wc command counts the number of lines.
- num_processes=$(ps ax | grep -e "unrar " -e "rar " | grep -v grep | wc -l)
+ num_processes=$(ps ax | grep -e " unrar " -e " rar " | grep -v grep | wc -l)
  if [ -z "$num_processes" ];then
   return 0
  fi
