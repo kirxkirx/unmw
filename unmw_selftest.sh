@@ -219,6 +219,11 @@ if [ ! -x sthttpd/src/thttpd ];then
  exit 1
 fi
 # by default, sthttpd will not pass UNMW_FREE_PORT to cgi scripts
+# So actually our only hope is that UNMW_FREE_PORT=8080
+if [ "$UNMW_FREE_PORT" != "8080" ];then
+ echo "$0 test error: the port 8080 needed for the sthttpd test is not free"
+ exit 1
+fi
 sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log"
 STHTTPD_SERVER_PID=$!
 
@@ -253,10 +258,11 @@ echo "------------------------------------"
 # (moved after zip file creation to give the server more time to start)
 sleep 5  # Give the server some time to start
 # Check if the server is running
-if ! ps -ef | grep python3 | grep custom_http_server.py ;then
+if ! ps -ef | grep thttpd ;then
  echo "$0 test error: looks like the HTTP server is not running"
  exit 1
 fi
+
 
 # Check if the server is working, serving the content of the current directory
 if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/" | grep --quiet 'uploads/' ;then
@@ -506,10 +512,11 @@ echo "------------------------------------"
 # (moved after zip file creation to give the server more time to start)
 sleep 5  # Give the server some time to start
 # Check if the server is running
-if ! ps -ef | grep thttpd ;then
+if ! ps -ef | grep python3 | grep custom_http_server.py ;then
  echo "$0 test error: looks like the HTTP server is not running"
  exit 1
 fi
+
 
 # Check if the server is working, serving the content of the current directory
 if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/" | grep --quiet 'uploads/' ;then
