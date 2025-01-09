@@ -220,6 +220,8 @@ if [ ! -x sthttpd/src/thttpd ];then
 fi
 # by default, sthttpd will not pass UNMW_FREE_PORT to cgi scripts
 # So actually our only hope is that UNMW_FREE_PORT=8080
+# It will also not pass REFERENCE_IMAGES that we set above and that works well with Python HTTP server
+# Will have to hardcode REFERENCE_IMAGES to local_config.sh_for_test
 if [ "$UNMW_FREE_PORT" != "8080" ];then
  echo "$0 test error: the port 8080 needed for the sthttpd test is not free"
  exit 1
@@ -513,7 +515,7 @@ echo "------------------------------------"
 sleep 5  # Give the server some time to start
 # Check if the server is running
 if ! ps -ef | grep python3 | grep custom_http_server.py ;then
- echo "$0 test error: looks like the HTTP server is not running"
+ echo "$0 test error: looks like the Python HTTP server is not running"
  exit 1
 fi
 
