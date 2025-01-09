@@ -231,7 +231,7 @@ function check_unrar_processes_are_not_too_many {
  fi
  if [[ $num_processes =~ ^[0-9]+$ ]];then
   # The string is an integer number
-  echo "$num_processes" |  awk -v target=1 '{
+  echo "$num_processes" |  awk -v target=3 '{
          if ($1 < target) {
           exit 0
          } else {
