@@ -467,7 +467,7 @@ if [ ! -x sthttpd/src/thttpd ];then
  echo "$0 test error: sthttpd/src/thttpd was not found"
  exit 1
 fi
-sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -f "$UPLOADS_DIR/sthttpd_http_server.log"
+sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log"
 STHTTPD_SERVER_PID=$!
 
 ### Repeat the Nova Vul test with sthttpd
