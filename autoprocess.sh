@@ -193,13 +193,16 @@ function check_sysrem_processes_are_not_too_many {
  # The grep command filters this list to only include lines that contain "util/sysrem".
  # The -v option to grep excludes lines that contain "grep" itself to prevent counting the grep command as a process.
  # The wc command counts the number of lines.
+ #
+ # one util/sysrem process my get suck in a wating state (not sure why) and stop the whole system
+ # so let's allow more than one util/sysrem process
  num_processes=$(ps ax | grep "util/sysrem" | grep -v grep | wc -l)
  if [ -z "$num_processes" ];then
   return 0
  fi
  if [[ $num_processes =~ ^[0-9]+$ ]];then
   # The string is an integer number
-  echo "$num_processes" |  awk -v target=1 '{
+  echo "$num_processes" |  awk -v target=3 '{
          if ($1 < target) {
           exit 0
          } else {
