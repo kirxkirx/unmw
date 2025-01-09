@@ -365,6 +365,13 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
     echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><td>$ERROR_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
    else
     WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | tail -n1)
+    if [ -z "$WARNING_MSG" ];then
+     # Special check for corrupted index.html: 'Processig complete!' is there but not 'List of TOCP transients'
+     if ! grep --quiet 'List of TOCP transients' "$INPUT_DIR/index.html" ;then
+      WARNING_MSG="WARNING: corrupted log file"
+      # maybe do something about it, like check the disk space?
+     fi
+    fi
     echo "<td><font color='green'>OK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$WARNING_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
     ####
    fi # grep --quiet 'ERROR' "$INPUT_DIR/index.html"

@@ -32,8 +32,14 @@ fi
 #
 if [ -z "$MAX_SYSTEM_LOAD" ];then
  if [ -f /proc/cpuinfo ];then
- # Try to guess an appropriate MAX_SYSTEM_LOAD for starting a new process
-  MAX_SYSTEM_LOAD=$(cat /proc/cpuinfo | grep -c 'processor' | awk '{threads=$1; print (threads/2 > 3 ? int(threads/2) : 3)}')
+  # Try to guess an appropriate MAX_SYSTEM_LOAD for starting a new process
+  # We have "sysrem pile-up" problem on kadar2 server when MAX_SYSTEM_LOAD is threads/2
+  MAX_SYSTEM_LOAD=$(cat /proc/cpuinfo | grep -c 'processor' | awk '{threads=$1; print (threads/3 > 3 ? int(threads/3) : 3)}')
+  # and since we are at it, set OMP_NUM_THREADS that will be used by vast and sysrem tools
+  if [ -z "$OMP_NUM_THREADS" ];then
+   OMP_NUM_THREADS=$(cat /proc/cpuinfo | grep -c 'processor' | awk '{threads=$1; print (threads == 1 ? 1 : (threads == 2 ? 2 : (threads/2 > 1 ? int(threads/2) : 1)))}')
+   export OMP_NUM_THREADS
+  fi
  fi
  # fallback
  if [ -z "$MAX_SYSTEM_LOAD" ];then
@@ -204,7 +210,7 @@ function check_sysrem_processes_are_not_too_many {
  fi
  if [[ $num_processes =~ ^[0-9]+$ ]];then
   # The string is an integer number
-  echo "$num_processes" |  awk -v target=3 '{
+  echo "$num_processes" |  awk -v target=2 '{
          if ($1 < target) {
           exit 0
          } else {
