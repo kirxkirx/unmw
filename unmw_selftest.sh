@@ -202,16 +202,6 @@ echo "Run sthttpd"
 # Go back to the work directory
 cd "$SCRIPTDIR" || exit 1
 
-# Yes, we want to put sthttpd on the next available port
-UNMW_FREE_PORT=$(get_free_port_for_http_server)
-if [[ $? -eq 0 ]]; then
-    echo "Free port for HTTP server: $UNMW_FREE_PORT"
-else
-    echo "Failed to find a free port."
-    exit 1
-fi
-# export UNMW_FREE_PORT as local_config.sh needs it
-export UNMW_FREE_PORT
 
 # Run the server - it will run in the background
 if [ ! -x sthttpd/src/thttpd ];then
@@ -470,7 +460,7 @@ else
  echo "Found Vul8 ERROR in $LATEST_PROCESSING_SUMMARY_LOG"
 fi
 
-echo "All tests passed with Python HTTP server!"
+echo "All tests passed with sthttpd HTTP server!"
 
 
 
@@ -479,6 +469,17 @@ echo "All tests passed with Python HTTP server!"
 cd "$SCRIPTDIR" || exit 1
 
 echo "Now let's test with Python HTTP server"
+
+UNMW_FREE_PORT=$(get_free_port_for_http_server)
+if [[ $? -eq 0 ]]; then
+    echo "Free port for HTTP server: $UNMW_FREE_PORT"
+else
+    echo "Failed to find a free port."
+    exit 1
+fi
+# export UNMW_FREE_PORT as local_config.sh needs it
+export UNMW_FREE_PORT
+
 
 # Start the Python HTTP server in the background
 cd "$SCRIPTDIR" || exit 1
@@ -575,7 +576,7 @@ fi
 
 ###
 
-echo "All tests passed with sthttpd HTTP server!"
+echo "All tests passed with Python HTTP server!"
 
 
 echo "
