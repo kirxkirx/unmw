@@ -10,6 +10,7 @@ else
 fi
 
 #export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
+export REFERENCE_IMAGES="$DATA_PROCESSING_ROOT/NMW__NovaVul24_Stas_test/reference_images"
 
 
 # Specify plate-solve service
