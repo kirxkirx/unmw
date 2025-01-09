@@ -164,11 +164,13 @@ SERVER_PID=$!
 cleanup() {
  cd "$SCRIPTDIR" || exit 1
  #
+ echo "____________ cleanup ____________"
  echo "Stopping the Python HTTP server..."
  kill $SERVER_PID 2>/dev/null
  echo "Logs of the Python HTTP server..."
  cat "$UPLOADS_DIR/custom_http_server.log"
  rm -fv "$UPLOADS_DIR/custom_http_server.log" 
+ echo "________________________________"
  #
  if [ -f "$UPLOADS_DIR/sthttpd_http_server.log" ];then
   echo "Stopping the sthttpd HTTP server..."
@@ -176,6 +178,7 @@ cleanup() {
   echo "Logs of the sthttpd HTTP server..."
   cat "$UPLOADS_DIR/sthttpd_http_server.log"
   rm -fv "$UPLOADS_DIR/sthttpd_http_server.log" 
+  echo "________________________________"
  fi
 }
 
@@ -427,19 +430,21 @@ cd "$SCRIPTDIR" || exit 1
 
 echo "Now let's test with sthttpd HTTP server"
 
-echo "Get sthttpd"
-git clone https://github.com/blueness/sthttpd.git
-if [ $? -ne 0 ];then
- echo "$0 test error: cannot git clone sthttpd"
- exit 1
-fi
-cd sthttpd || exit 1
-./autogen.sh || exit 1
-./configure || exit 1
-make || exit 1
-if [ ! -x src/thttpd ];then
- echo "$0 test error: src/thttpd was not created"
- exit 1
+if [ ! -d sthttpd ];then
+ echo "Get sthttpd"
+ git clone https://github.com/blueness/sthttpd.git
+ if [ $? -ne 0 ];then
+  echo "$0 test error: cannot git clone sthttpd"
+  exit 1
+ fi
+ cd sthttpd || exit 1
+ ./autogen.sh || exit 1
+ ./configure || exit 1
+ make || exit 1
+ if [ ! -x src/thttpd ];then
+  echo "$0 test error: src/thttpd was not created"
+  exit 1
+ fi
 fi
 
 echo "Run sthttpd"
@@ -458,7 +463,11 @@ fi
 export UNMW_FREE_PORT
 
 # Run the server - it will run in the background
-sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$(pwd)" -c "upload.py" -f "$UPLOADS_DIR/sthttpd_http_server.log"
+if [ ! -x sthttpd/src/thttpd ];then
+ echo "$0 test error: sthttpd/src/thttpd was not found"
+ exit 1
+fi
+sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -f "$UPLOADS_DIR/sthttpd_http_server.log"
 STHTTPD_SERVER_PID=$!
 
 ### Repeat the Nova Vul test with sthttpd
