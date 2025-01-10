@@ -312,14 +312,20 @@ def main():
         
         # Wait for autoprocess.sh to create results_url.txt
         # autoprocess.sh will keep running while wrapper.sh exits
+        #
+        # sthttpd (and others?) have a 30 sec timeout for the cgi script to start printing stuff
+        #
+        # Let's start printing something - maybe that'll make the web server wait
+        print(" ")
+        #
         time.sleep(5)
         results_url = None
-        for _ in range(6):
+        for _ in range(24):
             if os.path.isfile(dirname + "results_url.txt"):
                 with open(dirname + "results_url.txt") as f:
                     results_url = f.readline().strip()
                 break
-            time.sleep(4)
+            time.sleep(1)
 
         # If results_url.txt was never created 
         # - point uset to the upload directory where it should appear,

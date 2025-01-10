@@ -19,42 +19,6 @@ if [ -z "$UNMW_LOCAL_CONFIG_SOURCED" ];then
  fi
 fi
 
-# Set max system stress parameters
-# (normally they should be set in local_config.sh)
-#
-if [ -z "$MAX_IOWAIT_PERCENT" ];then
- MAX_IOWAIT_PERCENT=3.0
-fi
-#
-if [ -z "$MAX_CPU_TEMP_C" ];then
- MAX_CPU_TEMP_C=70.0
-fi
-#
-if [ -z "$MAX_SYSTEM_LOAD" ];then
- if [ -f /proc/cpuinfo ];then
-  # Try to guess an appropriate MAX_SYSTEM_LOAD for starting a new process
-  # We have "sysrem pile-up" problem on kadar2 server when MAX_SYSTEM_LOAD is threads/2
-  MAX_SYSTEM_LOAD=$(cat /proc/cpuinfo | grep -c 'processor' | awk '{threads=$1; print (threads/3 > 3 ? int(threads/3) : 3)}')
-  # and since we are at it, set OMP_NUM_THREADS that will be used by vast and sysrem tools
-  if [ -z "$OMP_NUM_THREADS" ];then
-   OMP_NUM_THREADS=$(cat /proc/cpuinfo | grep -c 'processor' | awk '{threads=$1; print (threads == 1 ? 1 : (threads == 2 ? 2 : (threads/2 > 1 ? int(threads/2) : 1)))}')
-   export OMP_NUM_THREADS
-  fi
- fi
- # fallback
- if [ -z "$MAX_SYSTEM_LOAD" ];then
-  MAX_SYSTEM_LOAD=3.0
- fi
-fi
-# disable load limit if we are testing in GitHub Actions
-if [ -n "$GITHUB_ACTIONS" ];then
- if [ "$GITHUB_ACTIONS" = "true" ];then
-  MAX_IOWAIT_PERCENT=99.0
-  MAX_CPU_TEMP_C=99.0
-  MAX_SYSTEM_LOAD=99.0
- fi
-fi
-#
 
 # Normally $IMAGE_DATA_ROOT $DATA_PROCESSING_ROOT $URL_OF_DATA_PROCESSING_ROOT are 
 # exported in local_config.sh that is sourced by wrapper.sh
@@ -419,6 +383,43 @@ if [ ! -x "$VAST_REFERENCE_COPY/util/transients/transient_factory_test31.sh" ];t
  exit 1
 fi
 ##########
+###########################################################################
+# Set max system stress parameters
+# (normally they should be set in local_config.sh)
+#
+if [ -z "$MAX_IOWAIT_PERCENT" ];then
+ MAX_IOWAIT_PERCENT=3.0
+fi
+#
+if [ -z "$MAX_CPU_TEMP_C" ];then
+ MAX_CPU_TEMP_C=70.0
+fi
+#
+if [ -z "$MAX_SYSTEM_LOAD" ];then
+ if [ -f /proc/cpuinfo ];then
+  # Try to guess an appropriate MAX_SYSTEM_LOAD for starting a new process
+  # We have "sysrem pile-up" problem on kadar2 server when MAX_SYSTEM_LOAD is threads/2
+  MAX_SYSTEM_LOAD=$(cat /proc/cpuinfo | grep -c 'processor' | awk '{threads=$1; print (threads/3 > 3 ? int(threads/3) : 3)}')
+  # and since we are at it, set OMP_NUM_THREADS that will be used by vast and sysrem tools
+  if [ -z "$OMP_NUM_THREADS" ];then
+   OMP_NUM_THREADS=$(cat /proc/cpuinfo | grep -c 'processor' | awk '{threads=$1; print (threads == 1 ? 1 : (threads == 2 ? 2 : (threads/2 > 1 ? int(threads/2) : 1)))}')
+   export OMP_NUM_THREADS
+  fi
+ fi
+ # fallback
+ if [ -z "$MAX_SYSTEM_LOAD" ];then
+  MAX_SYSTEM_LOAD=3.0
+ fi
+fi
+# disable load limit if we are testing in GitHub Actions
+if [ -n "$GITHUB_ACTIONS" ] && [ "$GITHUB_ACTIONS" = "true" ];then
+ AUTOPROCESS_NO_WAIT="yes"
+ # actually this is redundant as we set AUTOPROCESS_NO_WAIT="yes" above
+ MAX_IOWAIT_PERCENT=99.0
+ MAX_CPU_TEMP_C=99.0
+ MAX_SYSTEM_LOAD=99.0
+fi
+#
 ###########################################################################
 ############### Delay processing if the server load is high ###############
 UNIXSEC_START_WAITLOAD=$(date +%s)
