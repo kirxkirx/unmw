@@ -177,6 +177,9 @@ cleanup() {
   echo "Logs of the sthttpd HTTP server..."
   cat "$UPLOADS_DIR/sthttpd_http_server.log"
   rm -fv "$UPLOADS_DIR/sthttpd_http_server.log" 
+  if [ -f "$UPLOADS_DIR/sthttpd_http_server.pid" ];then
+   rm -fv "$UPLOADS_DIR/sthttpd_http_server.pid"
+  fi
   echo "________________________________"
  fi
 }
@@ -225,9 +228,13 @@ if [ "$UNMW_FREE_PORT" != "8080" ];then
  echo "$0 test error: the port 8080 needed for the sthttpd test is not free"
  exit 1
 fi
-sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log"
+sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid"
 STHTTPD_SERVER_PID=$!
-
+echo "sthttpd PID after starting it is
+$STHTTPD_SERVER_PID
+and reported in $UPLOADS_DIR/sthttpd_http_server.pid"
+cat "$UPLOADS_DIR/sthttpd_http_server.pid"
+STHTTPD_SERVER_PID="$(cat "$UPLOADS_DIR/sthttpd_http_server.pid")"
 
 
 

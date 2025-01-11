@@ -292,12 +292,15 @@ def main():
 
         # Run processing wrapper
         wrapper_command = f'./wrapper.sh {dirname}{os.path.basename(form["file"].filename)}'
-        exit_status = os.system(wrapper_command)
+        try:
+            exit_status = os.system(wrapper_command)
+        except Exception as e:
+            print(f"<html><body>Error running wrapper.sh command: {e}</body></html>")
 
         # Check exit status of wrapper.sh
         if exit_status != 0:
             # Cleanup on failure
-            print("<html><body>Error during processing. Cleaning up...</body></html>")
+            print(f"<html><body>Error during processing.<br>./wrapper.sh {dirname}{os.path.basename(form['file'].filename)}<br>Exit status {exit_status}<br>Cleaning up...</body></html>")
             try:
                 for root, dirs, files in os.walk(dirname, topdown=False):
                     for file in files:
