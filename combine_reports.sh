@@ -128,7 +128,7 @@ SORTED_LIST_OF_FILES=$(ls -tr $LIST_OF_FILES)
 
 INPUT_LIST_OF_RESULT_DIRS=""
 for FILE in $SORTED_LIST_OF_FILES ;do
- grep --quiet 'Processig complete' "$FILE"
+ grep --quiet 'Processing complete!' "$FILE"
  if [ $? -ne 0 ];then
   continue
  fi
@@ -255,7 +255,7 @@ fi
 
 # Summary file
 if [ ! -f "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME" ];then
- # make head
+ # make head, including the LOG LINE
  echo "<html>
 <style>
   .main th, .main td {
@@ -265,7 +265,7 @@ if [ ! -f "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME" ];then
 <body>
 
 <table align='center' width='100%' border='0' class='main'>
-<tr><th>Camera</th><th>Obs.Time(UTC)</th><th>Field</th><th>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</th><th>Status</th><th>Log</th><th>Pointing.Offset(&deg;)</th><th>mag.lim.</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+<tr><th>Camera</th><th>Obs.Time(UTC)</th><th>Field</th><th>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</th><th>Status</th><th>Log</th><th>Pointing.Offset(&deg;)</th><th>mag.lim.</th><th>Candidates(new/total)</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
 
  # Add this summary file to the list
  SUMMARY_FILE_NAME_FOR_THE_TABLE=$(basename $OUTPUT_PROCESSING_SUMMARY_HTML_NAME .html)
@@ -314,18 +314,24 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
   fi
  fi
 
- grep --max-count=1 --quiet 'Processig complete' "$INPUT_DIR/index.html"
+ grep --max-count=1 --quiet 'Processing complete!' "$INPUT_DIR/index.html"
  if [ $? -ne 0 ];then
   echo "ERROR: incomplete report in $INPUT_DIR/index.html"
   continue
  fi
 
  FIELD=$(grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:processing fields::g' | sed 's:<br>::g' | awk '{print $1}')
+ 
+ # Count how many candidates are listed in HTML file (and are to be inserted in the combined report)
  NUMBER_OF_CANDIDATE_TRANSIENTS=$(grep 'script' "$INPUT_DIR/index.html" | grep -c 'printCandidateNameWithAbsLink')
+ 
+ # See how many unidentified candidates are there (there shouldn't be too many real ones per field)
+ NUMBER_OF_UNIDENTIFIED_CANDIDATES=$(grep 'Found' "$INPUT_DIR/index.html" | grep 'unidentified candidates (excluding asteroids, hot pixels and known' | awk '{printf "%d", $2}') 
+ 
  # Always include the Galactic Center field Sco6
  #if [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 50 ] || [ "$FIELD" = "Sco6" ] ;then
  if [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 40 ] || [ "$FIELD" = "Sco6" ] ;then
-  grep --max-count=1 -A100000 'Processing fields' "$INPUT_DIR/index.html" | grep -B100000 'Processig complete' | grep -v -e 'Processing fields' -e 'Processig complete' | sed "s:src=\":src=\"$INPUT_DIR/:g" >> "$OUTPUT_COMBINED_HTML_NAME"
+  grep --max-count=1 -A100000 'Processing fields' "$INPUT_DIR/index.html" | grep -B100000 'Processing complete!' | grep -v -e 'Processing fields' -e 'Processing complete' | sed "s:src=\":src=\"$INPUT_DIR/:g" >> "$OUTPUT_COMBINED_HTML_NAME"
   INCLUDE_REPORT_IN_COMBINED_LIST="OK"
  else
   echo "ERROR: too many candidates in $INPUT_DIR/index.html"
@@ -335,7 +341,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
   NAME="$USER$HOST"
   #DATETIME=$(LANG=C date --utc)
   SCRIPTNAME=$(basename $0)
-  MSG="Too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
+  MSG="Too many candidates ($NUMBER_OF_UNIDENTIFIED_CANDIDATES with no ID, $NUMBER_OF_CANDIDATE_TRANSIENTS total) in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
   INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"
  fi
  echo "$INPUT_DIR/index.html" >> combine_reports.log
@@ -349,30 +355,35 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=$(grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | awk 'BEGIN{max=-1} {if($7+0 > max) max=$7} END{if (max == -1) print "ERROR"; else print max}')
  MAG_LIMIT=$(grep 'All-image limiting magnitude estimate' "$INPUT_DIR/index.html" | tail -n1 | awk '{print $5}')
  # remove "UTC" as we have it in the table header
+ # LOG LINE: the universal start
  echo -n "<tr><td>$CAMERA</td><td>${LAST_IMAGE_DATE/ UTC/}</td><td><font color='teal'> $FIELD </font></td><td>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  if [ "$INCLUDE_REPORT_IN_COMBINED_LIST" != "OK" ];then
-  echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>too many candidates ($NUMBER_OF_CANDIDATE_TRANSIENTS) to include in the combined list ($(basename $0))</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+  # LOG LINE: too many candidates to exclude in the combined report error
+  echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>too many candidates ($NUMBER_OF_UNIDENTIFIED_CANDIDATES with no ID, $NUMBER_OF_CANDIDATE_TRANSIENTS total) to include in the combined list ($(basename $0))</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  else
   grep --quiet 'ERROR' "$INPUT_DIR/index.html" | grep 'stuck camera'
   if [ $? -eq 0 ];then
    FIELD=$(grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:<br>::g' | awk '{print $1}')
-   echo "<td><font color='#FF0033'>CAMERA STUCK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+   # LOG LINE: suck camera error
+   echo "<td><font color='#FF0033'>CAMERA STUCK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
   else
    ### Check for all other errors
    grep --quiet 'ERROR' "$INPUT_DIR/index.html"
    if [ $? -eq 0 ] ;then
     ERROR_MSG=$(grep --max-count=1 'ERROR' "$INPUT_DIR/index.html")
-    echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><td>$ERROR_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    # LOG LINE: generic error
+    echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$ERROR_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
    else
     WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | tail -n1)
     if [ -z "$WARNING_MSG" ];then
-     # Special check for corrupted index.html: 'Processig complete!' is there but not 'List of TOCP transients'
+     # Special check for corrupted index.html: 'Processing complete!' is there but not 'List of TOCP transients'
      if ! grep --quiet 'List of TOCP transients' "$INPUT_DIR/index.html" ;then
-      WARNING_MSG="WARNING: corrupted log file"
+      WARNING_MSG="WARNING: corrupted log file $WARNING_MSG"
       # maybe do something about it, like check the disk space?
      fi
     fi
-    echo "<td><font color='green'>OK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$WARNING_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    # LOG LINE: everything fine
+    echo "<td><font color='green'>OK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$WARNING_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
     ####
    fi # grep --quiet 'ERROR' "$INPUT_DIR/index.html"
   fi # 'camera is stuck'
