@@ -303,7 +303,7 @@ def main():
                 print(f"<html><body>Error running wrapper.sh command: {e}<br>Current working directory: {cwd}</body></html>")
         else:
             print(f"<html><body>./wrapper.sh does not exist!<br>Current working directory: {cwd}</body></html>")
-            exit_status=1
+            exit_status = 1
 
         # Check exit status of wrapper.sh
         # 256 wrap around to 0

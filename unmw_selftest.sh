@@ -228,7 +228,8 @@ if [ "$UNMW_FREE_PORT" != "8080" ];then
  echo "$0 test error: the port 8080 needed for the sthttpd test is not free"
  exit 1
 fi
-sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid"
+sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
+# STHTTPD_SERVER_PID=$! will work only if the process was started in the background with &
 STHTTPD_SERVER_PID=$!
 echo "sthttpd PID after starting it is
 $STHTTPD_SERVER_PID
