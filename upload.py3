@@ -298,7 +298,10 @@ def main():
             print(f"<html><body>Error running wrapper.sh command: {e}</body></html>")
 
         # Check exit status of wrapper.sh
-        if exit_status != 0:
+        # 256 wrap around to 0
+        # An exit code of 256 is equivalent to 256 % 256 = 0.
+        # This means the actual exit code might have been 0, but a mistake in interpreting the value or truncation occurred.
+        if exit_status != 0 and exit_status != 256:
             # Cleanup on failure
             print(f"<html><body>Error during processing.<br>./wrapper.sh {dirname}{os.path.basename(form['file'].filename)}<br>Exit status {exit_status}<br>Cleaning up...</body></html>")
             try:
