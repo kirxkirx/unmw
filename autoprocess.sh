@@ -743,7 +743,23 @@ fi # if [ ! -f transient_report/index.html ];then
 ##
 UNIXSEC_STOP=$(date +%s)
 ############################################################################
+#
 cd ..
+# Delete the input archive for security reasons, no matter $SCRIPT_EXIT_CODE
+if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
+ if [ -n "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
+  if [ -d "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
+   if [ ! -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/DO_NOT_DELETE_THIS_DIR" ];then
+    # NOTE that results_url.txt should not be deleted with the folder containing it by autoprocess.sh
+    # before upload.py gets a chance to read it!
+    sleep 3
+    #
+    rm -rf "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE"
+   fi
+  fi
+ fi
+fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
+#
 if [ $SCRIPT_EXIT_CODE -eq 0 ];then
  echo "Cleaning up"
  if [ -n "$VAST_WORKING_DIR_FILENAME" ];then
@@ -753,17 +769,8 @@ if [ $SCRIPT_EXIT_CODE -eq 0 ];then
    fi
   fi
  fi
- if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
-  if [ -n "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
-   if [ -d "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" ];then
-    if [ ! -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/DO_NOT_DELETE_THIS_DIR" ];then
-     rm -rf "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE"
-    fi
-   fi
-  fi
- fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 else
- echo "Skip cleanup for non-zero script exit code"
+ echo "Skip processing directory cleanup for non-zero script exit code"
 fi
 ############################################################################
 

@@ -309,6 +309,7 @@ def main():
                 print(f"<html><body>Error during cleanup: {e}</body></html>")
                 sys.exit(1)
             sys.exit(1)
+        # otherwise autoprocess.sh should delete the input after it completes
         
         # Wait for autoprocess.sh to create results_url.txt
         # autoprocess.sh will keep running while wrapper.sh exits
@@ -317,8 +318,9 @@ def main():
         #
         # Let's start printing something - maybe that'll make the web server wait
         print(" ")
-        #
-        time.sleep(5)
+        # NOTE that results_url.txt should not be deleted with the folder containing it by autoprocess.sh
+        # before upload.py gets a chance to read it! autoprocess.sh may exit very fast on error.
+        time.sleep(1)
         results_url = None
         for _ in range(24):
             if os.path.isfile(dirname + "results_url.txt"):

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+# If something is wrong, this script exits with code 1
+# and upload.py is expected to catch that code and take care of removing the uploaded archive file
+
 if [ -z "$1" ]; then
     echo "Usage: $0 uploaded_image_archive_to_be_deleted_after_processing.zip"
     exit 1
