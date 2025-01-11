@@ -100,6 +100,15 @@ if [ ! -d vast ];then
  make || exit 1
 else
  cd vast || exit 1
+ # Fetch and check if there are updates
+ if git fetch --dry-run | grep -q '.'; then
+  echo "Repository is not up-to-date. Pulling changes..."
+  git pull
+  echo "Running make..."
+  make
+ else
+  echo "Repository is already up-to-date. No action needed."
+ fi
 fi
 lib/update_offline_catalogs.sh all || exit 1
 VAST_INSTALL_DIR="$PWD"
