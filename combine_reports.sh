@@ -394,7 +394,9 @@ done
 
 # Try regenerating the filtered report every time
 if [ -s "$OUTPUT_COMBINED_HTML_NAME" ];then
- "$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME" &
+ {
+  "$SCRIPTDIR"/filter_report.py "$OUTPUT_COMBINED_HTML_NAME" || echo "ERROR runnig filter_report.py!"
+ } &
 fi
 
 # update results_comets.txt - do the update if we saw a comet that night with this camera
