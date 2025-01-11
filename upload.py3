@@ -290,12 +290,20 @@ def main():
         # Log upload details
         os.system(f'ls -lh {dirname}* > {dirname}upload.log')
 
-        # Run processing wrapper
-        wrapper_command = f'./wrapper.sh {dirname}{os.path.basename(form["file"].filename)}'
-        try:
-            exit_status = os.system(wrapper_command)
-        except Exception as e:
-            print(f"<html><body>Error running wrapper.sh command: {e}</body></html>")
+        # Get the current working directory - for debugging
+        cwd = os.getcwd()
+        
+        # Check if ./wrapper.sh exists in the current directory
+        if os.path.isfile('./wrapper.sh'):
+            # Run processing wrapper
+            wrapper_command = f'./wrapper.sh {dirname}{os.path.basename(form["file"].filename)}'
+            try:
+                exit_status = os.system(wrapper_command)
+            except Exception as e:
+                print(f"<html><body>Error running wrapper.sh command: {e}<br>Current working directory: {cwd}</body></html>")
+        else:
+            print(f"<html><body>./wrapper.sh does not exist!<br>Current working directory: {cwd}</body></html>")
+            exit_status=1
 
         # Check exit status of wrapper.sh
         # 256 wrap around to 0
@@ -303,7 +311,7 @@ def main():
         # This means the actual exit code might have been 0, but a mistake in interpreting the value or truncation occurred.
         if exit_status != 0 and exit_status != 256:
             # Cleanup on failure
-            print(f"<html><body>Error during processing.<br>./wrapper.sh {dirname}{os.path.basename(form['file'].filename)}<br>Exit status {exit_status}<br>Cleaning up...</body></html>")
+            print(f"<html><body>Error during processing.<br>./wrapper.sh {dirname}{os.path.basename(form['file'].filename)}<br>Exit status {exit_status}<br>Current working directory: {cwd}<br>Cleaning up...</body></html>")
             try:
                 for root, dirs, files in os.walk(dirname, topdown=False):
                     for file in files:
