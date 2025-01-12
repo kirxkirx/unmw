@@ -172,7 +172,7 @@ cleanup() {
  #
  if [ -f "$UPLOADS_DIR/sthttpd_http_server.log" ];then
   echo "Stopping the sthttpd HTTP server..."
-  kill $STHTTPD_SERVER_PID 2>/dev/null
+  kill $STHTTPD_SERVER_PID $(cat "$UPLOADS_DIR/sthttpd_http_server.pid") 2>/dev/null
   echo "Logs of the sthttpd HTTP server..."
   cat "$UPLOADS_DIR/sthttpd_http_server.log"
   rm -fv "$UPLOADS_DIR/sthttpd_http_server.log" 
@@ -228,14 +228,10 @@ if [ "$UNMW_FREE_PORT" != "8080" ];then
  exit 1
 fi
 sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
-# STHTTPD_SERVER_PID=$! will work only if the process was started in the background with &
 STHTTPD_SERVER_PID=$!
-echo "sthttpd PID after starting it is
-$STHTTPD_SERVER_PID
-and reported in $UPLOADS_DIR/sthttpd_http_server.pid"
-cat "$UPLOADS_DIR/sthttpd_http_server.pid"
-STHTTPD_SERVER_PID="$(cat "$UPLOADS_DIR/sthttpd_http_server.pid")"
-
+# STHTTPD_SERVER_PID=$! will work only if the process was started in the background with &
+echo "sthttpd PID after starting it is $STHTTPD_SERVER_PID"
+# Nice try, but thttpd will change its PID
 
 
 # Prepare zip archive with the images for the web upload test
