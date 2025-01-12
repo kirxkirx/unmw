@@ -16,6 +16,44 @@ if [[ ! "$INPUT_FILE" =~ \.zip$ && ! "$INPUT_FILE" =~ \.rar$ ]]; then
     exit 1
 fi
 
+# rar may end up in /opt/bin
+# Function to check for binaries and update PATH
+check_and_update_path() {
+    DIR="$1"
+    BINARIES="rar unrar"
+
+    # Check if any of the binaries exist in the directory
+    for BIN in $BINARIES; do
+        if [ -x "$DIR/$BIN" ]; then
+            #echo "$BIN found in $DIR"
+
+            # Check if the directory is in PATH
+            case ":$PATH:" in
+                *":$DIR:"*)
+                    #echo "$DIR is already in PATH."
+                    ;;
+                *)
+                    #echo "$DIR is not in PATH. Adding it now."
+                    PATH="$DIR:$PATH"
+                    export PATH
+                    ;;
+            esac
+
+            # Exit the function as we only need one binary to update the PATH
+            return
+        fi
+    done
+
+    #echo "No binaries found in $DIR"
+}
+
+# Check /opt/bin
+check_and_update_path "/opt/bin"
+
+# Check /usr/local/bin
+check_and_update_path "/usr/local/bin"
+
+
 # Verify the file type using the `file` tool
 FILE_TYPE=$(file --mime-type -b "$INPUT_FILE")
 
@@ -61,8 +99,8 @@ fi
 FILES_ONLY="$(echo "$CONTENTS" | grep -v '/$')"
 
 # Filter and count the valid extensions
-VALID_FILES_COUNT=$(echo "$FILES_ONLY" | grep -E '\.(fts|fit|fits)$' | wc -l)
-INVALID_FILES_COUNT=$(echo "$FILES_ONLY" | grep -vE '\.(fts|fit|fits)$' | wc -l)
+VALID_FILES_COUNT=$(echo "$FILES_ONLY" | grep -c -E '\.(fts|fit|fits)$')
+INVALID_FILES_COUNT=$(echo "$FILES_ONLY" | grep -c -vE '\.(fts|fit|fits)$')
 
 if [[ "$VALID_FILES_COUNT" -lt 2 || "$INVALID_FILES_COUNT" -gt 0 ]]; then
     echo "Error: Archive must contain only .fts, .fit, or .fits files and at least two of them.  VALID_FILES_COUNT=$VALID_FILES_COUNT INVALID_FILES_COUNT=$INVALID_FILES_COUNT"
