@@ -433,6 +433,25 @@ if ! grep --quiet 'V0615 Vul' "$LATEST_COMBINED_HTML_REPORT" ;then
 else
  echo "Found V0615 Vul in $LATEST_COMBINED_HTML_REPORT"
 fi
+
+LATEST_COMBINED_HTML_REPORT_FILTERED=$(ls -t *_evening_* *_morning_* 2>/dev/null | grep '_filtered' | grep -v 'summary' | head -n 1)
+if [ -z "$LATEST_COMBINED_HTML_REPORT_FILTERED" ];then
+ echo "$0 test error: empty LATEST_COMBINED_HTML_REPORT_FILTERED"
+ exit 1
+else
+ echo "The latest combined report is:"
+ ls -lh "$LATEST_COMBINED_HTML_REPORT_FILTERED"
+ if [ ! -f "$LATEST_COMBINED_HTML_REPORT_FILTERED" ];then
+  echo "$0 test error: no such file $LATEST_COMBINED_HTML_REPORT_FILTERED"
+  exit 1
+ fi
+ if [ ! -s "$LATEST_COMBINED_HTML_REPORT_FILTERED" ];then
+  echo "$0 test error: empty file $LATEST_COMBINED_HTML_REPORT_FILTERED"
+  exit 1
+ fi
+fi
+
+
 # Check that the png image previews were actually created
 for PNG_FILE_TO_TEST in $(grep 'img src=' "$LATEST_COMBINED_HTML_REPORT" | awk -F"img src=" '{print $2}' | awk -F'"'  '{print $2}' | grep '.png') ;do
  if [ ! -f "$PNG_FILE_TO_TEST" ];then

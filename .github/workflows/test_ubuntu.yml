@@ -44,6 +44,10 @@ jobs:
           sudo mv /tmp/rar/unrar /usr/local/bin/unrar
       - name: Verify RAR installation
         run: rar
+      - name: Install bs4
+        run: pip install bs4
+      - name: Test bs4 installation
+        run: python -c "from bs4 import BeautifulSoup; print('bs4 installed successfully')"
       - name: Run self-test script
         run: bash unmw_selftest.sh
         
