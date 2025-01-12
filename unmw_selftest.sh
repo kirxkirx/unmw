@@ -101,11 +101,10 @@ if [ ! -d vast ];then
 else
  cd vast || exit 1
  # Fetch and check if there are updates
- if git fetch --dry-run | grep -q '.'; then
-  echo "Repository is not up-to-date. Pulling changes..."
-  git pull
+ echo "Checking if VaST needs an update"
+ if LANG=C git pull 2>&1 | grep --quiet 'Updating' ;then
   echo "Running make..."
-  make
+  make || exit 1
  else
   echo "Repository is already up-to-date. No action needed."
  fi

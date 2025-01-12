@@ -91,6 +91,8 @@ OUTPUT_PROCESSING_SUMMARY_HTML_NAME="${DAY}_${EVENING_OR_MORNING}_summary.html"
 ######################################################### 12 hours
 INPUT_LIST_OF_RESULT_DIRS=$(find . -maxdepth 1 -type d -mmin -720 -name "results*$CAMERA*")
 
+#echo "DEBUG: $INPUT_LIST_OF_RESULT_DIRS"
+
 if [ -z "$INPUT_LIST_OF_RESULT_DIRS" ];then
  # nothing to process, continue to the next camera
  continue
@@ -135,6 +137,8 @@ for FILE in $SORTED_LIST_OF_FILES ;do
  #
  INPUT_LIST_OF_RESULT_DIRS="$INPUT_LIST_OF_RESULT_DIRS "$(dirname "$FILE")
 done
+
+#echo "DEBUG--- INPUT_LIST_OF_RESULT_DIRS #$INPUT_LIST_OF_RESULT_DIRS#"
 
 if [ -z "$INPUT_LIST_OF_RESULT_DIRS" ];then
  # nothing is completed yet, continue to the next camera
@@ -273,7 +277,6 @@ if [ ! -f "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME" ];then
  echo "<tr><td><font color='teal'><a href='$OUTPUT_PROCESSING_SUMMARY_HTML_NAME' target='_blank'>$SUMMARY_FILE_NAME_FOR_THE_TABLE</a></font></td></tr>" >> index.html
 
 fi
-
 
 # make body
 for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
