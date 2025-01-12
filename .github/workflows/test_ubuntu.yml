@@ -48,6 +48,10 @@ jobs:
         run: pip install bs4
       - name: Test bs4 installation
         run: python -c "from bs4 import BeautifulSoup; print('bs4 installed successfully')"
+      - name: Install lxml
+        run: pip install lxml
+      - name: Test lxml installation
+        run: python -c "from lxml import etree; print('lxml installed successfully')"
       - name: Run self-test script
         run: bash unmw_selftest.sh
         
