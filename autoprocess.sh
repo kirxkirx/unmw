@@ -537,6 +537,11 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 else
  #INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE=$(basename $INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE)
  ABSOLUTE_PATH_TO_IMAGES=$(readlink -f "$INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE")
+ #### Not sure how the above line worked befor
+ if [ -z "$ABSOLUTE_PATH_TO_IMAGES" ];then
+  ABSOLUTE_PATH_TO_IMAGES=$(readlink -f $(basename "$INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE"))
+ fi
+ ####
  echo "Setting input directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 if [ ! -d "$ABSOLUTE_PATH_TO_IMAGES" ];then
