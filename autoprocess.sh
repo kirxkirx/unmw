@@ -123,9 +123,9 @@ function is_temperature_low {
     # temperature check to print the warning
     echo "$TEMPERATURE" |  awk -v target=$MAX_CPU_TEMP_C '{
          if ($1 < target) {
-          printf("CPU temperature: %f C\n",$1)
+          printf("CPU temperature: %.0f C\n",$1)
          } else {
-          printf("CPU temperature: %f C - WARNING\n",$1)
+          printf("CPU temperature: %.0f C - WARNING\n",$1)
          }
         }'
    fi
