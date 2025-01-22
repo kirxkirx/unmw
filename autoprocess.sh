@@ -115,6 +115,23 @@ function is_temperature_low {
  fi
  if [[ $TEMPERATURE =~ ^[0-9]+$ ]];then
   # The string is an integer number
+  #
+  # log the temperature value if asked to do so
+  if [ -n "$1" ];then
+   if [ "$1" = "log" ];then
+    #echo "CPU temperature: $TEMPERATURE C"
+    # temperature check to print the warning
+    echo "$TEMPERATURE" |  awk -v target=$MAX_CPU_TEMP_C '{
+         if ($1 < target) {
+          printf("CPU temperature: %f C\n",$1)
+         } else {
+          printf("CPU temperature: %f C - WARNING\n",$1)
+         }
+        }'
+   fi
+  fi
+  #
+  # actual temperature check
   echo "$TEMPERATURE" |  awk -v target=$MAX_CPU_TEMP_C '{
          if ($1 < target) {
           exit 0
@@ -666,6 +683,7 @@ UNIXSEC_START=$(date +%s)
 util/transients/transient_factory_test31.sh "$ABSOLUTE_PATH_TO_IMAGES"
 SCRIPT_EXIT_CODE=$?
 echo "SCRIPT_EXIT_CODE=$SCRIPT_EXIT_CODE"
+CPU_TEMERATURE_AT_THE_END_OF_THE_RUN_STRING=$(is_temperature_low log)
 #################################################################
 if [ ! -f transient_report/index.html ];then
  ERROR_MSG="no transient_report/index.html"
@@ -687,6 +705,7 @@ Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
  #fi
 else
  # nonempty 'transient_report/index.html' is found
+ echo "$CPU_TEMERATURE_AT_THE_END_OF_THE_RUN_STRING" | tee -a transient_report/index.html
  ## Check for extra bright transients and send a special e-mail message
  cat "transient_report/index.html" | grep -v -e 'This object is listed in planets.txt' -e 'This object is listed in comets.txt' -e 'This object is listed in moons.txt' | grep -B1 'galactic' | grep -v -e 'galactic' -e '--' | while read A ;do   
   echo $A | awk '{if ( $5<9.5 && $5>-5.0 ) print "FOUND"}' | grep --quiet "FOUND" 
@@ -800,6 +819,8 @@ $PROCESSING_TIME_WAITLOAD min  -- wait due to high server load
 $PROCESSING_TIME_UNPACK min  -- unpack data and prepare VaST
 
 The script exit code is $SCRIPT_EXIT_CODE
+
+$CPU_TEMERATURE_AT_THE_END_OF_THE_RUN_STRING
 
 The results should appear at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/
 "

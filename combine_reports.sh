@@ -385,6 +385,10 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
       # maybe do something about it, like check the disk space?
      fi
     fi
+    #
+    #if [ -z "$WARNING_MSG" ];then
+    # WARNING_MSG=$(grep 'CPU temperature' "$INPUT_DIR/index.html" | tail -n1)
+    #fi
     # LOG LINE: everything fine
     echo "<td><font color='green'>OK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$WARNING_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
     ####
