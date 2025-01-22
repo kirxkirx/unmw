@@ -403,9 +403,13 @@ if [ $? -eq 0 ];then
  TEST_RUN=1
 fi
 #
+# Set variables containg important directlry names readonly as we'll be deleting them and don't want to delete soemthing else
 VAST_WORKING_DIR_FILENAME="vast_${DATASET_NAME}_${SESSION_KEY}"
-VAST_RESULTS_DIR_FILENAME="results_$(date +'%Y%m%d_%H%M%S')_${DATASET_NAME}_$SESSION_KEY"
+readonly VAST_WORKING_DIR_FILENAME
+VAST_RESULTS_DIR_FILENAME="results_$(date +'%Y%m%d_%H%M%S')_${DATASET_NAME}_${SESSION_KEY}"
+readonly VAST_RESULTS_DIR_FILENAME
 LOCAL_PATH_TO_IMAGES="img_${DATASET_NAME}_${SESSION_KEY}"
+readonly LOCAL_PATH_TO_IMAGES
 
 
 if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
@@ -425,6 +429,7 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 else
  ABSOLUTE_PATH_TO_ZIP_ARCHIVE=""
 fi
+readonly ABSOLUTE_PATH_TO_ZIP_ARCHIVE
 
 # we want this to be after results_url.txt is created
 ###########################################################################
