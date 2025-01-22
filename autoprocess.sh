@@ -280,6 +280,51 @@ function wait_for_our_turn_to_start_processing {
  return 0
 }
 
+# Note that the same function is found in util/transients/transient_factory_test31.sh
+function check_free_space() {
+    if [ -n "$1" ];then
+     dir_to_check="$1"
+    else
+     dir_to_check="."
+    fi
+    
+    if [ ! -d "$dir_to_check" ];then
+     echo "WARNING from check_free_space(): $dir_to_check is not a directory"
+     return 0
+    fi
+
+
+    # Check free space in the current directory
+    local free_space_kb
+
+    # Use 'df -k .' for portability across Linux, macOS, and FreeBSD
+    free_space_kb=$(df -k "$dir_to_check" | awk 'NR==2 {print $4}')
+
+    # Minimum required space in KB (600MB = 600 * 1024 KB)
+    local required_space_kb_hardlimit=614400
+
+    # soft limit for minimum required space in KB (2 GB = 2 * 1024 * 1024 KB)
+    local required_space_kb_softlimit=2097152
+    # Or change it to an externally set value if $WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB is set
+    if [ -n "$WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB" ];then
+     if [[ "$WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB" =~ ^[0-9]+$ ]] && [ "$WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB" -gt "$required_space_kb_hardlimit" ]; then
+      required_space_kb_softlimit="$WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB"
+     fi
+    fi
+
+    
+    if [ "$free_space_kb" -ge "$required_space_kb_softlimit" ]; then
+        echo "server $HOSTNAME has sufficient free disk space available: $((free_space_kb / 1024)) MB at $dir_to_check"
+        return 0
+    elif [ "$free_space_kb" -ge "$required_space_kb_hardlimit" ]; then
+        echo "WARNING: server $HOSTNAME is low on disk space, only $((free_space_kb / 1024)) MB free at $dir_to_check"
+        return 0
+    else
+        echo "ERROR: server $HOSTNAME is out of disk space, only $((free_space_kb / 1024)) MB free at $dir_to_check"
+        return 1
+    fi
+}
+
 
 # Check input
 if [ -z "$INPUT_ZIP_ARCHIVE" ];then
@@ -438,6 +483,11 @@ if [ -n "$GITHUB_ACTIONS" ] && [ "$GITHUB_ACTIONS" = "true" ];then
 fi
 #
 ###########################################################################
+############ Do not start the wait if we are out of disk space ############
+if ! check_free_space ;then
+ echo "ERROR free disk space check faield before starting to wait for our turn"
+ exit 1
+fi
 ############### Delay processing if the server load is high ###############
 UNIXSEC_START_WAITLOAD=$(date +%s)
 
@@ -616,6 +666,12 @@ sudo chown -R $USER $PWD"
 fi
 #
 
+# Make sure we have enough disk space before doing this
+if ! check_free_space ;then
+ echo "ERROR free disk space check faield before rsync"
+ exit 1
+fi
+
 echo "Making a copy of $(readlink -f "$VAST_REFERENCE_COPY") to $VAST_WORKING_DIR_FILENAME"
 # use rsync instead of cp to ignore large and unneeded files
 # '/' tells rsync we want the content of the directory, not the directory itself
@@ -625,6 +681,10 @@ echo "Making a copy of $(readlink -f "$VAST_REFERENCE_COPY") to $VAST_WORKING_DI
 # --omit-dir-times skipping directory timestamp updates can reduce metadata write
 # --no-times avoid copying file modification times
 rsync -av --whole-file --no-times --omit-dir-times --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' "$(readlink -f "$VAST_REFERENCE_COPY")/" "$VAST_WORKING_DIR_FILENAME"
+if [ $? -ne 0 ];then
+ echo "ERROR running rsync"
+ exit 1
+fi
 cd "$VAST_WORKING_DIR_FILENAME" || exit 1
 # create symlinks
 ln -s "$(readlink -f "$VAST_REFERENCE_COPY")/astorb.dat" astorb.dat
@@ -779,7 +839,8 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  fi
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 #
-if [ $SCRIPT_EXIT_CODE -eq 0 ];then
+# Actually we do want to remove the VaST working directory no matter the exit code
+#if [ $SCRIPT_EXIT_CODE -eq 0 ];then
  echo "Cleaning up"
  if [ -n "$VAST_WORKING_DIR_FILENAME" ];then
   if [ -d "$VAST_WORKING_DIR_FILENAME" ];then
@@ -788,9 +849,9 @@ if [ $SCRIPT_EXIT_CODE -eq 0 ];then
    fi
   fi
  fi
-else
- echo "Skip processing directory cleanup for non-zero script exit code"
-fi
+#else
+# echo "Skip processing directory cleanup for non-zero script exit code"
+#fi
 ############################################################################
 
 PROCESSING_TIME=$(echo "$UNIXSEC_STOP $UNIXSEC_START" | awk '{printf "%6.2f", ($1-$2)/60 }')
