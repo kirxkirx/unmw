@@ -263,7 +263,7 @@ def main():
 
         st = os.statvfs(os.path.realpath(upload_dir))
         free_space = st.f_bavail * st.f_frsize
-        if free_space < 500 * 1024 * 1024:  # 500MB
+        if free_space < 1024 * 1024 * 1024:  # 1GB
             print("<html><body>Insufficient disk space</body></html>")
             sys.exit(1)
     except Exception as e:
