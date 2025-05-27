@@ -327,22 +327,32 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  
  # Count how many candidates are listed in HTML file (and are to be inserted in the combined report)
  NUMBER_OF_CANDIDATE_TRANSIENTS=$(grep 'script' "$INPUT_DIR/index.html" | grep -c 'printCandidateNameWithAbsLink')
+ # Because we use 'grep -c' NUMBER_OF_CANDIDATE_TRANSIENTS will always be set to a number, possibly 0
  
  # See how many unidentified candidates are there (there shouldn't be too many real ones per field)
  NUMBER_OF_UNIDENTIFIED_CANDIDATES=$(grep 'Found' "$INPUT_DIR/index.html" | grep 'unidentified candidates (excluding asteroids, hot pixels and known' | awk '{printf "%d", $2}') 
+ # if NUMBER_OF_UNIDENTIFIED_CANDIDATES is not set, set it to a special value to signify we might have a problem parsing the output file
+ if [ -z "$NUMBER_OF_UNIDENTIFIED_CANDIDATES" ];then
+  NUMBER_OF_UNIDENTIFIED_CANDIDATES="99999"
+ fi
  
  # Always include the Galactic Center field Sco6
- #if [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 40 ] || [ "$FIELD" = "Sco6" ] ;then
  if { [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 40 ] && [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -lt 20 ]; } || [ "$FIELD" = "Sco6" ]; then
   grep --max-count=1 -A100000 'Processing fields' "$INPUT_DIR/index.html" | grep -B100000 'Processing complete!' | grep -v -e 'Processing fields' -e 'Processing complete' | sed "s:src=\":src=\"$INPUT_DIR/:g" >> "$OUTPUT_COMBINED_HTML_NAME"
   INCLUDE_REPORT_IN_COMBINED_LIST="OK"
- else
-  echo "ERROR: too many candidates in $INPUT_DIR/index.html"
-  # too large file error
+ elif [ "$NUMBER_OF_UNIDENTIFIED_CANDIDATES" = "99999" ];then 
+  echo "ERROR: parsing $INPUT_DIR/index.html"
   HOST=$(hostname)
   HOST="@$HOST"
   NAME="$USER$HOST"
-  #DATETIME=$(LANG=C date --utc)
+  SCRIPTNAME=$(basename $0)
+  MSG="ERROR parsing candidates list in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
+  INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"  
+ else
+  echo "ERROR: too many candidates in $INPUT_DIR/index.html"
+  HOST=$(hostname)
+  HOST="@$HOST"
+  NAME="$USER$HOST"
   SCRIPTNAME=$(basename $0)
   MSG="Too many candidates ($NUMBER_OF_UNIDENTIFIED_CANDIDATES with no ID, $NUMBER_OF_CANDIDATE_TRANSIENTS total) in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
   INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"
