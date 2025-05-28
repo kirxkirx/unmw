@@ -95,7 +95,7 @@ UPLOADS_DIR="$PWD"
 
 # Install VaST if it was not installed before
 if [ ! -d vast ];then
- git clone https://github.com/kirxkirx/vast.git || exit 1
+ git clone --depth 1 https://github.com/kirxkirx/vast.git || exit 1
  cd vast || exit 1
  make || exit 1
 else
@@ -127,7 +127,6 @@ cd "$SCRIPTDIR" || exit 1
 
 ### Test ./autoprocess.sh without web upload scripts ###
 ./autoprocess.sh "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/second_epoch_images" || exit 1
-#RESULTS_DIR_FROM_URL__MANUALRUN=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F'http://localhost:8080/' '{print $2}')
 RESULTS_DIR_FROM_URL__MANUALRUN=$(grep 'The results should appear' uploads/autoprocess.txt | tail -n1 | awk -F"http://localhost:$UNMW_FREE_PORT/" '{print $2}')
 if [ -z "$RESULTS_DIR_FROM_URL__MANUALRUN" ];then
  echo "$0 test error: RESULTS_DIR_FROM_URL__MANUALRUN is empty"
@@ -194,7 +193,7 @@ echo "Let's test with sthttpd HTTP server"
 
 if [ ! -d sthttpd ];then
  echo "Get sthttpd"
- git clone https://github.com/blueness/sthttpd.git
+ git clone --depth 1 https://github.com/blueness/sthttpd.git
  if [ $? -ne 0 ];then
   echo "$0 test error: cannot git clone sthttpd"
   exit 1
