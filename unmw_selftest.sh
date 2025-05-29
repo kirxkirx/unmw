@@ -308,16 +308,19 @@ echo "Sleep to give the server some time to process the data"
 # (this assumes no other copies of the script are running)
 echo "Waiting for autoprocess.sh to finish..."
 while pgrep -f "autoprocess.sh" > /dev/null; do
- #echo -n "."
  sleep 1  # Wait for 1 second before checking again
 done
 #
+if curl --silent --show-error "$results_url" | grep --quiet 'out of disk space' ;then
+ echo "$0 test error: out of disk space"
+ exit 1
+fi
+#
 if ! curl --silent --show-error "$results_url" | grep --quiet 'V0615 Vul' ;then
-#if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL__MANUALRUN" | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get web run results page via the HTTP server"
  exit 1
 else
- echo "V0615 Vul is fond in HTTP-uploaded results"
+ echo "V0615 Vul is found in HTTP-uploaded results"
 fi
 
 # Go back to the work directory
@@ -397,11 +400,16 @@ for WEB_UPLOAD_DIR in web_upload_* ;do
  done
 done
 #
+if curl --silent --show-error "$results_url" | grep --quiet 'out of disk space' ;then
+ echo "$0 test error: out of disk space"
+ exit 1
+fi
+#
 if ! curl --silent --show-error "$results_url" | grep --quiet 'ERROR: too few refereence images for the field Vul8' ;then
  echo "$0 test error: failed to get web run results page via the HTTP server"
  exit 1
 else
- echo "Expected error message is fond in HTTP-uploaded results"
+ echo "Expected error message is found in HTTP-uploaded results"
 fi
 
 
@@ -418,7 +426,8 @@ fi
 # uploads/ is the default location for the processing data (both images and results)
 cd "$UPLOADS_DIR" || exit 1
 #
-LATEST_COMBINED_HTML_REPORT=$(ls -t *_evening_* *_morning_* 2>/dev/null | grep -v summary | head -n 1)
+# Make sure we are not looking at filtered list that may not contain known variable or fail without bs4
+LATEST_COMBINED_HTML_REPORT=$(ls -t *_evening_* *_morning_* 2>/dev/null | grep -v -e 'summary' -e '_filtered' | head -n 1)
 if [ -z "$LATEST_COMBINED_HTML_REPORT" ];then
  echo "$0 test error: empty LATEST_COMBINED_HTML_REPORT"
  exit 1
@@ -433,7 +442,7 @@ else
  echo "Found V0615 Vul in $LATEST_COMBINED_HTML_REPORT"
 fi
 
-LATEST_COMBINED_HTML_REPORT_FILTERED=$(ls -t *_evening_* *_morning_* 2>/dev/null | grep '_filtered' | grep -v 'summary' | head -n 1)
+LATEST_COMBINED_HTML_REPORT_FILTERED=$(ls -t *_evening_* *_morning_* 2>/dev/null | grep -v -e 'summary' -e '_filtered' | head -n 1)
 if [ -z "$LATEST_COMBINED_HTML_REPORT_FILTERED" ];then
  echo "$0 test error: empty LATEST_COMBINED_HTML_REPORT_FILTERED"
  exit 1
@@ -449,8 +458,6 @@ else
   exit 1
  fi
 fi
-
-
 # Check that the png image previews were actually created
 for PNG_FILE_TO_TEST in $(grep 'img src=' "$LATEST_COMBINED_HTML_REPORT" | awk -F"img src=" '{print $2}' | awk -F'"'  '{print $2}' | grep '.png') ;do
  if [ ! -f "$PNG_FILE_TO_TEST" ];then
@@ -592,16 +599,19 @@ echo "Sleep to give the server some time to process the data"
 # (this assumes no other copies of the script are running)
 echo "Waiting for autoprocess.sh to finish..."
 while pgrep -f "autoprocess.sh" > /dev/null; do
- #echo -n "."
  sleep 1  # Wait for 1 second before checking again
 done
 #
+if curl --silent --show-error "$results_url" | grep --quiet 'out of disk space' ;then
+ echo "$0 test error: out of disk space"
+ exit 1
+fi
+#
 if ! curl --silent --show-error "$results_url" | grep --quiet 'V0615 Vul' ;then
-#if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL__MANUALRUN" | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get web run results page via the HTTP server"
  exit 1
 else
- echo "V0615 Vul is fond in HTTP-uploaded results"
+ echo "V0615 Vul is found in HTTP-uploaded results"
 fi
 
 ###
