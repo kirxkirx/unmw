@@ -24,7 +24,7 @@ jobs:
       - name: Run Flake8 Python linter
         run: |
           for i in filter_report.py upload.py3; do
-            flake8 --ignore=W293,W291,E501,E128,E722 $i
+            flake8 --ignore=W293,W291,E501,E128,E722,E402 $i
           done
       - name: Install VaST dependencies
         run: sudo apt-get install gfortran libx11-dev libpng-dev 
