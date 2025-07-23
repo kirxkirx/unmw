@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+# The DeprecationWarning about 'import cgi' will corrput mime
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 import cgi
 import os
 import cgitb
