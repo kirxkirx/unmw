@@ -32,7 +32,7 @@ for i in uploads/*morning*.html uploads/*evening*.html ;do
   fi
   COMET_ID=$(grep -A2 "$MEASUREMENT" "$i" | awk -F'" ' '{printf "%s\"%s",$2,$3}' | awk -F'</b>' '{print $1}' | grep -v '^$')
   COMET_DIST_ARCSEC=$(echo "$COMET_ID" | awk -F'comets.txt</font> ' '{print $2}' | awk '{print $1}' | awk -F'"' '{print $1}')
-  echo "$COMET_DIST_ARCSEC" | awk '{if( $1>30 ) print "TOO FAR"}' | grep --quiet "TOO FAR" && continue
+  echo "$COMET_DIST_ARCSEC" | awk '{if( $1>60 ) print "TOO FAR"}' | grep --quiet "TOO FAR" && continue
   COMET_ID=$(echo "$COMET_ID" | awk -F'" ' '{print $2}')
   if [ -z "$COMET_ID" ];then
    continue
