@@ -765,19 +765,11 @@ if [ ! -f transient_report/index.html ];then
  echo "ERROR: $ERROR_MSG"
  MSG="A VaST error occured: $ERROR_MSG
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
- # Just send this to kirx
- #if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
- # curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
- #fi
 elif [ ! -s transient_report/index.html ];then
  ERROR_MSG="empty transient_report/index.html"
  echo "ERROR: $ERROR_MSG"
  MSG="A VaST error occured: $ERROR_MSG
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
- # Just send this to kirx
- #if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
- # curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
- #fi
 else
  # nonempty 'transient_report/index.html' is found
  echo "$CPU_TEMERATURE_AT_THE_END_OF_THE_RUN_STRING" | tee -a transient_report/index.html
@@ -827,10 +819,6 @@ The detailed log output is at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FIL
    FIELD=$(grep 'Processing fields' transient_report/index.html | sed 's:Processing:processing:g' | sed 's:<br>::g')
    MSG="An error occured while $FIELD
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
-   # Just send this to kirx
-   #if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
-   # curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR] $ERROR_MSG   $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
-   #fi
   fi
  fi # grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
 fi # if [ ! -f transient_report/index.html ];then
@@ -854,19 +842,15 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  fi
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 #
-# Actually we do want to remove the VaST working directory no matter the exit code
-#if [ $SCRIPT_EXIT_CODE -eq 0 ];then
- echo "Cleaning up"
- if [ -n "$VAST_WORKING_DIR_FILENAME" ];then
-  if [ -d "$VAST_WORKING_DIR_FILENAME" ];then
-   if [ ! -f "$VAST_WORKING_DIR_FILENAME/DO_NOT_DELETE_THIS_DIR" ];then
-    rm -rf "$VAST_WORKING_DIR_FILENAME"
-   fi
+# We want to remove the VaST working directory no matter the exit code
+echo "Cleaning up"
+if [ -n "$VAST_WORKING_DIR_FILENAME" ];then
+ if [ -d "$VAST_WORKING_DIR_FILENAME" ];then
+  if [ ! -f "$VAST_WORKING_DIR_FILENAME/DO_NOT_DELETE_THIS_DIR" ];then
+   rm -rf "$VAST_WORKING_DIR_FILENAME"
   fi
  fi
-#else
-# echo "Skip processing directory cleanup for non-zero script exit code"
-#fi
+fi
 ############################################################################
 
 PROCESSING_TIME=$(echo "$UNIXSEC_STOP $UNIXSEC_START" | awk '{printf "%6.2f", ($1-$2)/60 }')
