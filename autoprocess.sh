@@ -60,6 +60,16 @@ fi
 
 INPUT_ZIP_ARCHIVE="$1"
 
+if [ -z "$AUTOPROCESS_LOG" ];then
+ AUTOPROCESS_LOG="/dev/null"
+ if [ -f "$(dirname $INPUT_ZIP_ARCHIVE)/upload.log" ];then
+  AUTOPROCESS_LOG="$(dirname $INPUT_ZIP_ARCHIVE)/upload.log"
+ elif [ -f "$INPUT_ZIP_ARCHIVE/upload.log" ];then
+  AUTOPROCESS_LOG="$INPUT_ZIP_ARCHIVE/upload.log"
+ fi
+fi
+echo "=== $0 ===" >> "$AUTOPROCESS_LOG"
+
 UNIXSEC_START_TOTAL=$(date +%s)
 
 ## This function will set the random session key in attempt to avoid 
@@ -333,13 +343,13 @@ function check_free_space() {
 
 # Check input
 if [ -z "$INPUT_ZIP_ARCHIVE" ];then
- echo "ERROR: no input ZIP archive $INPUT_ZIP_ARCHIVE" 
+ echo "ERROR: no input ZIP archive $INPUT_ZIP_ARCHIVE" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 
 INPUT_DIR_NOT_ZIP_ARCHIVE=0
 if [ -d "$INPUT_ZIP_ARCHIVE" ];then
- echo "The input is a directory $INPUT_ZIP_ARCHIVE"
+ echo "The input is a directory $INPUT_ZIP_ARCHIVE" | tee -a "$AUTOPROCESS_LOG"
 
  #
  # Figure out fits file extension for this dataset
@@ -348,7 +358,7 @@ if [ -d "$INPUT_ZIP_ARCHIVE" ];then
   FITS_FILE_EXT="fts"
  fi
  export FITS_FILE_EXT
- echo "FITS_FILE_EXT=$FITS_FILE_EXT"
+ echo "FITS_FILE_EXT=$FITS_FILE_EXT" | tee -a "$AUTOPROCESS_LOG"
  #
 
 
@@ -363,31 +373,31 @@ fi
 
 if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  if [ ! -f "$INPUT_ZIP_ARCHIVE" ];then
-  echo "ERROR: input ZIP archive $INPUT_ZIP_ARCHIVE does not exist" 
+  echo "ERROR: input ZIP archive $INPUT_ZIP_ARCHIVE does not exist"  | tee -a "$AUTOPROCESS_LOG"
   exit 1
  fi
  if [ ! -s "$INPUT_ZIP_ARCHIVE" ];then
-  echo "ERROR: input ZIP archive $INPUT_ZIP_ARCHIVE is empty" 
+  echo "ERROR: input ZIP archive $INPUT_ZIP_ARCHIVE is empty"  | tee -a "$AUTOPROCESS_LOG"
   exit 1
  fi
  if [ -d "$INPUT_ZIP_ARCHIVE" ];then
-  echo "ERROR: input $INPUT_ZIP_ARCHIVE is a directory, not a ZIP archive" 
+  echo "ERROR: input $INPUT_ZIP_ARCHIVE is a directory, not a ZIP archive"  | tee -a "$AUTOPROCESS_LOG"
   exit 1
  fi
 fi
 
 if [ ! -d "$IMAGE_DATA_ROOT" ];then
- echo "ERROR: there is no image data directory $IMAGE_DATA_ROOT"
+ echo "ERROR: there is no image data directory $IMAGE_DATA_ROOT" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 
 if [ ! -d "$DATA_PROCESSING_ROOT" ];then
- echo "ERROR: there is no data processing directory $DATA_PROCESSING_ROOT"
+ echo "ERROR: there is no data processing directory $DATA_PROCESSING_ROOT" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 
 if [ ! -d "$VAST_REFERENCE_COPY" ];then
- echo "ERROR: cannot find VaST installation in directory $VAST_REFERENCE_COPY" 
+ echo "ERROR: cannot find VaST installation in directory $VAST_REFERENCE_COPY"  | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 
@@ -441,17 +451,17 @@ readonly ABSOLUTE_PATH_TO_ZIP_ARCHIVE
 # this check is slow an unlikely to fail, OK to put after creating results_url.txt that we want ASASP
 ##### Check if $VAST_REFERENCE_COPY seems to contain a working copy of VaST #####
 if [ ! -x "$VAST_REFERENCE_COPY/vast" ];then
- echo "ERROR: cannot find the main VaST executable at $VAST_REFERENCE_COPY/vast"
+ echo "ERROR: cannot find the main VaST executable at $VAST_REFERENCE_COPY/vast" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 # Check if vast actually runs
 "$VAST_REFERENCE_COPY"/vast --help 2>&1 | grep --quiet 'VaST'
 if [ $? -ne 0 ];then
- echo "ERROR: VaST does not seem to run $VAST_REFERENCE_COPY/vast --help"
+ echo "ERROR: VaST does not seem to run $VAST_REFERENCE_COPY/vast --help" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 if [ ! -x "$VAST_REFERENCE_COPY/util/transients/transient_factory_test31.sh" ];then 
- echo "ERROR: cannot find the main VaST data processing script at $VAST_REFERENCE_COPY/util/transients/transient_factory_test31.sh"
+ echo "ERROR: cannot find the main VaST data processing script at $VAST_REFERENCE_COPY/util/transients/transient_factory_test31.sh" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 ##########
@@ -495,15 +505,15 @@ fi
 ###########################################################################
 ############ Do not start the wait if we are out of disk space ############
 if ! check_free_space ;then
- echo "ERROR free disk space check faield before starting to wait for our turn"
+ echo "ERROR free disk space check faield before starting to wait for our turn" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 ############### Delay processing if the server load is high ###############
 UNIXSEC_START_WAITLOAD=$(date +%s)
 
-wait_for_our_turn_to_start_processing
+wait_for_our_turn_to_start_processing | tee -a "$AUTOPROCESS_LOG"
 
-echo "Done sleeping"
+echo "Done sleeping" | tee -a "$AUTOPROCESS_LOG"
 UNIXSEC_STOP_WAITLOAD=$(date +%s)
 ###########################################################################
 
@@ -514,19 +524,19 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  fi
 fi
 
-echo "Changing directory to $IMAGE_DATA_ROOT" 
+echo "Changing directory to $IMAGE_DATA_ROOT"  | tee -a "$AUTOPROCESS_LOG"
 cd "$IMAGE_DATA_ROOT" || exit 1
 #
-echo -n "Checking write permissions for the current directory ( $PWD ) ... "
+echo -n "Checking write permissions for the current directory ( $PWD ) ... " | tee -a "$AUTOPROCESS_LOG"
 touch testfile$$.tmp
 if [ $? -eq 0 ];then
  rm -f testfile$$.tmp
- echo "OK"
+ echo "OK" | tee -a "$AUTOPROCESS_LOG"
 else
  echo "ERROR: please make sure you have write permissions for the current directory.
 
 Maybe you need something like:
-sudo chown -R $USER $PWD"
+sudo chown -R $USER $PWD" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 #
@@ -538,7 +548,7 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  fi
  mkdir "$LOCAL_PATH_TO_IMAGES"
  ABSOLUTE_PATH_TO_IMAGES="$IMAGE_DATA_ROOT/$LOCAL_PATH_TO_IMAGES"
- echo "Setting archive directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
+ echo "Setting archive directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES" | tee -a "$AUTOPROCESS_LOG"
 else
  #INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE=$(basename $INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE)
  ABSOLUTE_PATH_TO_IMAGES=$(readlink -f "$INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE")
@@ -547,10 +557,10 @@ else
   ABSOLUTE_PATH_TO_IMAGES=$(readlink -f $(basename "$INPUT_IMAGE_DIR_PATH_INSTEAD_OF_ZIP_ARCHIVE"))
  fi
  ####
- echo "Setting input directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES"
+ echo "Setting input directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES" | tee -a "$AUTOPROCESS_LOG"
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 if [ ! -d "$ABSOLUTE_PATH_TO_IMAGES" ];then
- echo "ERROR: cannot find directory $ABSOLUTE_PATH_TO_IMAGES " 
+ echo "ERROR: cannot find directory $ABSOLUTE_PATH_TO_IMAGES "  | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 # Remove results directory with the same name if exist
@@ -560,9 +570,9 @@ fi
 mkdir "$VAST_RESULTS_DIR_FILENAME"
 
 if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
- mv -v "$ZIP_ARCHIVE_FILENAME" "$LOCAL_PATH_TO_IMAGES"
+ mv -v "$ZIP_ARCHIVE_FILENAME" "$LOCAL_PATH_TO_IMAGES" | tee -a "$AUTOPROCESS_LOG"
 
- echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
+ echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES"  | tee -a "$AUTOPROCESS_LOG"
  cd "$ABSOLUTE_PATH_TO_IMAGES" || exit 1
  if [ ! -f "$ZIP_ARCHIVE_FILENAME" ];then
   echo "ERROR: cannot find $ABSOLUTE_PATH_TO_IMAGES/$ZIP_ARCHIVE_FILENAME" x
@@ -575,18 +585,18 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
   if [ $? -eq 0 ];then
    rar e "$ZIP_ARCHIVE_FILENAME"
    if [ $? -ne 0 ];then
-    echo "ERROR: cannot extradct the RAR archive $ZIP_ARCHIVE_FILENAME" 
+    echo "ERROR: cannot extradct the RAR archive $ZIP_ARCHIVE_FILENAME"  | tee -a "$AUTOPROCESS_LOG"
     exit 1
    fi
   else
    command -v unrar &> /dev/null
    if [ $? -ne 0 ];then
-    echo "ERROR: cannot extradct the RAR archive $ZIP_ARCHIVE_FILENAME" 
+    echo "ERROR: cannot extradct the RAR archive $ZIP_ARCHIVE_FILENAME"  | tee -a "$AUTOPROCESS_LOG"
     exit 1
    else
     unrar e "$ZIP_ARCHIVE_FILENAME"
     if [ $? -ne 0 ];then
-     echo "ERROR: cannot extradct the RAR archive - please install rar or unrar" 
+     echo "ERROR: cannot extradct the RAR archive - please install rar or unrar"  | tee -a "$AUTOPROCESS_LOG"
      exit 1
     fi
    fi
@@ -596,11 +606,11 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
   # -j Junk the paths (extract all files into the current directory without directory structure).
   unzip -n -j "$ZIP_ARCHIVE_FILENAME"
   if [ $? -ne 0 ];then
-   echo "ERROR: cannot extradct the ZIP archive $ZIP_ARCHIVE_FILENAME" 
+   echo "ERROR: cannot extradct the ZIP archive $ZIP_ARCHIVE_FILENAME"  | tee -a "$AUTOPROCESS_LOG"
    exit 1
   fi
  else
-  echo "ERROR: unrecognized archive type $ZIP_ARCHIVE_FILENAME" 
+  echo "ERROR: unrecognized archive type $ZIP_ARCHIVE_FILENAME"  | tee -a "$AUTOPROCESS_LOG"
   exit 1
  fi
  # remove the archive file
@@ -625,36 +635,36 @@ fi
 #
 
 # Rename SF files
-echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES" 
+echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES"  | tee -a "$AUTOPROCESS_LOG"
 cd "$ABSOLUTE_PATH_TO_IMAGES" || exit 1
 #
-echo -n "Checking write permissions for the current directory ( $PWD ) ... "
+echo -n "Checking write permissions for the current directory ( $PWD ) ... " | tee -a "$AUTOPROCESS_LOG"
 touch testfile$$.tmp
 if [ $? -eq 0 ];then
  rm -f testfile$$.tmp
- echo "OK"
+ echo "OK" | tee -a "$AUTOPROCESS_LOG"
 else
  echo "ERROR: please make sure you have write permissions for the current directory.
 
 Maybe you need something like:
-sudo chown -R $USER $PWD"
+sudo chown -R $USER $PWD" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 #
-echo "Renaming the SF files" 
+echo "Renaming the SF files"  | tee -a "$AUTOPROCESS_LOG"
 for i in *-SF*."$FITS_FILE_EXT" ;do 
  if [ -f "$i" ];then
   mv "$i" "${i/-SF/}"
  fi 
 done
 #
-echo "Renaming the 2021_ field name files (should be 2021-)"
+echo "Renaming the 2021_ field name files (should be 2021-)" | tee -a "$AUTOPROCESS_LOG"
 for i in *"2021_"*."$FITS_FILE_EXT" ;do 
  if [ -f "$i" ];then
   mv "$i" "${i/2021_/2021-}" 
  fi
 done
-echo "Remofing fd_*.* (old calibrated files)"
+echo "Removing fd_*.* (old calibrated files)" | tee -a "$AUTOPROCESS_LOG"
 for i in fd_*."$FITS_FILE_EXT" ;do
  if [ -f "$i" ];then
   rm -f "$i"
@@ -665,29 +675,29 @@ done
 
 
 # make a VaST Copy
-echo "Changing directory to $DATA_PROCESSING_ROOT" 
+echo "Changing directory to $DATA_PROCESSING_ROOT"  | tee -a "$AUTOPROCESS_LOG"
 cd "$DATA_PROCESSING_ROOT" || exit 1
 #
-echo -n "Checking write permissions for the current directory ( $PWD ) ... "
+echo -n "Checking write permissions for the current directory ( $PWD ) ... " | tee -a "$AUTOPROCESS_LOG"
 touch testfile$$.tmp
 if [ $? -eq 0 ];then
  rm -f testfile$$.tmp
- echo "OK"
+ echo "OK" | tee -a "$AUTOPROCESS_LOG"
 else
  echo "ERROR: please make sure you have write permissions for the current directory.
 Maybe you need something like:
-sudo chown -R $USER $PWD"
+sudo chown -R $USER $PWD" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 #
 
 # Make sure we have enough disk space before doing this
 if ! check_free_space ;then
- echo "ERROR free disk space check faield before rsync"
+ echo "ERROR free disk space check faield before rsync" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 
-echo "Making a copy of $(readlink -f "$VAST_REFERENCE_COPY") to $VAST_WORKING_DIR_FILENAME"
+echo "Making a copy of $(readlink -f "$VAST_REFERENCE_COPY") to $VAST_WORKING_DIR_FILENAME" | tee -a "$AUTOPROCESS_LOG"
 # use rsync instead of cp to ignore large and unneeded files
 # '/' tells rsync we want the content of the directory, not the directory itself
 #rsync -avz --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' $(readlink -f "$VAST_REFERENCE_COPY")/ "$VAST_WORKING_DIR_FILENAME"
@@ -697,7 +707,7 @@ echo "Making a copy of $(readlink -f "$VAST_REFERENCE_COPY") to $VAST_WORKING_DI
 # --no-times avoid copying file modification times
 rsync -av --whole-file --no-times --omit-dir-times --exclude 'astorb.dat' --exclude 'lib/catalogs' --exclude 'src' --exclude '.git' --exclude '.github' "$(readlink -f "$VAST_REFERENCE_COPY")/" "$VAST_WORKING_DIR_FILENAME"
 if [ $? -ne 0 ];then
- echo "ERROR running rsync"
+ echo "ERROR running rsync" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 cd "$VAST_WORKING_DIR_FILENAME" || exit 1
@@ -709,17 +719,17 @@ cd .. || exit 1
 #
 
 # We should be at $VAST_WORKING_DIR_FILENAME
-echo "We are currently at $PWD"
+echo "We are currently at $PWD" | tee -a "$AUTOPROCESS_LOG"
 
 #
 if [ -d transient_report ];then
- echo "Removing transient_report"
+ echo "Removing transient_report" | tee -a "$AUTOPROCESS_LOG"
  rm -rf transient_report
 fi
 ln -s "../$VAST_RESULTS_DIR_FILENAME" transient_report
 
 # Report that we are ready to go
-echo "Reporting the start of work" 
+echo "Reporting the start of work"  | tee -a "$AUTOPROCESS_LOG"
 HOST=$(hostname)
 HOST="@$HOST"
 NAME="$USER$HOST"
@@ -741,7 +751,7 @@ The results should appear at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILE
 echo "
 $MSG
 
-" 
+"  | tee -a "$AUTOPROCESS_LOG"
 if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workstartemail" ];then
  if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ] && [ $TEST_RUN -eq 0 ] ;then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
@@ -752,22 +762,22 @@ if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workendemail" ] && [ $TEST_RUN -eq 0 ];th
  WORKENDEMAIL="on"
 fi
 ############################################################################
-echo "Starting work" 
+echo "Starting work"  | tee -a "$AUTOPROCESS_LOG"
 UNIXSEC_START=$(date +%s)
 ########################## ACTUAL WORK ##########################
 util/transients/transient_factory_test31.sh "$ABSOLUTE_PATH_TO_IMAGES"
 SCRIPT_EXIT_CODE=$?
-echo "SCRIPT_EXIT_CODE=$SCRIPT_EXIT_CODE"
+echo "SCRIPT_EXIT_CODE=$SCRIPT_EXIT_CODE" | tee -a "$AUTOPROCESS_LOG"
 CPU_TEMERATURE_AT_THE_END_OF_THE_RUN_STRING=$(is_temperature_low log)
 #################################################################
 if [ ! -f transient_report/index.html ];then
  ERROR_MSG="no transient_report/index.html"
- echo "ERROR: $ERROR_MSG"
+ echo "ERROR: $ERROR_MSG" | tee -a "$AUTOPROCESS_LOG"
  MSG="A VaST error occured: $ERROR_MSG
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
 elif [ ! -s transient_report/index.html ];then
  ERROR_MSG="empty transient_report/index.html"
- echo "ERROR: $ERROR_MSG"
+ echo "ERROR: $ERROR_MSG" | tee -a "$AUTOPROCESS_LOG"
  MSG="A VaST error occured: $ERROR_MSG
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
 else
@@ -836,18 +846,18 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
     # before upload.py gets a chance to read it!
     sleep 3
     #
-    rm -rf "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE"
+    rm -rf "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" 2>&1 | tee -a "$AUTOPROCESS_LOG"
    fi
   fi
  fi
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 #
 # We want to remove the VaST working directory no matter the exit code
-echo "Cleaning up"
+echo "Cleaning up" | tee -a "$AUTOPROCESS_LOG"
 if [ -n "$VAST_WORKING_DIR_FILENAME" ];then
  if [ -d "$VAST_WORKING_DIR_FILENAME" ];then
   if [ ! -f "$VAST_WORKING_DIR_FILENAME/DO_NOT_DELETE_THIS_DIR" ];then
-   rm -rf "$VAST_WORKING_DIR_FILENAME"
+   rm -rf "$VAST_WORKING_DIR_FILENAME" 2>&1 | tee -a "$AUTOPROCESS_LOG"
   fi
  fi
 fi
@@ -860,7 +870,7 @@ PROCESSING_TIME_TOTAL=$(echo "$UNIXSEC_STOP $UNIXSEC_START_TOTAL" | awk '{printf
 DATETIME=$(LANG=C date --utc)
 
 # report end of work
-echo "Reporting the end of work" 
+echo "Reporting the end of work"  | tee -a "$AUTOPROCESS_LOG"
 MSG="The script $0 has finished work on $DATETIME at $PWD with the following parameters:
 IMAGE_DATA_ROOT=$IMAGE_DATA_ROOT
 DATA_PROCESSING_ROOT=$DATA_PROCESSING_ROOT
@@ -887,7 +897,7 @@ The results should appear at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILE
 echo "
 $MSG
 
-"
+" | tee -a "$AUTOPROCESS_LOG"
 if [ "$WORKENDEMAIL" = "on" ];then
  if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ] && [ $TEST_RUN -eq 0 ];then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 
 # The DeprecationWarning about 'import cgi' will corrput mime
 import warnings
@@ -291,11 +291,22 @@ def main():
             os.system(f'touch {dirname}workendemail')
 
         # Log upload details
-        os.system(f'ls -lh {dirname}* > {dirname}upload.log')
-
+        os.system(f'ls -lh {dirname}* >> {dirname}upload.log')
+        
         # Get the current working directory - for debugging
         cwd = os.getcwd()
         
+        # Debug: log environment and paths
+        debug_log = os.path.join(dirname, 'upload.log')
+        with open(debug_log, 'a') as f:
+            f.write(f"=== upload.py3 ===\n")
+            f.write(f"CWD: {cwd}\n")
+            f.write(f"wrapper.sh exists: {os.path.isfile('./wrapper.sh')}\n")
+            f.write(f"wrapper.sh executable: {os.access('./wrapper.sh', os.X_OK)}\n")
+            f.write(f"Full wrapper path: {os.path.abspath('./wrapper.sh')}\n")
+            f.write(f"dirname: {dirname}\n")
+            f.write(f"Command: ./wrapper.sh {dirname}{os.path.basename(form['file'].filename)}\n")
+
         # Check if ./wrapper.sh exists in the current directory
         if os.path.isfile('./wrapper.sh'):
             # Run processing wrapper

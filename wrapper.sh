@@ -112,5 +112,22 @@ if [ -s local_config.sh ]; then
     source local_config.sh
 fi
 
+# Create a log file in the upload directory
+LOGFILE="$(dirname $INPUT_FILE)/upload.log"
+{
+    echo "=== Wrapper started at $(date) ==="
+    echo "PWD: $PWD"
+    echo "USER: $USER"
+    echo "INPUT_FILE: $1"
+    echo "PATH: $PATH"
+    echo "Environment:"
+    env | sort
+    echo "=== Starting autoprocess.sh ==="
+} >> "$LOGFILE" 2>&1
+
+# Run autoprocess WITHOUT backgrounding and WITHOUT silencing (temporarily)
+#./autoprocess.sh "$1" >> "$LOGFILE" 2>&1 &
+#echo "autoprocess.sh PID: $!" >> "$LOGFILE"
+
 # Start the autoprocess script
 ./autoprocess.sh "$1" &>/dev/null &

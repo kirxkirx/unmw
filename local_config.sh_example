@@ -7,6 +7,8 @@ export URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
 
 export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 
+# Note that $HOME is typically not defined in CGI environment, so use absolute paths!
+
 
 # Specify plate-solve service
 # as local (requires locally installed astromety.net code and indexes)
