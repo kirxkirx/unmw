@@ -299,7 +299,7 @@ def main():
         # Debug: log environment and paths
         debug_log = os.path.join(dirname, 'upload.log')
         with open(debug_log, 'a') as f:
-            f.write(f"=== upload.py3 ===\n")
+            f.write("=== upload.py3 ===\n")
             f.write(f"CWD: {cwd}\n")
             f.write(f"wrapper.sh exists: {os.path.isfile('./wrapper.sh')}\n")
             f.write(f"wrapper.sh executable: {os.access('./wrapper.sh', os.X_OK)}\n")
