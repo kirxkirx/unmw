@@ -6,6 +6,8 @@ These are the scripts used to analyze the [NMW survey](https://scan.sai.msu.ru/n
 
 This is very much work in progress. You may reach me at kirx[at]kirx.net
 
+***Don't forget to add new camera name to combine_reports.sh***
+
 # draft installation instructions
 
  1. place the code in 'cgi-bin'
