@@ -108,7 +108,130 @@ function is_system_load_low {
  return $?
 }
 
-function is_temperature_low {
+# Return one integer: best-guess CPU temp in degrees C.
+# Prints nothing and returns non-zero if it cannot determine.
+get_cpu_temp_c() {
+  local t="" best="" best_prio=999999
+  local hwmon name dir f label input prio
+
+  # 1) sysfs: /sys/class/hwmon (preferred)
+  for dir in /sys/class/hwmon/hwmon*; do
+    [ -d "$dir" ] || continue
+
+    name=""
+    [ -r "$dir/name" ] && name=$(cat "$dir/name" 2>/dev/null)
+
+    # Prioritize likely CPU-related hwmon drivers
+    # coretemp (Intel), k10temp (AMD), zenpower (AMD), acpitz (ACPI zones)
+    case "$name" in
+      coretemp) prio_base=10 ;;
+      k10temp|zenpower|zenpower3) prio_base=20 ;;
+      acpitz) prio_base=80 ;;
+      *) prio_base=200 ;;
+    esac
+
+    for input in "$dir"/temp*_input; do
+      [ -r "$input" ] || continue
+      f="${input%_input}"
+      label=""
+      [ -r "${f}_label" ] && label=$(cat "${f}_label" 2>/dev/null)
+
+      # Choose the most CPU-ish label when available
+      # Package id / Tctl / Tdie are common CPU package controls
+      case "$label" in
+        *"Package id"*|*"Tctl"*|*"Tdie"*|*"CPU"*|*"Core 0"*) prio=0 ;;
+        *"Core "*|*"CCD"*|*"CCX"*) prio=5 ;;
+        *"temp1"*) prio=30 ;;
+        *) prio=50 ;;
+      esac
+
+      # Combine driver-based and label-based priority
+      prio=$((prio + prio_base))
+
+      t=$(cat "$input" 2>/dev/null)
+      # Expect millidegrees
+      case "$t" in
+        ''|*[!0-9]*)
+          continue
+          ;;
+      esac
+      t=$((t / 1000))
+
+      # Sanity range (ignore bogus 0, or absurd values)
+      [ "$t" -ge 5 ] && [ "$t" -le 120 ] || continue
+
+      if [ -z "$best" ] || [ "$prio" -lt "$best_prio" ]; then
+        best="$t"
+        best_prio="$prio"
+      fi
+    done
+  done
+
+  if [ -n "$best" ]; then
+    printf '%s\n' "$best"
+    return 0
+  fi
+
+  # 2) fallback: sensors -u (less pretty than default output, less fragile)
+  if command -v sensors >/dev/null 2>&1; then
+    # Try common CPU fields: Package id 0, Tctl, Tdie.
+    # sensors -u prints temp*_input: 30.000
+    t=$(
+      sensors -u 2>/dev/null |
+        awk '
+          BEGIN { best=""; }
+          /^[^[:space:]]/ { chip=$0 }
+          /^[[:space:]]+temp[0-9]+_input:/ {
+            v=$2+0
+            # Heuristic: prefer chips that look CPU-ish
+            prio=1000
+            if (chip ~ /^coretemp/) prio=10
+            if (chip ~ /^k10temp|^zenpower/) prio=20
+            if (chip ~ /acpitz/) prio=80
+            # Keep the first best-priority value we see
+            key=prio ":" v
+            if (best=="" || key < best) best=key
+          }
+          END {
+            if (best!="") {
+              split(best,a,":")
+              printf("%.0f\n", a[2])
+            }
+          }'
+    )
+    if [ -n "$t" ] && printf '%s' "$t" | grep -Eq '^[0-9]+$'; then
+      [ "$t" -ge 5 ] && [ "$t" -le 120 ] || return 1
+      printf '%s\n' "$t"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+# Your policy wrapper: return 0 if temperature < MAX_CPU_TEMP_C, else 1.
+# If temp is unavailable, currently you "fail open" (return 0). Keep that behavior.
+is_temperature_low() {
+  local t
+  t=$(get_cpu_temp_c) || t=""
+
+  if [ -z "$t" ]; then
+    # no data: assume OK (fail open)
+    return 0
+  fi
+
+  if [ "$1" = "log" ]; then
+    if [ "$t" -lt "$MAX_CPU_TEMP_C" ]; then
+      printf "CPU temperature: %s C\n" "$t"
+    else
+      printf "CPU temperature: %s C - WARNING\n" "$t"
+    fi
+  fi
+
+  [ "$t" -lt "$MAX_CPU_TEMP_C" ]
+}
+
+function is_temperature_low_old_version_based_solely_on_lm-sensors {
  command -v sensors &> /dev/null 
  if [ $? -ne 0 ];then
   return 0
