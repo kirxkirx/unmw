@@ -219,6 +219,13 @@ is_temperature_low() {
     # no data: assume OK (fail open)
     return 0
   fi
+  
+  if ! [[ $t =~ ^[0-9]+$ ]]; then
+   echo "WARNING: cannot parse CPU temperature information ($t)"
+   return 0
+  fi
+  
+  MAX_CPU_TEMP_C=$(echo "$MAX_CPU_TEMP_C" | awk '{printf "%.0f", $1}')
 
   if [ "$1" = "log" ]; then
     if [ "$t" -lt "$MAX_CPU_TEMP_C" ]; then
@@ -228,7 +235,14 @@ is_temperature_low() {
     fi
   fi
 
-  [ "$t" -lt "$MAX_CPU_TEMP_C" ]
+  if [ "$t" -lt "$MAX_CPU_TEMP_C" ]; then
+   return 0
+  else
+   return 1
+  fi
+  
+  # get here if something is wrong with the above if
+  return 0
 }
 
 function is_temperature_low_old_version_based_solely_on_lm-sensors {
