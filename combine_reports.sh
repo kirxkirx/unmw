@@ -399,7 +399,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
     WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | tail -n1)
     if [ -z "$WARNING_MSG" ];then
      # Special check for corrupted index.html: 'Processing complete!' is there but not 'List of TOCP transients'
-     if ! grep --quiet 'List of TOCP transients' "$INPUT_DIR/index.html" ;then
+     if ! grep --quiet -e 'List of TOCP transients' -e 'Truncated list of TOCP transients' "$INPUT_DIR/index.html" ;then
       WARNING_MSG="WARNING: corrupted log file $WARNING_MSG"
       # maybe do something about it, like check the disk space?
      fi
