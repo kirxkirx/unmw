@@ -27,7 +27,9 @@ jobs:
             flake8 --ignore=W293,W291,E501,E128,E722,E402 $i
           done
       - name: Install VaST dependencies
-        run: sudo apt-get install gfortran libx11-dev libpng-dev 
+        run: |
+          sudo apt-get update
+          sudo apt-get install gfortran libx11-dev libpng-dev 
       - name: Install rarfile for Python
         run: |
           sudo apt-get install -y unrar
