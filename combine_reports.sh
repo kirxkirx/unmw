@@ -76,7 +76,7 @@ trap 'rm -f "${LOCKFILE}"; exit' INT TERM EXIT
 echo $$ > "${LOCKFILE}"
 
 # loop through the cameras
-for CAMERA in Stas STL-11000M TICA_TESS ED80__Black TTUQ1b1x1 ;do
+for CAMERA in Stas STL-11000M TICA_TESS ED80__Black TTUQ1b1x1 TTUQ2b1x1 ;do
 
 DAY=$(date +%Y%m%d)
 HOUR=$(date +%H)

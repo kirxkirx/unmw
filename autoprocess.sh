@@ -697,7 +697,7 @@ else
  echo "Setting input directory path ABSOLUTE_PATH_TO_IMAGES= $ABSOLUTE_PATH_TO_IMAGES" | tee -a "$AUTOPROCESS_LOG"
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 if [ ! -d "$ABSOLUTE_PATH_TO_IMAGES" ];then
- echo "ERROR: cannot find directory $ABSOLUTE_PATH_TO_IMAGES "  | tee -a "$AUTOPROCESS_LOG"
+ echo "ERROR: cannot find directory containing the absolute path to images $ABSOLUTE_PATH_TO_IMAGES "  | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
 # Remove results directory with the same name if exist
