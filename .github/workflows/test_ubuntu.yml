@@ -54,6 +54,10 @@ jobs:
         run: pip install lxml
       - name: Test lxml installation
         run: python -c "from lxml import etree; print('lxml installed successfully')"
+      - name: Install pytest
+        run: pip install pytest
+      - name: Run Python unit tests
+        run: python3 -m pytest test_python.py -v
       - name: Run self-test script
         run: bash unmw_selftest.sh
         
