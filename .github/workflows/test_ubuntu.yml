@@ -8,10 +8,19 @@ permissions:
   contents: read  # Minimal permissions to access repository content
 
 jobs:
-  ubuntuLatestTest:
+  full-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Display Python version
+        run: python --version
       - name: Install shellcheck
         run: sudo apt-get install shellcheck
       - name: Shellcheck VaST BASH scripts
@@ -29,7 +38,7 @@ jobs:
       - name: Install VaST dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install gfortran libx11-dev libpng-dev 
+          sudo apt-get install gfortran libx11-dev libpng-dev
       - name: Install rarfile for Python
         run: |
           sudo apt-get install -y unrar
@@ -46,6 +55,8 @@ jobs:
           sudo mv /tmp/rar/unrar /usr/local/bin/unrar
       - name: Verify RAR installation
         run: rar
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
       - name: Install bs4
         run: pip install bs4
       - name: Test bs4 installation
@@ -60,4 +71,4 @@ jobs:
         run: python3 -m pytest test_python.py -v
       - name: Run self-test script
         run: bash unmw_selftest.sh
-        
+

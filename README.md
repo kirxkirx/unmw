@@ -6,6 +6,20 @@ These are the scripts used to analyze the [NMW survey](https://scan.sai.msu.ru/n
 
 This is very much work in progress. You may reach me at kirx[at]kirx.net
 
+## Python version compatibility
+
+The code supports Python 3.9 through 3.13+. For **Python 3.13 and later**, the `cgi` and `cgitb` modules were removed from the standard library. You must install the `legacy-cgi` package:
+
+```bash
+pip install legacy-cgi
+```
+
+Alternatively, install all dependencies from `requirements.txt` which handles this automatically:
+
+```bash
+pip install -r requirements.txt
+```
+
 ***Don't forget to add new camera name to combine_reports.sh***
 
 # draft installation instructions

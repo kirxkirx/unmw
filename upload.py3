@@ -1,11 +1,19 @@
-#!/usr/bin/env python3.12
+#!/usr/bin/env python3
 
-# The DeprecationWarning about 'import cgi' will corrput mime
+# Handle cgi module removal in Python 3.13+
+# The 'cgi' and 'cgitb' modules were removed from stdlib in Python 3.13.
+# The 'legacy-cgi' package provides these modules for Python 3.13+.
+# Install with: pip install legacy-cgi
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
-import cgi
+try:
+    import cgi
+    import cgitb
+except ImportError:
+    import sys
+    sys.exit("Error: 'cgi' module not found. "
+             "For Python 3.13+, install: pip install legacy-cgi")
 import os
-import cgitb
 import random
 import string
 import time
