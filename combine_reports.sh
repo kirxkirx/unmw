@@ -373,9 +373,11 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  SECOND_EPOCH_FIRST=$(grep 'SECOND_EPOCH__FIRST_IMAGE=' "$INPUT_DIR/index.html" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
  SECOND_EPOCH_SECOND=$(grep 'SECOND_EPOCH__SECOND_IMAGE=' "$INPUT_DIR/index.html" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
  # Extract FWHM values for these specific images and get the maximum
+ # Match lines containing "pix" and image name (with or without fd_ prefix), but only
+ # extract $1 if it's a number (to exclude "star elongation" lines that start with "The")
  FWHM_PIX=$( {
-  [ -n "$SECOND_EPOCH_FIRST" ] && grep "pix  $SECOND_EPOCH_FIRST" "$INPUT_DIR/index.html" | awk '{print $1}'
-  [ -n "$SECOND_EPOCH_SECOND" ] && grep "pix  $SECOND_EPOCH_SECOND" "$INPUT_DIR/index.html" | awk '{print $1}'
+  [ -n "$SECOND_EPOCH_FIRST" ] && grep "pix.*$SECOND_EPOCH_FIRST" "$INPUT_DIR/index.html" | awk '$1 ~ /^[0-9.]+$/ {print $1}'
+  [ -n "$SECOND_EPOCH_SECOND" ] && grep "pix.*$SECOND_EPOCH_SECOND" "$INPUT_DIR/index.html" | awk '$1 ~ /^[0-9.]+$/ {print $1}'
  } | sort -rn | head -n1 )
  # remove "UTC" as we have it in the table header
  # LOG LINE: the universal start

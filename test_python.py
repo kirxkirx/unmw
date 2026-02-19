@@ -507,5 +507,116 @@ The object was found in astcheck
             os.unlink(temp_path)
 
 
+class TestFWHMExtraction:
+    """Tests for FWHM extraction logic in combine_reports.sh"""
+
+    def test_fwhm_extraction_with_fd_prefix(self):
+        """Should extract FWHM value from calibrated image lines (fd_ prefix)"""
+        # Simulate index.html content with both FWHM and star elongation lines
+        html_content = """
+SECOND_EPOCH__FIRST_IMAGE= /path/to/161_2026-2-19_18-43-44_002.fts
+SECOND_EPOCH__SECOND_IMAGE= /path/to/161_2026-2-19_18-44-38_003.fts
+The star elongation is within the allowed range: median(A-B)=0.12 pix  161_2026-2-19_18-43-44_002.fts
+The star elongation is within the allowed range: median(A-B)=0.13 pix  161_2026-2-19_18-44-38_003.fts
+ 1.7 pix  fd_161_2026-2-19_18-43-44_002.fts
+ 1.6 pix  fd_161_2026-2-19_18-44-38_003.fts
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html',
+                                         delete=False) as f:
+            f.write(html_content)
+            temp_path = f.name
+
+        try:
+            # Extract FWHM using the same logic as combine_reports.sh
+            # This tests that we get numeric FWHM values, not "The"
+            import subprocess
+            bash_cmd = f'''
+SECOND_EPOCH_FIRST=$(grep 'SECOND_EPOCH__FIRST_IMAGE=' "{temp_path}" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
+SECOND_EPOCH_SECOND=$(grep 'SECOND_EPOCH__SECOND_IMAGE=' "{temp_path}" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
+FWHM_PIX=$( {{
+  [ -n "$SECOND_EPOCH_FIRST" ] && grep "pix.*$SECOND_EPOCH_FIRST" "{temp_path}" | awk '$1 ~ /^[0-9.]+$/ {{print $1}}'
+  [ -n "$SECOND_EPOCH_SECOND" ] && grep "pix.*$SECOND_EPOCH_SECOND" "{temp_path}" | awk '$1 ~ /^[0-9.]+$/ {{print $1}}'
+}} | sort -rn | head -n1 )
+echo "$FWHM_PIX"
+'''
+            result = subprocess.run(['bash', '-c', bash_cmd],
+                                    capture_output=True, text=True)
+            fwhm_value = result.stdout.strip()
+
+            # FWHM should be a number (1.7), not "The"
+            assert fwhm_value != "The", \
+                f"FWHM extraction returned 'The' instead of numeric value"
+            assert fwhm_value == "1.7", \
+                f"Expected FWHM 1.7, got {fwhm_value}"
+        finally:
+            os.unlink(temp_path)
+
+    def test_fwhm_extraction_without_fd_prefix(self):
+        """Should extract FWHM value from non-calibrated image lines"""
+        html_content = """
+SECOND_EPOCH__FIRST_IMAGE= /path/to/image_001.fts
+SECOND_EPOCH__SECOND_IMAGE= /path/to/image_002.fts
+ 2.3 pix  image_001.fts
+ 2.1 pix  image_002.fts
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html',
+                                         delete=False) as f:
+            f.write(html_content)
+            temp_path = f.name
+
+        try:
+            import subprocess
+            bash_cmd = f'''
+SECOND_EPOCH_FIRST=$(grep 'SECOND_EPOCH__FIRST_IMAGE=' "{temp_path}" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
+SECOND_EPOCH_SECOND=$(grep 'SECOND_EPOCH__SECOND_IMAGE=' "{temp_path}" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
+FWHM_PIX=$( {{
+  [ -n "$SECOND_EPOCH_FIRST" ] && grep "pix.*$SECOND_EPOCH_FIRST" "{temp_path}" | awk '$1 ~ /^[0-9.]+$/ {{print $1}}'
+  [ -n "$SECOND_EPOCH_SECOND" ] && grep "pix.*$SECOND_EPOCH_SECOND" "{temp_path}" | awk '$1 ~ /^[0-9.]+$/ {{print $1}}'
+}} | sort -rn | head -n1 )
+echo "$FWHM_PIX"
+'''
+            result = subprocess.run(['bash', '-c', bash_cmd],
+                                    capture_output=True, text=True)
+            fwhm_value = result.stdout.strip()
+
+            assert fwhm_value == "2.3", \
+                f"Expected FWHM 2.3, got {fwhm_value}"
+        finally:
+            os.unlink(temp_path)
+
+    def test_fwhm_not_extracted_from_elongation_lines(self):
+        """Should NOT extract from star elongation lines (regression test)"""
+        # This is the exact bug scenario - only elongation lines, no FWHM lines
+        html_content = """
+SECOND_EPOCH__FIRST_IMAGE= /path/to/161_2026-2-19_18-43-44_002.fts
+The star elongation is within the allowed range: median(A-B)=0.12 pix  161_2026-2-19_18-43-44_002.fts
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html',
+                                         delete=False) as f:
+            f.write(html_content)
+            temp_path = f.name
+
+        try:
+            import subprocess
+            bash_cmd = f'''
+SECOND_EPOCH_FIRST=$(grep 'SECOND_EPOCH__FIRST_IMAGE=' "{temp_path}" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
+FWHM_PIX=$( {{
+  [ -n "$SECOND_EPOCH_FIRST" ] && grep "pix.*$SECOND_EPOCH_FIRST" "{temp_path}" | awk '$1 ~ /^[0-9.]+$/ {{print $1}}'
+}} | sort -rn | head -n1 )
+echo "$FWHM_PIX"
+'''
+            result = subprocess.run(['bash', '-c', bash_cmd],
+                                    capture_output=True, text=True)
+            fwhm_value = result.stdout.strip()
+
+            # Should be empty, NOT "The"
+            assert fwhm_value != "The", \
+                "FWHM extraction incorrectly returned 'The' from elongation line"
+            assert fwhm_value == "", \
+                f"Expected empty FWHM (no valid lines), got '{fwhm_value}'"
+        finally:
+            os.unlink(temp_path)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
