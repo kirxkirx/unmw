@@ -699,7 +699,8 @@ echo "Validated $VUL3_PREVIEW_PNG_COUNT Preview PNG file(s) for Vul3 OK rows"
 VUL3_FWHM_VALID=0
 while IFS= read -r VUL3_ROW; do
  # FWHM is in the 9th <td> column
- VUL3_FWHM=$(echo "$VUL3_ROW" | grep -o '<td>[^<]*</td>' | sed -n '9p' | sed 's/<td>//;s/<\/td>//')
+ # Use sed to extract column content, handling nested HTML tags
+ VUL3_FWHM=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '9p' | tr -d ' ')
  if [ -z "$VUL3_FWHM" ];then
   echo "FWHM value for a Vul3 row is empty (acceptable)"
   VUL3_FWHM_VALID=1
@@ -723,7 +724,8 @@ fi
 # Check mag.lim. value for Vul3 OK rows - should be empty or a float (typically 10-20)
 while IFS= read -r VUL3_ROW; do
  # mag.lim. is in the 8th <td> column
- VUL3_MAGLIM=$(echo "$VUL3_ROW" | grep -o '<td>[^<]*</td>' | sed -n '8p' | sed 's/<td>//;s/<\/td>//')
+ # Use sed to extract column content, handling nested HTML tags
+ VUL3_MAGLIM=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '8p' | tr -d ' ')
  if [ -n "$VUL3_MAGLIM" ]; then
   if ! echo "$VUL3_MAGLIM" | grep -qE '^[0-9]+\.?[0-9]*$' ; then
    echo "$0 test error: mag.lim. value '$VUL3_MAGLIM' is not a valid number (got text instead?)"
@@ -738,7 +740,8 @@ done < <(grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep 'OK')
 # Check Pointing.Offset value for Vul3 OK rows - should be a float or "ERROR"
 while IFS= read -r VUL3_ROW; do
  # Pointing.Offset is in the 7th <td> column
- VUL3_OFFSET=$(echo "$VUL3_ROW" | grep -o '<td>[^<]*</td>' | sed -n '7p' | sed 's/<td>//;s/<\/td>//')
+ # Use sed to extract column content, handling nested HTML tags
+ VUL3_OFFSET=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '7p' | tr -d ' ')
  if [ -n "$VUL3_OFFSET" ]; then
   if [ "$VUL3_OFFSET" = "ERROR" ]; then
    echo "Pointing.Offset value for Vul3 is ERROR (acceptable)"
