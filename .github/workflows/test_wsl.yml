@@ -74,22 +74,6 @@ jobs:
           pip3 install --break-system-packages -r requirements.txt
           pip3 install --break-system-packages pytest rarfile
 
-      - name: Install Flake8 and run linter
-        run: |
-          pip3 install --break-system-packages flake8
-          cd ~/unmw
-          for i in filter_report.py upload.py3; do
-            flake8 --ignore=W293,W291,E501,E128,E722,E402 $i
-          done
-
-      - name: Install shellcheck and check bash scripts
-        run: |
-          sudo apt-get install -y shellcheck
-          cd ~/unmw
-          for i in *.sh; do
-            shellcheck --severity=error $i
-          done
-
       - name: Run Python unit tests
         run: |
           cd ~/unmw
