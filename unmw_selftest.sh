@@ -430,7 +430,16 @@ if [ "$UNMW_FREE_PORT" != "8080" ];then
  exit 1
 fi
 # Use "**.py" pattern to match all Python scripts as CGI (more flexible for testing)
-# On WSL2, add -u root to prevent user switching which causes CGI to fail silently
+#
+# WSL2 Bug Workaround:
+# When thttpd runs as root, it normally switches to the "nobody" user for security
+# before executing CGI scripts. On WSL2, this user-switching mechanism is broken:
+# the CGI script executes but its output is silently lost - the server logs show
+# "200 25000" (success with bytes sent) but curl receives 0 bytes. This appears
+# to be a WSL2-specific issue with process credentials or IPC after setuid/setgid.
+# The fix is to use "-u root" to prevent user switching, keeping the server running
+# as root throughout. This is acceptable for testing but should not be used in
+# production. See also: IPv6 and mmap workarounds earlier in this script.
 STHTTPD_EXTRA_ARGS=""
 if grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null; then
  echo "Detected WSL - running sthttpd without user switching to fix CGI execution"
