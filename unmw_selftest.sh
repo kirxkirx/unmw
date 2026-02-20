@@ -481,20 +481,98 @@ if [ -z "$LATEST_PROCESSING_SUMMARY_LOG" ];then
  echo "$0 test error: empty LATEST_PROCESSING_SUMMARY_LOG"
  exit 1
 else
- echo "The latest combined report is:"
+ echo "The latest processing summary is:"
  ls -lh "$LATEST_PROCESSING_SUMMARY_LOG"
 fi
+
+# Check that required columns exist in the header
+if ! grep --quiet '<th>Field</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;then
+ echo "$0 test error: cannot find 'Field' column header in $LATEST_PROCESSING_SUMMARY_LOG"
+ exit 1
+fi
+if ! grep --quiet '<th>Preview</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;then
+ echo "$0 test error: cannot find 'Preview' column header in $LATEST_PROCESSING_SUMMARY_LOG"
+ exit 1
+fi
+if ! grep --quiet '<th>Status</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;then
+ echo "$0 test error: cannot find 'Status' column header in $LATEST_PROCESSING_SUMMARY_LOG"
+ exit 1
+fi
+if ! grep --quiet '<th>mag.lim.</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;then
+ echo "$0 test error: cannot find 'mag.lim.' column header in $LATEST_PROCESSING_SUMMARY_LOG"
+ exit 1
+fi
+if ! grep --quiet '<th>FWHM(pix)</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;then
+ echo "$0 test error: cannot find 'FWHM(pix)' column header in $LATEST_PROCESSING_SUMMARY_LOG"
+ exit 1
+fi
+echo "All required column headers found in summary"
+
+# Check for Vul3 row with OK status
 if ! grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep --quiet 'OK' ;then
  echo "$0 test error: cannot find Vul3 OK in LATEST_PROCESSING_SUMMARY_LOG=$LATEST_PROCESSING_SUMMARY_LOG"
  exit 1
 else
  echo "Found Vul3 OK in $LATEST_PROCESSING_SUMMARY_LOG"
 fi
+
+# Check for Vul8 row with ERROR status
 if ! grep 'Vul8' "$LATEST_PROCESSING_SUMMARY_LOG" | grep --quiet 'ERROR' ;then
  echo "$0 test error: cannot find Vul8 ERROR in LATEST_PROCESSING_SUMMARY_LOG=$LATEST_PROCESSING_SUMMARY_LOG"
  exit 1
 else
  echo "Found Vul8 ERROR in $LATEST_PROCESSING_SUMMARY_LOG"
+fi
+
+# Check that Preview column points to existing valid PNG file for ALL Vul3 OK rows
+VUL3_PREVIEW_PNG_COUNT=0
+while IFS= read -r VUL3_PREVIEW_PNG; do
+ if [ -z "$VUL3_PREVIEW_PNG" ];then
+  echo "$0 test error: cannot extract Preview PNG path from a Vul3 OK row"
+  exit 1
+ fi
+ if [ ! -f "$VUL3_PREVIEW_PNG" ];then
+  echo "$0 test error: Preview PNG file does not exist: $VUL3_PREVIEW_PNG"
+  exit 1
+ fi
+ if ! file "$VUL3_PREVIEW_PNG" | grep --quiet 'PNG image' ;then
+  echo "$0 test error: not a valid PNG image: $VUL3_PREVIEW_PNG"
+  file "$VUL3_PREVIEW_PNG"
+  exit 1
+ fi
+ echo "Preview PNG valid for Vul3: $VUL3_PREVIEW_PNG"
+ VUL3_PREVIEW_PNG_COUNT=$((VUL3_PREVIEW_PNG_COUNT + 1))
+done < <(grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep 'OK' | grep -o 'src="[^"]*\.png"' | sed 's/src="//;s/"//')
+if [ "$VUL3_PREVIEW_PNG_COUNT" -eq 0 ];then
+ echo "$0 test error: no Vul3 OK rows found for Preview PNG validation"
+ exit 1
+fi
+echo "Validated $VUL3_PREVIEW_PNG_COUNT Preview PNG file(s) for Vul3 OK rows"
+
+# Check FWHM value for Vul3 OK rows - should be empty or a float less than 10
+# There may be multiple Vul3 rows, check all of them
+VUL3_FWHM_VALID=0
+while IFS= read -r VUL3_ROW; do
+ # FWHM is in the 9th <td> column
+ VUL3_FWHM=$(echo "$VUL3_ROW" | grep -o '<td>[^<]*</td>' | sed -n '9p' | sed 's/<td>//;s/<\/td>//')
+ if [ -z "$VUL3_FWHM" ];then
+  echo "FWHM value for a Vul3 row is empty (acceptable)"
+  VUL3_FWHM_VALID=1
+ elif echo "$VUL3_FWHM" | grep -qE '^[0-9]+\.?[0-9]*$' ;then
+  if echo "$VUL3_FWHM" | awk '{exit ($1 >= 10 ? 0 : 1)}' ;then
+   echo "$0 test error: FWHM value '$VUL3_FWHM' is >= 10"
+   exit 1
+  fi
+  echo "FWHM value for Vul3 is valid: $VUL3_FWHM"
+  VUL3_FWHM_VALID=1
+ else
+  echo "$0 test error: FWHM value '$VUL3_FWHM' is not a valid number"
+  exit 1
+ fi
+done < <(grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep 'OK')
+if [ "$VUL3_FWHM_VALID" -eq 0 ];then
+ echo "$0 test error: no Vul3 OK rows found for FWHM validation"
+ exit 1
 fi
 
 echo "All tests passed with sthttpd HTTP server!"
