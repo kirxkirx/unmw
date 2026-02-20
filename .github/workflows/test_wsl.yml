@@ -1,0 +1,123 @@
+name: Windows deploy test (via WSL2 Ubuntu)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual triggering from GitHub web interface
+
+jobs:
+  test_wsl:
+    runs-on: windows-2022
+
+    defaults:
+      run:
+        shell: wsl-bash {0}
+
+    steps:
+      # Checkout on the Windows side, then copy into the WSL virtual disk
+      - name: Configure git to preserve LF line endings
+        shell: cmd
+        run: git config --global core.autocrlf input
+
+      - uses: actions/checkout@v4
+
+      - name: Setup WSL2 with Ubuntu
+        uses: Vampire/setup-wsl@v6
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          update: 'true'
+          additional-packages:
+            build-essential
+            gcc
+            g++
+            gfortran
+            make
+            libx11-dev
+            libpng-dev
+            curl
+            wget
+            file
+            git
+            zip
+            unzip
+            python3
+            python3-pip
+            python3-venv
+            rar
+
+      - name: Copy sources to WSL home directory
+        run: |
+          # The checkout is on the Windows NTFS filesystem which is extremely
+          # slow under WSL2 due to the 9P protocol bridge.
+          # Copy to the WSL-native ext4 virtual disk for much better I/O.
+          SRCDIR=$(wslpath '${{ github.workspace }}')
+          echo "Copying from $SRCDIR to ~/unmw ..."
+          cp -rp "$SRCDIR" ~/unmw
+          echo "Source tree size:"
+          du -sh ~/unmw
+
+      - name: Display Python version
+        run: |
+          python3 --version
+          which python3
+
+      - name: Install Python dependencies
+        run: |
+          cd ~/unmw
+          pip3 install --break-system-packages -r requirements.txt
+          pip3 install --break-system-packages pytest rarfile
+
+      - name: Install Flake8 and run linter
+        run: |
+          pip3 install --break-system-packages flake8
+          cd ~/unmw
+          for i in filter_report.py upload.py3; do
+            flake8 --ignore=W293,W291,E501,E128,E722,E402 $i
+          done
+
+      - name: Install shellcheck and check bash scripts
+        run: |
+          sudo apt-get install -y shellcheck
+          cd ~/unmw
+          for i in *.sh; do
+            shellcheck --severity=error $i
+          done
+
+      - name: Run Python unit tests
+        run: |
+          cd ~/unmw
+          python3 -m pytest test_python.py -v
+
+      - name: Run self-test script
+        run: |
+          cd ~/unmw
+          bash unmw_selftest.sh
+        timeout-minutes: 60
+
+      - name: Collect test artifacts
+        if: always()
+        run: |
+          mkdir -p ~/unmw/test_artifacts
+          # Copy logs and results if they exist
+          cp ~/unmw/uploads/autoprocess.txt ~/unmw/test_artifacts/ 2>/dev/null || true
+          cp ~/unmw/uploads/*_summary.html ~/unmw/test_artifacts/ 2>/dev/null || true
+          cp ~/unmw/uploads/*_evening_*.html ~/unmw/test_artifacts/ 2>/dev/null || true
+          cp ~/unmw/uploads/*_morning_*.html ~/unmw/test_artifacts/ 2>/dev/null || true
+
+      - name: Copy test artifacts to Windows filesystem
+        if: always()
+        run: |
+          OUTDIR=$(wslpath '${{ github.workspace }}')
+          mkdir -p "$OUTDIR/test_artifacts"
+          if [ -d ~/unmw/test_artifacts ]; then
+            cp -rp ~/unmw/test_artifacts/* "$OUTDIR/test_artifacts/" 2>/dev/null || true
+          fi
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-artifacts-wsl
+          path: test_artifacts/
+          retention-days: 7
