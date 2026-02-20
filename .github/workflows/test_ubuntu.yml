@@ -3,6 +3,7 @@ name: Ubuntu deploy test
 on:
   push:
     branches: [ main ]
+  workflow_dispatch:  # Allow manual triggering from GitHub web interface
 
 permissions:
   contents: read  # Minimal permissions to access repository content
