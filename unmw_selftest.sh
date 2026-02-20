@@ -56,6 +56,23 @@ echo "All required external programs found!"
 echo ""
 
 ##################################################################
+# Disable IPv6 to work around WSL2 localhost networking issues
+# WSL2 has known issues with IPv6 (::1) localhost connections where
+# data can be silently lost. See: https://github.com/microsoft/WSL/issues/10803
+# This only affects the current session and is safe on native Linux.
+##################################################################
+echo "Disabling IPv6 to work around WSL2 networking issues..."
+if sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 && \
+   sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 && \
+   sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1; then
+ echo "  IPv6 disabled successfully"
+else
+ echo "  WARNING: Could not disable IPv6 (may need root privileges)"
+ echo "  Continuing anyway - this may cause issues on WSL2"
+fi
+echo ""
+
+##################################################################
 # Check Python scripts for portability and syntax
 ##################################################################
 echo "Checking Python scripts..."
