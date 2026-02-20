@@ -429,7 +429,8 @@ if [ "$UNMW_FREE_PORT" != "8080" ];then
  echo "$0 test error: the port 8080 needed for the sthttpd test is not free"
  exit 1
 fi
-sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
+# Use "**.py" pattern to match all Python scripts as CGI (more flexible for testing)
+sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "**.py" -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
 STHTTPD_SERVER_PID=$!
 # STHTTPD_SERVER_PID=$! will work only if the process was started in the background with &
 echo "sthttpd PID after starting it is $STHTTPD_SERVER_PID"
@@ -490,6 +491,29 @@ if [ ! -f NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
 else
  echo "$0 test: double-checking that NMW__NovaVul24_Stas__WebCheck__NotReal.zip is stil here"
 fi
+
+# Debug: Test CGI execution with a simple test script first
+echo "DEBUG: Creating a simple test CGI script..."
+cd "$SCRIPTDIR" || exit 1
+cat > test_cgi.py << 'TESTCGI'
+#!/usr/bin/env python3
+print("Content-Type: text/plain")
+print("")
+print("CGI TEST OK")
+TESTCGI
+chmod +x test_cgi.py
+
+echo "DEBUG: Testing simple CGI script..."
+test_cgi_response=$(curl --silent --show-error -w "\nHTTP_CODE:%{http_code}\nSIZE:%{size_download}" "http://localhost:$UNMW_FREE_PORT/test_cgi.py" 2>&1)
+echo "DEBUG: test_cgi.py response:"
+echo "$test_cgi_response"
+echo "DEBUG: sthttpd log after test_cgi.py:"
+cat "$UPLOADS_DIR/sthttpd_http_server.log" 2>/dev/null | tail -n3
+
+# Also check directory listing size for comparison
+echo "DEBUG: Checking directory listing size..."
+dir_listing_size=$(curl --silent --show-error -w "%{size_download}" -o /dev/null "http://localhost:$UNMW_FREE_PORT/" 2>&1)
+echo "DEBUG: Directory listing size: $dir_listing_size bytes"
 
 # Debug: Test CGI execution before upload
 echo "DEBUG: Testing if CGI script is accessible..."
