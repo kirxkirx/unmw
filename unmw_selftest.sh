@@ -56,6 +56,106 @@ echo "All required external programs found!"
 echo ""
 
 ##################################################################
+# Check Python scripts for portability and syntax
+##################################################################
+echo "Checking Python scripts..."
+
+# Check that Python scripts don't have hardcoded version in shebang
+# (e.g., #!/usr/bin/env python3.12 would fail on systems without that specific version)
+for PY_SCRIPT in upload.py3 filter_report.py custom_http_server.py; do
+ if [ -f "$PY_SCRIPT" ]; then
+  SHEBANG=$(head -n1 "$PY_SCRIPT")
+  if echo "$SHEBANG" | grep -qE '^#!/usr/bin/env python3\.[0-9]+'; then
+   echo "  WARNING: $PY_SCRIPT has hardcoded Python version in shebang: $SHEBANG"
+   echo "  This may fail on systems without that specific Python version."
+   echo "  Consider using '#!/usr/bin/env python3' instead."
+   exit 1
+  fi
+  echo "  $PY_SCRIPT - shebang OK"
+ fi
+done
+
+# Check that Python scripts can be parsed (syntax check)
+for PY_SCRIPT in upload.py3 filter_report.py custom_http_server.py; do
+ if [ -f "$PY_SCRIPT" ]; then
+  if ! python3 -m py_compile "$PY_SCRIPT" 2>/dev/null; then
+   echo "  ERROR: $PY_SCRIPT has Python syntax errors"
+   python3 -m py_compile "$PY_SCRIPT"
+   exit 1
+  fi
+  echo "  $PY_SCRIPT - syntax OK"
+ fi
+done
+
+# Check that required Python modules can be imported
+echo "Checking required Python modules..."
+PYTHON_MODULES_MISSING=""
+for PY_MODULE in cgi cgitb zipfile re os sys; do
+ if ! python3 -c "import $PY_MODULE" 2>/dev/null; then
+  PYTHON_MODULES_MISSING="$PYTHON_MODULES_MISSING $PY_MODULE"
+  echo "  $PY_MODULE - NOT FOUND"
+ else
+  echo "  $PY_MODULE - found"
+ fi
+done
+
+# Optional but recommended modules
+for PY_MODULE in lxml bs4; do
+ if ! python3 -c "import $PY_MODULE" 2>/dev/null; then
+  echo "  $PY_MODULE - NOT FOUND (optional but recommended)"
+ else
+  echo "  $PY_MODULE - found"
+ fi
+done
+
+if [ -n "$PYTHON_MODULES_MISSING" ]; then
+ echo ""
+ echo "ERROR: Required Python modules are missing:$PYTHON_MODULES_MISSING"
+ echo "For Python 3.13+, install legacy-cgi: pip install legacy-cgi"
+ exit 1
+fi
+
+echo "Python scripts OK!"
+echo ""
+
+##################################################################
+# Check bash scripts for syntax errors
+##################################################################
+echo "Checking bash scripts for syntax errors..."
+
+for BASH_SCRIPT in autoprocess.sh combine_reports.sh wrapper.sh; do
+ if [ -f "$BASH_SCRIPT" ]; then
+  if ! bash -n "$BASH_SCRIPT" 2>/dev/null; then
+   echo "  ERROR: $BASH_SCRIPT has bash syntax errors"
+   bash -n "$BASH_SCRIPT"
+   exit 1
+  fi
+  echo "  $BASH_SCRIPT - syntax OK"
+ fi
+done
+
+echo "Bash scripts OK!"
+echo ""
+
+##################################################################
+# Check that key scripts are executable
+##################################################################
+echo "Checking script permissions..."
+
+for SCRIPT in autoprocess.sh combine_reports.sh wrapper.sh upload.py3 filter_report.py; do
+ if [ -f "$SCRIPT" ]; then
+  if [ ! -x "$SCRIPT" ]; then
+   echo "  WARNING: $SCRIPT is not executable, fixing..."
+   chmod +x "$SCRIPT"
+  fi
+  echo "  $SCRIPT - executable"
+ fi
+done
+
+echo "Script permissions OK!"
+echo ""
+
+##################################################################
 
 # change to the work directory
 SCRIPTDIR=$(dirname "$(readlink -f "$0")")
@@ -619,6 +719,39 @@ if [ "$VUL3_FWHM_VALID" -eq 0 ];then
  echo "$0 test error: no Vul3 OK rows found for FWHM validation"
  exit 1
 fi
+
+# Check mag.lim. value for Vul3 OK rows - should be empty or a float (typically 10-20)
+while IFS= read -r VUL3_ROW; do
+ # mag.lim. is in the 8th <td> column
+ VUL3_MAGLIM=$(echo "$VUL3_ROW" | grep -o '<td>[^<]*</td>' | sed -n '8p' | sed 's/<td>//;s/<\/td>//')
+ if [ -n "$VUL3_MAGLIM" ]; then
+  if ! echo "$VUL3_MAGLIM" | grep -qE '^[0-9]+\.?[0-9]*$' ; then
+   echo "$0 test error: mag.lim. value '$VUL3_MAGLIM' is not a valid number (got text instead?)"
+   exit 1
+  fi
+  echo "mag.lim. value for Vul3 is valid: $VUL3_MAGLIM"
+ else
+  echo "mag.lim. value for Vul3 is empty (acceptable for error rows)"
+ fi
+done < <(grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep 'OK')
+
+# Check Pointing.Offset value for Vul3 OK rows - should be a float or "ERROR"
+while IFS= read -r VUL3_ROW; do
+ # Pointing.Offset is in the 7th <td> column
+ VUL3_OFFSET=$(echo "$VUL3_ROW" | grep -o '<td>[^<]*</td>' | sed -n '7p' | sed 's/<td>//;s/<\/td>//')
+ if [ -n "$VUL3_OFFSET" ]; then
+  if [ "$VUL3_OFFSET" = "ERROR" ]; then
+   echo "Pointing.Offset value for Vul3 is ERROR (acceptable)"
+  elif echo "$VUL3_OFFSET" | grep -qE '^[0-9]+\.?[0-9]*$' ; then
+   echo "Pointing.Offset value for Vul3 is valid: $VUL3_OFFSET"
+  else
+   echo "$0 test error: Pointing.Offset value '$VUL3_OFFSET' is not a valid number or ERROR"
+   exit 1
+  fi
+ fi
+done < <(grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep 'OK')
+
+echo "All numeric columns validated successfully"
 
 echo "All tests passed with sthttpd HTTP server!"
 
