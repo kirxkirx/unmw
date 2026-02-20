@@ -372,7 +372,15 @@ if [ ! -d sthttpd ];then
  fi
  cd sthttpd || exit 1
  ./autogen.sh || exit 1
- ./configure || exit 1
+ # Detect WSL and disable mmap if running under it
+ # WSL2 has known issues with mmap that cause zero-byte responses
+ # See: https://github.com/microsoft/WSL/issues/10103
+ if grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null; then
+  echo "Detected WSL - building sthttpd with mmap disabled"
+  CFLAGS="-UHAVE_MMAP" ./configure || exit 1
+ else
+  ./configure || exit 1
+ fi
  make || exit 1
  if [ ! -x src/thttpd ];then
   echo "$0 test error: src/thttpd was not created"
