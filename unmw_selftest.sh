@@ -231,6 +231,16 @@ cp -v local_config.sh_for_test local_config.sh
 # Link the python3 version of the upload handler code
 ln -s upload.py3 upload.py
 
+# Debug: verify the symlink was created correctly
+echo "DEBUG: Checking upload.py symlink..."
+ls -la upload.py upload.py3
+file upload.py
+if [ -L upload.py ]; then
+ echo "DEBUG: upload.py is a symlink pointing to: $(readlink upload.py)"
+else
+ echo "DEBUG: WARNING - upload.py is NOT a symlink!"
+fi
+
 # Create data directory
 if [ ! -d uploads ];then
  mkdir "uploads" || exit 1
@@ -357,6 +367,29 @@ echo "Run sthttpd"
 # Go back to the work directory
 cd "$SCRIPTDIR" || exit 1
 
+# Debug: Check CGI script setup before starting sthttpd
+echo "DEBUG: Pre-sthttpd CGI diagnostics..."
+echo "DEBUG: Current directory: $PWD"
+echo "DEBUG: Files in current directory:"
+ls -la upload.py upload.py3 2>&1
+echo "DEBUG: File types:"
+file upload.py upload.py3
+echo "DEBUG: Symlink target:"
+readlink -f upload.py
+echo "DEBUG: First line (shebang) of upload.py3:"
+head -n1 upload.py3
+echo "DEBUG: Checking if python3 is in PATH:"
+which python3
+echo "DEBUG: Checking upload.py3 permissions:"
+stat upload.py3
+echo "DEBUG: Checking if upload.py3 is executable:"
+if [ -x upload.py3 ]; then
+ echo "DEBUG: upload.py3 IS executable"
+else
+ echo "DEBUG: upload.py3 is NOT executable - fixing..."
+ chmod +x upload.py3
+fi
+echo "DEBUG: End of pre-sthttpd diagnostics"
 
 # Run the server - it will run in the background
 if [ ! -x sthttpd/src/thttpd ];then
@@ -413,12 +446,12 @@ fi
 
 
 # Check if the server is working, serving the content of the current directory
-if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/" | grep --quiet 'uploads/' ;then
+if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/" 2>/dev/null | grep --quiet 'uploads/' ;then
  echo "$0 test error: something is wrong with the HTTP server"
  exit 1
 fi
-# Check the results of the previous manual run
-if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL__MANUALRUN" | grep --quiet 'V0615 Vul' ;then
+# Check the results of the previous manual run (redirect stderr to suppress broken pipe warnings)
+if ! curl --silent --show-error "http://localhost:$UNMW_FREE_PORT/$RESULTS_DIR_FROM_URL__MANUALRUN" 2>/dev/null | grep --quiet 'V0615 Vul' ;then
  echo "$0 test error: failed to get manual run results page via the HTTP server"
  exit 1
 else
@@ -432,9 +465,36 @@ if [ ! -f NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
 else
  echo "$0 test: double-checking that NMW__NovaVul24_Stas__WebCheck__NotReal.zip is stil here"
 fi
-results_server_reply=$(curl --max-time 600 --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' "http://localhost:$UNMW_FREE_PORT/upload.py")
+
+# Debug: Test CGI execution before upload
+echo "DEBUG: Testing if CGI script is accessible..."
+echo "DEBUG: Attempting GET request to upload.py:"
+curl_debug_response=$(curl --silent --show-error -w "\nHTTP_CODE:%{http_code}\nSIZE:%{size_download}" "http://localhost:$UNMW_FREE_PORT/upload.py" 2>&1)
+echo "DEBUG: GET /upload.py response info:"
+echo "$curl_debug_response" | tail -n2
+echo "DEBUG: sthttpd log after GET:"
+cat "$UPLOADS_DIR/sthttpd_http_server.log" 2>/dev/null | tail -n5
+
+echo "DEBUG: Now attempting POST upload..."
+# Save response to file first to diagnose capture issues
+curl --max-time 600 --silent --show-error -w "\nHTTP_CODE:%{http_code}\nSIZE:%{size_download}" -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' "http://localhost:$UNMW_FREE_PORT/upload.py" -o /tmp/upload_response.txt 2>/tmp/upload_stderr.txt
+curl_exit_code=$?
+echo "DEBUG: curl exit code: $curl_exit_code"
+echo "DEBUG: curl stderr:"
+cat /tmp/upload_stderr.txt
+echo "DEBUG: Response file size:"
+ls -la /tmp/upload_response.txt 2>&1
+echo "DEBUG: Response file first 500 chars:"
+head -c 500 /tmp/upload_response.txt 2>/dev/null
+echo ""
+echo "DEBUG: sthttpd log after POST:"
+cat "$UPLOADS_DIR/sthttpd_http_server.log" 2>/dev/null | tail -n5
+
+results_server_reply=$(cat /tmp/upload_response.txt 2>/dev/null)
 if [ -z "$results_server_reply" ];then
  echo "$0 test error: empty HTTP server reply"
+ echo "DEBUG: Full sthttpd log:"
+ cat "$UPLOADS_DIR/sthttpd_http_server.log" 2>/dev/null
  exit 1
 fi
 echo "---- Server reply ---
