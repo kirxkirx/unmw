@@ -430,7 +430,13 @@ if [ "$UNMW_FREE_PORT" != "8080" ];then
  exit 1
 fi
 # Use "**.py" pattern to match all Python scripts as CGI (more flexible for testing)
-sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "**.py" -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
+# On WSL2, add -u root to prevent user switching which causes CGI to fail silently
+STHTTPD_EXTRA_ARGS=""
+if grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null; then
+ echo "Detected WSL - running sthttpd without user switching to fix CGI execution"
+ STHTTPD_EXTRA_ARGS="-u root"
+fi
+sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "**.py" $STHTTPD_EXTRA_ARGS -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
 STHTTPD_SERVER_PID=$!
 # STHTTPD_SERVER_PID=$! will work only if the process was started in the background with &
 echo "sthttpd PID after starting it is $STHTTPD_SERVER_PID"
