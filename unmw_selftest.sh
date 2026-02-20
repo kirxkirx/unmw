@@ -494,14 +494,13 @@ fi
 
 # Debug: Test CGI execution with a simple test script first
 echo "DEBUG: Creating a simple test CGI script..."
-cd "$SCRIPTDIR" || exit 1
-cat > test_cgi.py << 'TESTCGI'
+cat > "$SCRIPTDIR/test_cgi.py" << 'TESTCGI'
 #!/usr/bin/env python3
 print("Content-Type: text/plain")
 print("")
 print("CGI TEST OK")
 TESTCGI
-chmod +x test_cgi.py
+chmod +x "$SCRIPTDIR/test_cgi.py"
 
 echo "DEBUG: Testing simple CGI script..."
 test_cgi_response=$(curl --silent --show-error -w "\nHTTP_CODE:%{http_code}\nSIZE:%{size_download}" "http://localhost:$UNMW_FREE_PORT/test_cgi.py" 2>&1)
