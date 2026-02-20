@@ -16,7 +16,7 @@ MISSING_PROGRAMS=""
 # List of required programs
 # Note: ss/netstat/lsof - at least one is needed for port checking
 # Note: rar/unrar - at least one is needed for RAR archive handling
-REQUIRED_PROGRAMS="zip dirname readlink seq git make curl tar grep awk sleep kill cat ps pgrep unzip file sed python3 head tail tr"
+REQUIRED_PROGRAMS="zip dirname readlink seq git make aclocal autoconf automake curl tar grep awk sleep kill cat ps pgrep unzip file sed python3 head tail tr"
 
 for PROG in $REQUIRED_PROGRAMS; do
  if ! command -v "$PROG" &> /dev/null; then

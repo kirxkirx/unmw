@@ -33,6 +33,9 @@ jobs:
             g++
             gfortran
             make
+            automake
+            autoconf
+            libtool
             libx11-dev
             libpng-dev
             curl
