@@ -6,11 +6,56 @@ if [[ -n "$REQUEST_METHOD" ]]; then
  exit 1
 fi
 
-command -v zip &> /dev/null
-if [ $? -ne 0 ];then
- echo "$0 test error: 'zip' command not found" 
+##################################################################
+# Check for required external programs before starting the test
+##################################################################
+echo "Checking for required external programs..."
+
+MISSING_PROGRAMS=""
+
+# List of required programs
+# Note: ss/netstat/lsof - at least one is needed for port checking
+# Note: rar/unrar - at least one is needed for RAR archive handling
+REQUIRED_PROGRAMS="zip dirname readlink seq git make curl tar grep awk sleep kill cat ps pgrep unzip file sed python3 head tail tr"
+
+for PROG in $REQUIRED_PROGRAMS; do
+ if ! command -v "$PROG" &> /dev/null; then
+  MISSING_PROGRAMS="$MISSING_PROGRAMS $PROG"
+  echo "  $PROG - NOT FOUND"
+ else
+  echo "  $PROG - found"
+ fi
+done
+
+# Check for at least one of ss/netstat/lsof (needed for port checking)
+if ! command -v ss &> /dev/null && ! command -v netstat &> /dev/null && ! command -v lsof &> /dev/null; then
+ MISSING_PROGRAMS="$MISSING_PROGRAMS ss/netstat/lsof(at_least_one)"
+ echo "  ss/netstat/lsof - NONE FOUND (at least one required for port checking)"
+else
+ echo "  ss/netstat/lsof - at least one found"
+fi
+
+# Check for at least one of rar/unrar (needed for RAR archive handling)
+if ! command -v rar &> /dev/null && ! command -v unrar &> /dev/null; then
+ MISSING_PROGRAMS="$MISSING_PROGRAMS rar/unrar(at_least_one)"
+ echo "  rar/unrar - NONE FOUND (at least one required for RAR archive handling)"
+else
+ echo "  rar/unrar - at least one found"
+fi
+
+if [ -n "$MISSING_PROGRAMS" ]; then
+ echo ""
+ echo "ERROR: The following required programs are missing:"
+ echo "$MISSING_PROGRAMS"
+ echo ""
+ echo "Please install these programs before running the test."
  exit 1
 fi
+
+echo "All required external programs found!"
+echo ""
+
+##################################################################
 
 # change to the work directory
 SCRIPTDIR=$(dirname "$(readlink -f "$0")")
