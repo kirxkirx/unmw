@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:  # Allow manual triggering from GitHub web interface
 
+permissions:
+  contents: read  # Minimal permissions to access repository content
+
 jobs:
   test_wsl:
     runs-on: windows-2022
