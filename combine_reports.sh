@@ -3,7 +3,32 @@
 # You probably want to add this script to /etc/crontab
 #*/8     *       *       *       *       www-data        /dataX/cgi-bin/unmw/combine_reports.sh &> /dev/null
 
-# shellcheck disable=SC2086,SC2181,SC2002,SC2162,SC2012,SC2009,SC2126,SC1091  
+# shellcheck disable=SC2086,SC2181,SC2002,SC2162,SC2012,SC2009,SC2126,SC1091
+
+##################################################################
+# Debug mode: enable with --debug, -d flag or DEBUG=1 environment variable
+# Example: ./combine_reports.sh --debug
+# Example: DEBUG=1 ./combine_reports.sh
+COMBINE_REPORTS_DEBUG="${DEBUG:-0}"
+for arg in "$@"; do
+ case "$arg" in
+  --debug|-d)
+   COMBINE_REPORTS_DEBUG=1
+   ;;
+ esac
+done
+
+##################################################################
+# helper functions
+
+# Debug logging function - only prints when debug mode is enabled
+debug_log() {
+ if [ "$COMBINE_REPORTS_DEBUG" = "1" ]; then
+  echo "[DEBUG] $*"
+ fi
+}
+
+##################################################################
 
 ## The old way to check if multiple copies of this script are running
 ##### This does not work for all systems! On some N_RUN is 3 #####
@@ -13,12 +38,9 @@ N_RUN=$(ps ax | grep combine_reports.sh | grep -v grep | grep bash | grep -c com
 # So one running copy of the script corresponds to N_RUN=2
 #if [ $N_RUN -gt 2 ];then
 if [ $N_RUN -gt 3 ];then
+ debug_log "Another instance is running (N_RUN=$N_RUN), exiting"
  exit 0
 fi
-##################################################################
-# helper functions
-
-# none so far
 
 ##################################################################
 # change to the work directory
@@ -78,6 +100,8 @@ echo $$ > "${LOCKFILE}"
 # loop through the cameras
 for CAMERA in Stas STL-11000M TICA_TESS ED80__Black TTUQ1b1x1 TTUQ2b1x1 ;do
 
+debug_log "========== Processing CAMERA=$CAMERA =========="
+
 DAY=$(date +%Y%m%d)
 HOUR=$(date +%H)
 EVENING_OR_MORNING="evening"
@@ -95,6 +119,7 @@ INPUT_LIST_OF_RESULT_DIRS=$(find . -maxdepth 1 -type d -mmin -720 -name "results
 
 if [ -z "$INPUT_LIST_OF_RESULT_DIRS" ];then
  # nothing to process, continue to the next camera
+ debug_log "CAMERA=$CAMERA: no result directories found matching 'results*$CAMERA*' in last 720 min, skipping"
  continue
 fi
 
@@ -103,6 +128,7 @@ LIST_OF_FILES=""
 for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
  # check that this report does not look like a test - we don't want them in the ombined list
  if [[ "$INPUT_DIR" == *"_test"* ]]; then
+  debug_log "CAMERA=$CAMERA: skipping test directory $INPUT_DIR"
   continue
  fi
  # check that this report has not apeared in a combined report before
@@ -110,6 +136,7 @@ for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
  if [ -s combine_reports.log ];then
   grep --quiet "$INPUT_DIR/index.html" combine_reports.log
   if [ $? -eq 0 ];then
+   debug_log "CAMERA=$CAMERA: $INPUT_DIR already in combine_reports.log, skipping"
    continue
   fi
  fi
@@ -123,6 +150,7 @@ done
 
 if [ -z "$LIST_OF_FILES" ];then
  # nothing to process, continue to the next camera
+ debug_log "CAMERA=$CAMERA: no new files to process (all filtered out or already processed), skipping"
  continue
 fi
 
@@ -132,6 +160,7 @@ INPUT_LIST_OF_RESULT_DIRS=""
 for FILE in $SORTED_LIST_OF_FILES ;do
  grep --quiet 'Processing complete!' "$FILE"
  if [ $? -ne 0 ];then
+  debug_log "CAMERA=$CAMERA: $FILE not complete (missing 'Processing complete!'), skipping"
   continue
  fi
  #
@@ -142,21 +171,26 @@ done
 
 if [ -z "$INPUT_LIST_OF_RESULT_DIRS" ];then
  # nothing is completed yet, continue to the next camera
+ debug_log "CAMERA=$CAMERA: no completed reports found, skipping"
  continue
 fi
 
+debug_log "CAMERA=$CAMERA: processing directories: $INPUT_LIST_OF_RESULT_DIRS"
 
 if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
  # make head
+ debug_log "CAMERA=$CAMERA: creating new combined file $OUTPUT_COMBINED_HTML_NAME"
  for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
 
   if [ ! -d "$INPUT_DIR" ];then
    echo "ERROR: there is no directory $INPUT_DIR"
+   debug_log "CAMERA=$CAMERA: directory $INPUT_DIR does not exist, skipping"
    continue
   fi
 
   if [ ! -f "$INPUT_DIR/index.html" ];then
    echo "ERROR: there is no file $INPUT_DIR/index.html"
+   debug_log "CAMERA=$CAMERA: file $INPUT_DIR/index.html does not exist, skipping"
    continue
   fi
 
@@ -281,14 +315,17 @@ fi
 
 # make body
 for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
+ debug_log "CAMERA=$CAMERA: processing $INPUT_DIR"
 
  if [ ! -d "$INPUT_DIR" ];then
   echo "ERROR: there is no directory $INPUT_DIR"
+  debug_log "CAMERA=$CAMERA: directory $INPUT_DIR does not exist, skipping"
   continue
  fi
 
  if [ ! -f "$INPUT_DIR/index.html" ];then
   echo "ERROR: there is no file $INPUT_DIR/index.html"
+  debug_log "CAMERA=$CAMERA: file $INPUT_DIR/index.html does not exist, skipping"
   continue
  fi
 
@@ -321,9 +358,11 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  grep --max-count=1 --quiet 'Processing complete!' "$INPUT_DIR/index.html"
  if [ $? -ne 0 ];then
   echo "ERROR: incomplete report in $INPUT_DIR/index.html"
+  debug_log "CAMERA=$CAMERA: $INPUT_DIR/index.html incomplete (no 'Processing complete!'), skipping"
   continue
  fi
 
+ debug_log "CAMERA=$CAMERA: adding $INPUT_DIR to combined report"
  FIELD=$(grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:processing fields::g' | sed 's:<br>::g' | awk '{print $1}')
  
  # Count how many candidates are listed in HTML file (and are to be inserted in the combined report)
@@ -445,6 +484,9 @@ fi
 # wait for the child processes to complete
 wait
 
+debug_log "CAMERA=$CAMERA: done processing"
+
 done # for CAMERA in Stas Nazar ;do
 
+debug_log "All cameras processed, exiting"
 rm -f "${LOCKFILE}"
