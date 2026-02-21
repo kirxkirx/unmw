@@ -100,11 +100,25 @@ class CustomCGIHTTPRequestHandler(CGIHTTPRequestHandler):
                 env['HTTP_' + key] = value
 
         # Read POST data if present
+        # For large files, we need to read in chunks to ensure we get all data
         stdin_data = None
         if self.command == 'POST':
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length > 0:
-                stdin_data = self.rfile.read(content_length)
+                # Read in chunks to handle large uploads reliably
+                chunks = []
+                bytes_remaining = content_length
+                while bytes_remaining > 0:
+                    chunk_size = min(65536, bytes_remaining)  # 64KB chunks
+                    chunk = self.rfile.read(chunk_size)
+                    if not chunk:
+                        break  # EOF reached
+                    chunks.append(chunk)
+                    bytes_remaining -= len(chunk)
+                stdin_data = b''.join(chunks)
+                if len(stdin_data) != content_length:
+                    print(f"Warning: Expected {content_length} bytes, got {len(stdin_data)}",
+                          file=sys.stderr)
 
         try:
             # Run CGI script using subprocess
