@@ -377,7 +377,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  fi
  
  # Always include the Galactic Center field Sco6
- if { [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 40 ] && [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -lt 20 ]; } || [ "$FIELD" = "Sco6" ]; then
+ if { [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt 60 ] && [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -lt 20 ]; } || [ "$FIELD" = "Sco6" ]; then
   grep --max-count=1 -A100000 'Processing fields' "$INPUT_DIR/index.html" | grep -B100000 'Processing complete!' | grep -v -e 'Processing fields' -e 'Processing complete' | sed "s:src=\":src=\"$INPUT_DIR/:g" >> "$OUTPUT_COMBINED_HTML_NAME"
   INCLUDE_REPORT_IN_COMBINED_LIST="OK"
  elif [ "$NUMBER_OF_UNIDENTIFIED_CANDIDATES" = "99999" ];then 

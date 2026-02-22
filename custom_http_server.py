@@ -100,12 +100,13 @@ class CustomCGIHTTPRequestHandler(CGIHTTPRequestHandler):
                 env['HTTP_' + key] = value
 
         # Read POST data if present
-        # For large files, we need to read in chunks to ensure we get all data
+        # Large file uploads require chunked reading because self.rfile.read(n)
+        # may return fewer than n bytes in a single call - the OS/socket layer
+        # delivers data in chunks, so we must loop until all bytes are received.
         stdin_data = None
         if self.command == 'POST':
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length > 0:
-                # Read in chunks to handle large uploads reliably
                 chunks = []
                 bytes_remaining = content_length
                 while bytes_remaining > 0:
