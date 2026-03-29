@@ -43,6 +43,87 @@ ALLOWED_EXTENSIONS = {'.zip', '.rar'}
 ALLOWED_IMAGE_EXTENSIONS = {'.fit', '.fits', '.fts'}
 MIN_IMAGE_FILES = 2
 
+# Disk space thresholds in KB
+# These defaults can be overridden by WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB
+# and WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB environment variables or
+# by exporting them in local_config.sh
+DEFAULT_DISK_SPACE_SOFTLIMIT_KB = 100 * 1024 * 1024  # 100 GB
+DEFAULT_DISK_SPACE_HARDLIMIT_KB = 5 * 1024 * 1024    # 5 GB
+
+
+def _parse_config_value(config_path: str, var_name: str):
+    """Read a variable value from a bash-style config file."""
+    try:
+        with open(config_path) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('#') or '=' not in line:
+                    continue
+                if line.startswith('export '):
+                    line = line[7:]
+                key, _, value = line.partition('=')
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                # Strip inline comments: "12345 # comment" → "12345"
+                comment_pos = value.find(' #')
+                if comment_pos >= 0:
+                    value = value[:comment_pos].strip()
+                if key == var_name:
+                    return value
+    except (FileNotFoundError, PermissionError):
+        pass
+    return None
+
+
+def get_disk_space_limits() -> Tuple[int, int]:
+    """Get disk space soft and hard limits in KB.
+    Checks environment variables first, then local_config.sh, then defaults."""
+    softlimit = DEFAULT_DISK_SPACE_SOFTLIMIT_KB
+    hardlimit = DEFAULT_DISK_SPACE_HARDLIMIT_KB
+
+    # Path to local_config.sh in the same directory as this script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    config_path = os.path.join(script_dir, 'local_config.sh')
+
+    for var_name, default_val, setter in [
+        ('WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB', softlimit, 'soft'),
+        ('WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB', hardlimit, 'hard'),
+    ]:
+        val = os.environ.get(var_name)
+        if not val:
+            val = _parse_config_value(config_path, var_name)
+        if val and val.isdigit() and int(val) > 0:
+            if setter == 'soft':
+                softlimit = int(val)
+            else:
+                hardlimit = int(val)
+
+    # Ensure softlimit >= hardlimit
+    if softlimit < hardlimit:
+        softlimit = hardlimit
+
+    return softlimit, hardlimit
+
+
+def check_disk_space_status(directory: str) -> Tuple[str, str]:
+    """Check disk space and return (status, message).
+    status is one of 'OK', 'WARNING', 'ERROR'.
+    Message format matches the shell script check_free_space() output."""
+    softlimit_kb, hardlimit_kb = get_disk_space_limits()
+    hostname = socket.gethostname()
+
+    st = os.statvfs(os.path.realpath(directory))
+    free_kb = (st.f_bavail * st.f_frsize) // 1024
+
+    free_mb = free_kb // 1024
+
+    if free_kb >= softlimit_kb:
+        return "OK", f"server {hostname} has sufficient free disk space available: {free_mb} MB at {directory}"
+    elif free_kb >= hardlimit_kb:
+        return "WARNING", f"WARNING: server {hostname} is low on disk space, only {free_mb} MB free at {directory}"
+    else:
+        return "ERROR", f"ERROR: server {hostname} is out of disk space, only {free_mb} MB free at {directory}"
+
 
 def is_safe_filename(filename: str) -> bool:
     """
@@ -252,35 +333,83 @@ def main():
     # Enable CGI error reporting
     cgitb.enable()
 
-    print("Content-Type: text/html\n")
+    upload_dir = 'uploads'
+    request_method = os.environ.get('REQUEST_METHOD', 'POST')
+
+    # ---- GET: preflight disk/load status check for astrocam-go ----
+    if request_method == 'GET':
+        # Check system load
+        try:
+            with open('/proc/loadavg', 'r') as f:
+                load = float(f.readline().split()[1])
+                if load > 50.0:
+                    print("Status: 503 Service Unavailable")
+                    print("Content-Type: text/plain\n")
+                    print(f"UNMW_STATUS:ERROR system load too high: {load}")
+                    sys.exit(0)
+        except Exception:
+            pass  # If we can't check load, continue to disk check
+
+        # Check disk space
+        try:
+            if not os.path.exists(upload_dir):
+                print("Status: 500 Internal Server Error")
+                print("Content-Type: text/plain\n")
+                print("UNMW_STATUS:ERROR upload directory missing")
+                sys.exit(0)
+
+            status, message = check_disk_space_status(upload_dir)
+            if status == "ERROR":
+                print("Status: 507 Insufficient Storage")
+                print("Content-Type: text/plain\n")
+                print(f"UNMW_STATUS:ERROR {message}")
+            elif status == "WARNING":
+                print("Content-Type: text/plain\n")
+                print(f"UNMW_STATUS:WARNING {message}")
+            else:
+                print("Content-Type: text/plain\n")
+                print("UNMW_STATUS:OK")
+        except Exception as e:
+            print("Status: 500 Internal Server Error")
+            print("Content-Type: text/plain\n")
+            print(f"UNMW_STATUS:ERROR failed to check disk space: {e}")
+        sys.exit(0)
+
+    # ---- POST: file upload handling ----
 
     # Check system load
     try:
         with open('/proc/loadavg', 'r') as f:
             load = float(f.readline().split()[1])
             if load > 50.0:
+                print("Content-Type: text/html\n")
                 print("<html><body>System load too high</body></html>")
                 sys.exit(1)
     except Exception as e:
+        print("Content-Type: text/html\n")
         print(f"<html><body>Error checking system load: {e}</body></html>")
         sys.exit(1)
 
-    # Check upload directory
-    upload_dir = 'uploads'
+    # Check upload directory and disk space
     try:
         if not os.path.exists(upload_dir):
+            print("Content-Type: text/html\n")
             print("<html><body>Upload directory missing</body></html>")
             sys.exit(1)
 
-        st = os.statvfs(os.path.realpath(upload_dir))
-        free_space = st.f_bavail * st.f_frsize
-        if free_space < 1024 * 1024 * 1024:  # 1GB
-            print("<html><body>Insufficient disk space</body></html>")
+        status, message = check_disk_space_status(upload_dir)
+        if status == "ERROR":
+            print("Status: 507 Insufficient Storage")
+            print("Content-Type: text/html\n")
+            print(f"<html><body>Insufficient disk space: {message}</body></html>")
             sys.exit(1)
     except Exception as e:
+        print("Content-Type: text/html\n")
         print(
             f"<html><body>Error checking upload directory: {e}</body></html>")
         sys.exit(1)
+
+    print("Content-Type: text/html\n")
 
     # Handle upload
     form = cgi.FieldStorage()

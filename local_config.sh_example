@@ -24,8 +24,12 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 
 # Raise warning in the processing log on low disk space
 # 'util/transients/transient_factory_test31.sh' script will look for that variable
-# 2 GB = 2 * 1024 * 1024 KB
-#export WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB=2097152
+# Default soft limit is 100 GB = 100 * 1024 * 1024 KB
+#export WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB=104857600
+
+# Hard limit: reject uploads and abort processing below this threshold
+# Default hard limit is 5 GB = 5 * 1024 * 1024 KB
+#export WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB=5242880
 
 # set this variable to indicate this file has been sourced
 # (can be checked in order not to source it twice)
