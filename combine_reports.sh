@@ -446,8 +446,11 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
     # LOG LINE: generic error
     echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$ERROR_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
    else
+    DISK_SPACE_WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | grep 'low on disk space' | tail -n1)
     WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | grep -v 'replace_file_with_symlink_if_filename_contains_white_spaces' | tail -n1)
-    if [ -z "$WARNING_MSG" ];then
+    if [ -n "$DISK_SPACE_WARNING_MSG" ];then
+     WARNING_MSG="<font color='red'>$DISK_SPACE_WARNING_MSG</font>"
+    elif [ -z "$WARNING_MSG" ];then
      # Special check for corrupted index.html: 'Processing complete!' is there but not 'List of TOCP transients'
      if ! grep --quiet -e 'List of TOCP transients' -e 'Truncated list of TOCP transients' "$INPUT_DIR/index.html" ;then
       WARNING_MSG="WARNING: corrupted log file $WARNING_MSG"
