@@ -295,12 +295,128 @@ fi
 if [ ! -f "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME" ];then
  # make head, including the LOG LINE
  echo "<html>
+<head>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+
+<script type='text/javascript'>
+(function() {
+    var savedTheme = localStorage.getItem('pageTheme');
+    if (savedTheme === 'dark-theme') {
+        document.write('<style>body{background-color:#121212;color:#d0d0d0;}</style>');
+    } else {
+        document.write('<style>body{background-color:#ffffff;color:#000000;}</style>');
+    }
+})();
+</script>
+
 <style>
+  body {
+    font-family: monospace;
+    font-size: 12px;
+    margin: 8px;
+  }
+
+  body.light-theme {
+    background-color: #ffffff;
+    color: #000000;
+  }
+
+  body.light-theme a { color: #0000ee; }
+  body.light-theme a:visited { color: #551a8b; }
+
+  body.dark-theme {
+    background-color: #121212;
+    color: #d0d0d0;
+  }
+
+  body.dark-theme a { color: #7aa2f7; }
+  body.dark-theme a:visited { color: #5c7fa3; }
+
+  body.dark-theme th {
+    color: #ffffff;
+  }
+
   .main th, .main td {
     text-align: center;
   }
+
+  .status-ok { color: #00cc00; }
+  body.dark-theme .status-ok { color: #66ff66; }
+
+  .status-error { color: #FF0033; }
+
+  .field-name { color: teal; }
+  body.dark-theme .field-name { color: #4db8b8; }
+
+  .disk-warning { color: red; }
+  body.dark-theme .disk-warning { color: #ff6666; }
+
+  .floating-btn {
+    position: fixed;
+    top: 5vh;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    z-index: 1000;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  .floating-btn:hover { background-color: #0056b3; }
+
+  #theme-btn {
+    right: 20px;
+    top: 5vh;
+  }
+
+  body.dark-theme .floating-btn {
+    background-color: #2d6cdf;
+    color: #ffffff;
+  }
+
+  body.dark-theme .floating-btn:hover {
+    background-color: #1f56b5;
+  }
 </style>
+
+<script type='text/javascript'>
+function toggleTheme() {
+    var body = document.body;
+    var themeButton = document.getElementById(\"theme-btn\");
+
+    if (body.classList.contains(\"dark-theme\")) {
+        body.classList.remove(\"dark-theme\");
+        body.classList.add(\"light-theme\");
+        themeButton.textContent = \"Dark theme\";
+        localStorage.setItem(\"pageTheme\", \"light-theme\");
+    } else {
+        body.classList.remove(\"light-theme\");
+        body.classList.add(\"dark-theme\");
+        themeButton.textContent = \"Light theme\";
+        localStorage.setItem(\"pageTheme\", \"dark-theme\");
+    }
+}
+
+document.addEventListener(\"DOMContentLoaded\", function() {
+    var savedTheme = localStorage.getItem(\"pageTheme\");
+    var themeButton = document.getElementById(\"theme-btn\");
+
+    if (savedTheme === \"dark-theme\") {
+        document.body.classList.add(\"dark-theme\");
+        themeButton.textContent = \"Light theme\";
+    } else {
+        document.body.classList.add(\"light-theme\");
+        themeButton.textContent = \"Dark theme\";
+    }
+});
+</script>
+
+</head>
 <body>
+<button id='theme-btn' class='floating-btn' onclick='toggleTheme()'>Dark theme</button>
 
 <table align='center' width='100%' border='0' class='main'>
 <tr><th>Camera</th><th>Obs.Time(UTC)</th><th>Field</th><th>Preview</th><th>Status</th><th>Log</th><th>Pointing.Offset(&deg;)</th><th>mag.lim.</th><th>FWHM(pix)</th><th>Candidates(new/total)</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
@@ -421,7 +537,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  # remove "UTC" as we have it in the table header
  # LOG LINE: the universal start
  #echo -n "<tr><td>$CAMERA</td><td>${LAST_IMAGE_DATE/ UTC/}</td><td><font color='teal'> $FIELD </font></td><td>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
- echo -n "<tr><td>$CAMERA</td><td>${LAST_IMAGE_DATE/ UTC/}</td><td><font color='teal'> $FIELD </font></td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+ echo -n "<tr><td>$CAMERA</td><td>${LAST_IMAGE_DATE/ UTC/}</td><td><span class='field-name'> $FIELD </span></td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  # Image preview or mdash
  if [ -f "$INPUT_DIR/small_field_preview.png" ];then
   echo -n "<td><a href='$INPUT_DIR/index.html#small_field_preview_log_section' target='_blank'><img src=\"$INPUT_DIR/small_field_preview.png\"></a></td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
@@ -431,25 +547,25 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
  # Status
  if [ "$INCLUDE_REPORT_IN_COMBINED_LIST" != "OK" ];then
   # LOG LINE: too many candidates to exclude in the combined report error
-  echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>too many candidates ($NUMBER_OF_UNIDENTIFIED_CANDIDATES with no ID, $NUMBER_OF_CANDIDATE_TRANSIENTS total) to include in the combined list ($(basename $0))</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+  echo "<td><span class='status-error'>ERROR</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>too many candidates ($NUMBER_OF_UNIDENTIFIED_CANDIDATES with no ID, $NUMBER_OF_CANDIDATE_TRANSIENTS total) to include in the combined list ($(basename $0))</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  else
   grep --quiet 'ERROR' "$INPUT_DIR/index.html" | grep 'stuck camera'
   if [ $? -eq 0 ];then
    FIELD=$(grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:<br>::g' | awk '{print $1}')
    # LOG LINE: suck camera error
-   echo "<td><font color='#FF0033'>CAMERA STUCK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td><td></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+   echo "<td><span class='status-error'>CAMERA STUCK</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td><td></td><td></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
   else
    ### Check for all other errors
    grep --quiet 'ERROR' "$INPUT_DIR/index.html"
    if [ $? -eq 0 ] ;then
     ERROR_MSG=$(grep --max-count=1 'ERROR' "$INPUT_DIR/index.html")
     # LOG LINE: generic error
-    echo "<td><font color='#FF0033'>ERROR</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$ERROR_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    echo "<td><span class='status-error'>ERROR</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td></td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$ERROR_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
    else
     DISK_SPACE_WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | grep 'low on disk space' | tail -n1)
     WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | grep -v 'replace_file_with_symlink_if_filename_contains_white_spaces' | tail -n1)
     if [ -n "$DISK_SPACE_WARNING_MSG" ];then
-     WARNING_MSG="<font color='red'>$DISK_SPACE_WARNING_MSG</font>"
+     WARNING_MSG="<span class='disk-warning'>$DISK_SPACE_WARNING_MSG</span>"
     elif [ -z "$WARNING_MSG" ];then
      # Special check for corrupted index.html: 'Processing complete!' is there but not 'List of TOCP transients'
      if ! grep --quiet -e 'List of TOCP transients' -e 'Truncated list of TOCP transients' "$INPUT_DIR/index.html" ;then
@@ -462,7 +578,7 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
     # WARNING_MSG=$(grep 'CPU temperature' "$INPUT_DIR/index.html" | tail -n1)
     #fi
     # LOG LINE: everything fine
-    echo "<td><font color='green'>OK</font></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$WARNING_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    echo "<td><span class='status-ok'>OK</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$WARNING_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
     ####
    fi # grep --quiet 'ERROR' "$INPUT_DIR/index.html"
   fi # 'camera is stuck'
