@@ -418,6 +418,9 @@ Unknown transient
             # Unknown transient is in its own class
             assert 'transient-unknown' in filtered
             assert 'Candidate 2' in filtered
+            # All candidates from original must be present
+            for anchor in re.findall(r'<a name="([^"]+)"', html_content):
+                assert anchor in filtered, f"Candidate {anchor} missing from filtered output"
 
             os.unlink(output_path)
         finally:
@@ -459,6 +462,9 @@ New transient discovery
             # Unknown transient is in its own class
             assert 'transient-unknown' in filtered
             assert 'New transient' in filtered
+            # All candidates from original must be present
+            for anchor in re.findall(r'<a name="([^"]+)"', html_content):
+                assert anchor in filtered, f"Candidate {anchor} missing from filtered output"
 
             os.unlink(output_path)
         finally:
@@ -511,6 +517,9 @@ The object was found in astcheck
             # Asteroid is still in the output (hidden by default)
             assert 'transient-asteroid' in filtered
             assert 'astcheck' in filtered
+            # All candidates from original must be present
+            for anchor in re.findall(r'<a name="([^"]+)"', html_content):
+                assert anchor in filtered, f"Candidate {anchor} missing from filtered output"
 
             os.unlink(output_path)
         finally:
@@ -557,6 +566,9 @@ Unknown transient
             # 2 asteroids, 1 variable star
             assert 'Asteroids (2)' in filtered
             assert 'Variable Stars (1)' in filtered
+            # All candidates from original must be present
+            for anchor in re.findall(r'<a name="([^"]+)"', html_content):
+                assert anchor in filtered, f"Candidate {anchor} missing from filtered output"
 
             os.unlink(output_path)
         finally:
