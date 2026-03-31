@@ -204,9 +204,114 @@ if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
  if [ ! -f index.html ];then
   # make head
   echo "<HTML>
-   <BODY>
-   
-   <table align='center' width='50%' border='0' class='main'>" > index.html
+<HEAD>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+
+<script type='text/javascript'>
+(function() {
+    var savedTheme = localStorage.getItem('pageTheme');
+    if (savedTheme === 'dark-theme') {
+        document.write('<style>body{background-color:#121212;color:#d0d0d0;}</style>');
+    } else {
+        document.write('<style>body{background-color:#ffffff;color:#000000;}</style>');
+    }
+})();
+</script>
+
+<style>
+  body {
+    font-family: monospace;
+    font-size: 14px;
+    margin: 8px;
+  }
+
+  body.light-theme {
+    background-color: #ffffff;
+    color: #000000;
+  }
+
+  body.light-theme a { color: #0000ee; }
+  body.light-theme a:visited { color: #551a8b; }
+
+  body.dark-theme {
+    background-color: #121212;
+    color: #d0d0d0;
+  }
+
+  body.dark-theme a { color: #7aa2f7; }
+  body.dark-theme a:visited { color: #5c7fa3; }
+
+  .summary-link { color: teal; }
+  body.dark-theme .summary-link { color: #4db8b8; }
+
+  .floating-btn {
+    position: fixed;
+    top: 5vh;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    padding: 10px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    z-index: 1000;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  }
+
+  .floating-btn:hover { background-color: #0056b3; }
+
+  #theme-btn {
+    right: 20px;
+    top: 5vh;
+  }
+
+  body.dark-theme .floating-btn {
+    background-color: #2d6cdf;
+    color: #ffffff;
+  }
+
+  body.dark-theme .floating-btn:hover {
+    background-color: #1f56b5;
+  }
+</style>
+
+<script type='text/javascript'>
+function toggleTheme() {
+    var body = document.body;
+    var themeButton = document.getElementById('theme-btn');
+
+    if (body.classList.contains('dark-theme')) {
+        body.classList.remove('dark-theme');
+        body.classList.add('light-theme');
+        themeButton.textContent = 'Dark theme';
+        localStorage.setItem('pageTheme', 'light-theme');
+    } else {
+        body.classList.remove('light-theme');
+        body.classList.add('dark-theme');
+        themeButton.textContent = 'Light theme';
+        localStorage.setItem('pageTheme', 'dark-theme');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    var savedTheme = localStorage.getItem('pageTheme');
+    var themeButton = document.getElementById('theme-btn');
+
+    if (savedTheme === 'dark-theme') {
+        document.body.classList.add('dark-theme');
+        themeButton.textContent = 'Light theme';
+    } else {
+        document.body.classList.add('light-theme');
+        themeButton.textContent = 'Dark theme';
+    }
+});
+</script>
+
+</HEAD>
+<BODY>
+<button id='theme-btn' class='floating-btn' onclick='toggleTheme()'>Dark theme</button>
+
+<table align='center' width='50%' border='0' class='main'>" > index.html
    if [ -s 'results_comets.txt' ];then
     echo "<tr><td>Summary of comet detections: <a href='results_comets.txt' target='_blank'>results_comets.txt</a></td></tr>" >> index.html
     echo "<tr><td></td></tr>" >> index.html
@@ -425,7 +530,7 @@ document.addEventListener(\"DOMContentLoaded\", function() {
  # Add this summary file to the list
  SUMMARY_FILE_NAME_FOR_THE_TABLE=$(basename $OUTPUT_PROCESSING_SUMMARY_HTML_NAME .html)
  SUMMARY_FILE_NAME_FOR_THE_TABLE="${SUMMARY_FILE_NAME_FOR_THE_TABLE//_/ }"
- echo "<tr><td><font color='teal'><a href='$OUTPUT_PROCESSING_SUMMARY_HTML_NAME' target='_blank'>$SUMMARY_FILE_NAME_FOR_THE_TABLE</a></font></td></tr>" >> index.html
+ echo "<tr><td><span class='summary-link'><a href='$OUTPUT_PROCESSING_SUMMARY_HTML_NAME' target='_blank'>$SUMMARY_FILE_NAME_FOR_THE_TABLE</a></span></td></tr>" >> index.html
 
 fi
 
