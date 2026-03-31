@@ -195,8 +195,8 @@ if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
   fi
 
   # The combined HTML page should have the same HEAD as an individual field results page, so we just copy its head
-  # and -A1 is for the floating button
-  grep --max-count=1 -B10000 '<BODY>' -A1 "$INPUT_DIR/index.html" > "$OUTPUT_COMBINED_HTML_NAME" && break
+  # and -A2 is for the floating buttons (Invert + Dark theme)
+  grep --max-count=1 -B10000 '<BODY>' -A2 "$INPUT_DIR/index.html" > "$OUTPUT_COMBINED_HTML_NAME" && break
  
  done
 
