@@ -84,13 +84,13 @@ function applyFilterState() {{
     var vsBtn = document.getElementById('btn-varstars');
 
     for (var i = 0; i < astDivs.length; i++) {{
-        astDivs[i].style.display = asteroidsVisible ? '' : 'none';
+        astDivs[i].style.display = asteroidsVisible ? 'block' : 'none';
     }}
     astBtn.textContent = (asteroidsVisible ? 'Hide' : 'Show') + ' Asteroids ({asteroid_count})';
     if (asteroidsVisible) astBtn.classList.add('active'); else astBtn.classList.remove('active');
 
     for (var i = 0; i < vsDivs.length; i++) {{
-        vsDivs[i].style.display = varstarsVisible ? '' : 'none';
+        vsDivs[i].style.display = varstarsVisible ? 'block' : 'none';
     }}
     vsBtn.textContent = (varstarsVisible ? 'Hide' : 'Show') + ' Variable Stars ({varstar_count})';
     if (varstarsVisible) vsBtn.classList.add('active'); else vsBtn.classList.remove('active');
