@@ -203,7 +203,8 @@ if [ ! -f "$OUTPUT_COMBINED_HTML_NAME" ];then
  ################ 
  if [ ! -f index.html ];then
   # make head
-  echo "<HTML>
+  echo "<!DOCTYPE html>
+<HTML>
 <HEAD>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
 
@@ -399,7 +400,8 @@ fi
 # Summary file
 if [ ! -f "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME" ];then
  # make head, including the LOG LINE
- echo "<html>
+ echo "<!DOCTYPE html>
+<html>
 <head>
 <meta name='viewport' content='width=device-width, initial-scale=1.0'>
 

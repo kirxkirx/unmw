@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import re
 import sys
 from os.path import splitext
 
@@ -54,7 +55,8 @@ def is_ast_or_vs(pre_el_text):
     )
 
 
-FILTER_BLOCK_TEMPLATE = """
+# CSS to inject before </HEAD>
+FILTER_CSS_TEMPLATE = """
 <style>
 .transient-asteroid {{ display: none; }}
 .transient-varstar {{ display: none; }}
@@ -69,9 +71,6 @@ FILTER_BLOCK_TEMPLATE = """
     top: calc(5vh + 180px);
 }}
 </style>
-
-<button id="btn-asteroids" class="floating-btn" onclick="toggleAsteroids()">Show Asteroids ({asteroid_count})</button>
-<button id="btn-varstars" class="floating-btn" onclick="toggleVarStars()">Show Variable Stars ({varstar_count})</button>
 
 <script>
 var asteroidsVisible = localStorage.getItem('filterAsteroids') === 'visible';
@@ -110,6 +109,12 @@ function toggleVarStars() {{
 
 document.addEventListener('DOMContentLoaded', applyFilterState);
 </script>
+"""
+
+# Buttons and message to inject after <BODY> (before transient content)
+FILTER_BODY_TEMPLATE = """
+<button id="btn-asteroids" class="floating-btn" onclick="toggleAsteroids()">Show Asteroids ({asteroid_count})</button>
+<button id="btn-varstars" class="floating-btn" onclick="toggleVarStars()">Show Variable Stars ({varstar_count})</button>
 
 {message}
 """
@@ -160,13 +165,22 @@ def filter_report(path_to_report):
         else:
             message = ''
 
-        filter_block = FILTER_BLOCK_TEMPLATE.format(
+        filter_css = FILTER_CSS_TEMPLATE.format(
+            asteroid_count=asteroid_count,
+            varstar_count=varstar_count,
+        )
+        filter_body = FILTER_BODY_TEMPLATE.format(
             asteroid_count=asteroid_count,
             varstar_count=varstar_count,
             message=message,
         )
 
-        output = head + filter_block + '\n'.join(wrapped) + '\n</body></html>'
+        # Inject CSS+JS before </HEAD> (case-insensitive) and buttons after
+        # the head content (which ends right before the first <a name)
+        head_with_css = re.sub(
+            r'(</HEAD>)', filter_css + r'\1', head, count=1, flags=re.IGNORECASE)
+
+        output = head_with_css + filter_body + '\n'.join(wrapped) + '\n</body></html>'
 
         output_path = splitext(path_to_report)[0] + '_filtered.html'
         with open(output_path, 'w') as f:
