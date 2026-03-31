@@ -54,6 +54,67 @@ def is_ast_or_vs(pre_el_text):
     )
 
 
+FILTER_BLOCK_TEMPLATE = """
+<style>
+.transient-asteroid {{ display: none; }}
+.transient-varstar {{ display: none; }}
+
+#btn-asteroids {{
+    left: calc(max(420px, 85vw));
+    top: calc(5vh + 120px);
+}}
+
+#btn-varstars {{
+    left: calc(max(420px, 85vw));
+    top: calc(5vh + 180px);
+}}
+</style>
+
+<button id="btn-asteroids" class="floating-btn" onclick="toggleAsteroids()">Show Asteroids ({asteroid_count})</button>
+<button id="btn-varstars" class="floating-btn" onclick="toggleVarStars()">Show Variable Stars ({varstar_count})</button>
+
+<script>
+var asteroidsVisible = localStorage.getItem('filterAsteroids') === 'visible';
+var varstarsVisible = localStorage.getItem('filterVarStars') === 'visible';
+
+function applyFilterState() {{
+    var astDivs = document.querySelectorAll('.transient-asteroid');
+    var vsDivs = document.querySelectorAll('.transient-varstar');
+    var astBtn = document.getElementById('btn-asteroids');
+    var vsBtn = document.getElementById('btn-varstars');
+
+    for (var i = 0; i < astDivs.length; i++) {{
+        astDivs[i].style.display = asteroidsVisible ? '' : 'none';
+    }}
+    astBtn.textContent = (asteroidsVisible ? 'Hide' : 'Show') + ' Asteroids ({asteroid_count})';
+    if (asteroidsVisible) astBtn.classList.add('active'); else astBtn.classList.remove('active');
+
+    for (var i = 0; i < vsDivs.length; i++) {{
+        vsDivs[i].style.display = varstarsVisible ? '' : 'none';
+    }}
+    vsBtn.textContent = (varstarsVisible ? 'Hide' : 'Show') + ' Variable Stars ({varstar_count})';
+    if (varstarsVisible) vsBtn.classList.add('active'); else vsBtn.classList.remove('active');
+}}
+
+function toggleAsteroids() {{
+    asteroidsVisible = !asteroidsVisible;
+    localStorage.setItem('filterAsteroids', asteroidsVisible ? 'visible' : 'hidden');
+    applyFilterState();
+}}
+
+function toggleVarStars() {{
+    varstarsVisible = !varstarsVisible;
+    localStorage.setItem('filterVarStars', varstarsVisible ? 'visible' : 'hidden');
+    applyFilterState();
+}}
+
+document.addEventListener('DOMContentLoaded', applyFilterState);
+</script>
+
+{message}
+"""
+
+
 def filter_report(path_to_report):
     try:
         with open(path_to_report, 'r') as f:
@@ -68,22 +129,44 @@ def filter_report(path_to_report):
         head = content[: a_name_first_occurance]
         transients = content[a_name_first_occurance:].split('<HR>')[:-1]
 
-        ast_or_vs_s = []
+        asteroid_count = 0
+        varstar_count = 0
+        unknown_count = 0
+        wrapped = []
+
         for transient in transients:
             soup = BeautifulSoup(transient, features="lxml")
-            ast_or_vs_s.append(is_ast_or_vs(soup.pre.text))
+            pre_text = soup.pre.text
 
-        not_ast_and_not_vs = []
-        for transient, ast_or_vs_ in zip(transients, ast_or_vs_s):
-            if not ast_or_vs_:
-                not_ast_and_not_vs.append(transient)
+            if is_asteroid(pre_text):
+                css_class = "transient-asteroid"
+                asteroid_count += 1
+            elif is_variable_star(pre_text, "VSX") or is_variable_star(pre_text, "ASASSN-V"):
+                css_class = "transient-varstar"
+                varstar_count += 1
+            else:
+                css_class = "transient-unknown"
+                unknown_count += 1
 
-        if len(not_ast_and_not_vs) == 0:
-            output = head + '\nSeems like every transient is the known object.\n</body></html>'
+            wrapped.append('<div class="{}">\n{}\n<HR></div>'.format(
+                css_class, transient))
+
+        total = asteroid_count + varstar_count + unknown_count
+        if unknown_count == 0:
+            message = ('<p>All {} candidates are known objects'
+                       ' ({} asteroids, {} variable stars).'
+                       ' Use the buttons to show them.</p>').format(
+                           total, asteroid_count, varstar_count)
         else:
-            output = (
-                head + '<HR>'.join(not_ast_and_not_vs) + '\n<HR></body></html>'
-            )
+            message = ''
+
+        filter_block = FILTER_BLOCK_TEMPLATE.format(
+            asteroid_count=asteroid_count,
+            varstar_count=varstar_count,
+            message=message,
+        )
+
+        output = head + filter_block + '\n'.join(wrapped) + '\n</body></html>'
 
         output_path = splitext(path_to_report)[0] + '_filtered.html'
         with open(output_path, 'w') as f:

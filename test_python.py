@@ -382,8 +382,8 @@ class TestCheckArchiveContents:
 class TestFilterReport:
     """Tests for filter_report function"""
 
-    def test_filter_removes_asteroids(self):
-        """Should filter out asteroids from report"""
+    def test_filter_classifies_asteroids(self):
+        """Asteroids should be in output wrapped in transient-asteroid class"""
         html_content = """<html><body>
 <a name="candidate1">
 <pre>
@@ -412,17 +412,19 @@ Unknown transient
             with open(output_path, 'r') as f:
                 filtered = f.read()
 
-            # Should not contain asteroid
-            assert 'astcheck' not in filtered
-            # Should contain the unknown transient
-            assert 'Candidate 2' in filtered or 'candidate2' in filtered
+            # Asteroid content is present but in hidden-by-default class
+            assert 'astcheck' in filtered
+            assert 'transient-asteroid' in filtered
+            # Unknown transient is in its own class
+            assert 'transient-unknown' in filtered
+            assert 'Candidate 2' in filtered
 
             os.unlink(output_path)
         finally:
             os.unlink(temp_path)
 
-    def test_filter_removes_variable_stars(self):
-        """Should filter out known variable stars within threshold"""
+    def test_filter_classifies_variable_stars(self):
+        """Variable stars should be in output wrapped in transient-varstar class"""
         html_content = """<html><body>
 <a name="candidate1">
 <pre>
@@ -451,8 +453,12 @@ New transient discovery
             with open(output_path, 'r') as f:
                 filtered = f.read()
 
-            # Should contain the new transient
-            assert 'Candidate 2' in filtered or 'candidate2' in filtered or 'New transient' in filtered
+            # Variable star content is present in varstar class
+            assert 'transient-varstar' in filtered
+            assert 'V0615 Vul' in filtered
+            # Unknown transient is in its own class
+            assert 'transient-unknown' in filtered
+            assert 'New transient' in filtered
 
             os.unlink(output_path)
         finally:
@@ -478,7 +484,7 @@ New transient discovery
             if os.path.exists(temp_path.replace('.html', '_filtered.html')):
                 os.unlink(temp_path.replace('.html', '_filtered.html'))
 
-    def test_all_filtered_message(self):
+    def test_all_known_objects_message(self):
         """Should show message when all transients are known objects"""
         html_content = """<html><body>
 <a name="candidate1">
@@ -500,7 +506,57 @@ The object was found in astcheck
             with open(output_path, 'r') as f:
                 filtered = f.read()
 
-            assert 'every transient is the known object' in filtered
+            # Message about all being known objects
+            assert 'All' in filtered and 'known objects' in filtered
+            # Asteroid is still in the output (hidden by default)
+            assert 'transient-asteroid' in filtered
+            assert 'astcheck' in filtered
+
+            os.unlink(output_path)
+        finally:
+            os.unlink(temp_path)
+
+    def test_button_counts(self):
+        """Toggle buttons should show correct counts"""
+        html_content = """<html><body>
+<a name="c1">
+<pre>
+The object was found in astcheck
+</pre>
+<HR>
+<a name="c2">
+<pre>
+The object was found in astcheck
+</pre>
+<HR>
+<a name="c3">
+<pre>
+The object was found in VSX
+10" V0615 Vul
+</pre>
+<HR>
+<a name="c4">
+<pre>
+Unknown transient
+</pre>
+<HR>
+</body></html>"""
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as f:
+            f.write(html_content)
+            temp_path = f.name
+
+        try:
+            filter_report(temp_path)
+            output_path = temp_path.replace('.html', '_filtered.html')
+
+            assert os.path.exists(output_path)
+            with open(output_path, 'r') as f:
+                filtered = f.read()
+
+            # 2 asteroids, 1 variable star
+            assert 'Asteroids (2)' in filtered
+            assert 'Variable Stars (1)' in filtered
 
             os.unlink(output_path)
         finally:
