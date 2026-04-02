@@ -599,14 +599,18 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
   NUMBER_OF_UNIDENTIFIED_CANDIDATES="99999"
  fi
  
- # Always include the Galactic Center field Sco6
+ # Always include crowded Galactic Center region fields
+ IS_GALACTIC_CENTER_CANDIDATE_LIMIT_EXEMPT_FIELD="no"
+ case "$FIELD" in
+  Sco6|Oph-08-Q1b1x1|Oph-08-Q2b1x1|Sco-04-Q1b1x1|Sco-04-Q2b1x1|Sgr-04-Q1b1x1|Sgr-04-Q2b1x1|242) IS_GALACTIC_CENTER_CANDIDATE_LIMIT_EXEMPT_FIELD="yes" ;;
+ esac
  # Use a higher total candidate limit if most candidates are already identified
  if [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -le 9 ];then
   MAX_CANDIDATES_FOR_COMBINED_LIST=100
  else
   MAX_CANDIDATES_FOR_COMBINED_LIST=60
  fi
- if { [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt $MAX_CANDIDATES_FOR_COMBINED_LIST ] && [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -lt 20 ]; } || [ "$FIELD" = "Sco6" ]; then
+ if { [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt $MAX_CANDIDATES_FOR_COMBINED_LIST ] && [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -lt 20 ]; } || [ "$IS_GALACTIC_CENTER_CANDIDATE_LIMIT_EXEMPT_FIELD" = "yes" ]; then
   grep --max-count=1 -A100000 'Processing fields' "$INPUT_DIR/index.html" | grep -B100000 'Processing complete!' | grep -v -e 'Processing fields' -e 'Processing complete' | sed "s:src=\":src=\"$INPUT_DIR/:g" >> "$OUTPUT_COMBINED_HTML_NAME"
   INCLUDE_REPORT_IN_COMBINED_LIST="OK"
  elif [ "$NUMBER_OF_UNIDENTIFIED_CANDIDATES" = "99999" ];then 
