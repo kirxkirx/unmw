@@ -193,6 +193,12 @@ echo "Created local_config.sh"
 ln -sf upload.py3 upload.py
 echo "Created upload.py symlink"
 
+# Create cgi-bin/unmw/ directory with symlinks for production-path compatibility
+mkdir -p cgi-bin/unmw
+ln -sf ../../upload.py3 cgi-bin/unmw/upload.py
+ln -sf ../../fastplot.py cgi-bin/unmw/fastplot.py
+echo "Created cgi-bin/unmw/ directory with CGI symlinks"
+
 # Set up web interface directory
 if [ -d move_to_htdocs ]; then
  echo "Web interface files already available in move_to_htdocs/"
@@ -399,7 +405,7 @@ if [ "$USE_PYTHON_SERVER" = "1" ]; then
  SERVER_LOG="$UPLOADS_DIR/python_http_server.log"
 else
  echo "Starting sthttpd server on port $UNMW_FREE_PORT..."
- sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "upload.py" -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
+ sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "**.py" -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
  SERVER_TYPE="sthttpd"
  SERVER_LOG="$UPLOADS_DIR/sthttpd_http_server.log"
 fi

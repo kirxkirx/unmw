@@ -35,6 +35,10 @@ class CustomCGIHTTPRequestHandler(CGIHTTPRequestHandler):
             script = self.path.split('?')[0][1:]  # Remove leading /
             self.cgi_info = "", script
             return True
+        # Route fastplot.py CGI requests (both direct and production-path)
+        if self.path.startswith("/fastplot.py") or self.path.startswith("/cgi-bin/unmw/fastplot.py"):
+            self.cgi_info = "", "fastplot.py"
+            return True
         return super().is_cgi()
 
     def translate_path(self, path):
