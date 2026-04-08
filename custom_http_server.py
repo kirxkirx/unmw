@@ -37,7 +37,9 @@ class CustomCGIHTTPRequestHandler(CGIHTTPRequestHandler):
             return True
         # Route fastplot.py CGI requests (both direct and production-path)
         if self.path.startswith("/fastplot.py") or self.path.startswith("/cgi-bin/unmw/fastplot.py"):
-            self.cgi_info = "", "fastplot.py"
+            # Preserve query string - run_cgi() extracts QUERY_STRING from rest
+            query_part = self.path[self.path.index('?'):] if '?' in self.path else ""
+            self.cgi_info = "", "fastplot.py" + query_part
             return True
         return super().is_cgi()
 

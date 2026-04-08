@@ -59,6 +59,31 @@ def _parse_config_value(config_path, var_name):
     return None
 
 
+def _expand_shell_vars(value, script_dir):
+    """Expand shell variables in config values.
+
+    Python reads config files as text without shell expansion,
+    so variables need manual expansion.
+    """
+    if not value:
+        return value
+    # In CGI context, $PWD is the script directory
+    value = value.replace('$PWD', script_dir)
+    value = value.replace('${PWD}', script_dir)
+    # Expand $HOME
+    home = os.path.expanduser('~')
+    value = value.replace('$HOME', home)
+    value = value.replace('${HOME}', home)
+    # Expand any remaining $VAR or ${VAR} from environment
+    # Handle ${VAR} form first, then $VAR
+    import re as _re
+    def _env_replace(m):
+        var = m.group(1) or m.group(2)
+        return os.environ.get(var, m.group(0))
+    value = _re.sub(r'\$\{(\w+)\}|\$(\w+)', _env_replace, value)
+    return value
+
+
 def get_config():
     """Load configuration from environment or local_config.sh."""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -70,6 +95,8 @@ def get_config():
         val = os.environ.get(var_name)
         if not val:
             val = _parse_config_value(config_path, var_name)
+        if val:
+            val = _expand_shell_vars(val, script_dir)
         config[var_name] = val
 
     return config
@@ -126,34 +153,50 @@ def validate_candidate_url(raw_url, config):
     if len(candidate_id) > 256:
         raise ValueError("Candidate ID too long")
 
-    # Extract just the basename of the HTML file from the path
-    # This prevents path traversal and SSRF
-    try:
-        # Remove query string if present
-        path_part = base_part.split('?')[0]
-        # Get just the filename
-        basename = os.path.basename(path_part)
-    except Exception:
-        raise ValueError("Cannot parse URL path")
-
-    if not basename:
-        raise ValueError("Cannot extract HTML filename from URL")
-    if not SAFE_HTML_BASENAME_RE.match(basename):
-        raise ValueError("Invalid HTML filename: must match pattern "
-                         "[a-zA-Z0-9_.-]+.html")
-    if '..' in basename:
-        raise ValueError("Path traversal detected")
-
-    # Reconstruct safe URL using server-side base URL
+    # Extract the path relative to the uploads URL
+    # This prevents SSRF while preserving subdirectory structure
     url_base = config.get('URL_OF_DATA_PROCESSING_ROOT', '')
     if not url_base:
         raise ValueError("Server configuration error: "
                          "URL_OF_DATA_PROCESSING_ROOT not set")
-
-    # Remove trailing slash from base URL
     url_base = url_base.rstrip('/')
 
-    safe_url = url_base + '/' + basename + '#' + candidate_id
+    try:
+        # Remove query string if present
+        path_part = base_part.split('?')[0]
+    except Exception:
+        raise ValueError("Cannot parse URL path")
+
+    # Try to extract the relative path after the uploads URL pattern
+    # e.g., from http://host/unmw/uploads/results_xxx/index.html
+    # extract results_xxx/index.html
+    # We look for '/uploads/' in the path and take everything after it
+    rel_path = None
+    if '/uploads/' in path_part:
+        rel_path = path_part.split('/uploads/', 1)[1]
+    elif path_part.endswith('.html'):
+        # Fallback: take just the basename
+        rel_path = os.path.basename(path_part)
+
+    if not rel_path:
+        raise ValueError("Cannot extract report path from URL")
+
+    # Validate each path component for safety
+    if '..' in rel_path:
+        raise ValueError("Path traversal detected")
+    for component in rel_path.split('/'):
+        if not component:
+            continue
+        if not re.match(r'^[a-zA-Z0-9_.-]+$', component):
+            raise ValueError("Invalid path component: %s" % component)
+
+    # The last component must be an .html file
+    basename = os.path.basename(rel_path)
+    if not SAFE_HTML_BASENAME_RE.match(basename):
+        raise ValueError("URL must point to an .html file")
+
+    # Reconstruct safe URL using server-side base URL
+    safe_url = url_base + '/' + rel_path + '#' + candidate_id
 
     return safe_url, candidate_id
 
