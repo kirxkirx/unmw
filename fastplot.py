@@ -34,6 +34,13 @@ MAX_REQUESTS_PER_HOUR = 5
 # Auto-refresh interval in seconds
 REFRESH_INTERVAL = 15
 
+# Minimum free disk space in KB before allowing new jobs
+# 5 GB - enough for rsync copy + archive generation
+MIN_FREE_DISK_SPACE_KB = 5 * 1024 * 1024
+
+# Set to True to show log output on error pages (exposes internal paths)
+SHOW_LOG_ON_ERROR = False
+
 
 def _parse_config_value(config_path, var_name):
     """Read a variable value from a bash-style config file."""
@@ -116,6 +123,31 @@ def get_fastplot_dir(config):
     return fastplot_dir
 
 
+# --- Helpers ---
+
+def html_escape(s):
+    """Escape a string for safe inclusion in HTML."""
+    s = s.replace('&', '&amp;')
+    s = s.replace('<', '&lt;')
+    s = s.replace('>', '&gt;')
+    s = s.replace('"', '&quot;')
+    s = s.replace("'", '&#x27;')
+    return s
+
+
+def check_disk_space(path):
+    """Check if there is enough free disk space.
+
+    Returns (ok, free_kb) where ok is True if space is sufficient.
+    """
+    try:
+        st = os.statvfs(os.path.realpath(path))
+        free_kb = (st.f_bavail * st.f_frsize) // 1024
+        return free_kb >= MIN_FREE_DISK_SPACE_KB, free_kb
+    except OSError:
+        return False, 0
+
+
 # --- Input Validation ---
 
 # Strict patterns for safety
@@ -148,8 +180,9 @@ def validate_candidate_url(raw_url, config):
     if not candidate_id:
         raise ValueError("Empty candidate ID in URL fragment")
     if not SAFE_CANDIDATE_ID_RE.match(candidate_id):
-        raise ValueError("Invalid candidate ID: must contain only "
-                         "alphanumeric characters, underscores, hyphens, and dots")
+        raise ValueError("Invalid candidate ID")
+    if '..' in candidate_id:
+        raise ValueError("Invalid candidate ID")
     if len(candidate_id) > 256:
         raise ValueError("Candidate ID too long")
 
@@ -372,7 +405,7 @@ def send_processing_page(candidate_id, candidate_url):
     print("</head>")
     print("<body>")
     print("<h2>Fastplot job is running</h2>")
-    print("<p>Processing candidate: <b>%s</b></p>" % candidate_id)
+    print("<p>Processing candidate: <b>%s</b></p>" % html_escape(candidate_id))
     print("<p>This page will auto-refresh every %d seconds.</p>" % REFRESH_INTERVAL)
     print("<p>The job typically takes several minutes. "
           "The output archive can be hundreds of MB.</p>")
@@ -381,31 +414,31 @@ def send_processing_page(candidate_id, candidate_url):
 
 
 def send_error_with_log(candidate_id, fastplot_dir, config):
-    """Send an error page with a link to the log file."""
+    """Send an error page, optionally with log output.
+
+    Log display is controlled by SHOW_LOG_ON_ERROR at the top of this file.
+    Disabled by default to avoid exposing internal paths and configuration.
+    """
     log_file = 'fastplot_%s.log' % candidate_id
     log_path = os.path.join(fastplot_dir, log_file)
 
+    safe_id = html_escape(candidate_id)
     body = "<h2>Fastplot job failed</h2>"
-    body += "<p>The fastplot job for candidate <b>%s</b> " % candidate_id
+    body += "<p>The fastplot job for candidate <b>%s</b> " % safe_id
     body += "appears to have failed.</p>"
 
-    if os.path.exists(log_path):
+    if SHOW_LOG_ON_ERROR and os.path.exists(log_path):
         body += "<h3>Log output:</h3><pre>"
         try:
             with open(log_path, 'r') as f:
-                # Show last 100 lines
                 lines = f.readlines()
                 for line in lines[-100:]:
-                    # Escape HTML
-                    line = line.replace('&', '&amp;')
-                    line = line.replace('<', '&lt;')
-                    line = line.replace('>', '&gt;')
-                    body += line
+                    body += html_escape(line)
         except (IOError, OSError):
             body += "(Could not read log file)"
         body += "</pre>"
     else:
-        body += "<p>No log file found.</p>"
+        body += "<p>Please contact the server administrator.</p>"
 
     send_html(500, "Error", body)
 
@@ -482,7 +515,7 @@ def main():
                       "<p>Another fastplot job is currently running "
                       "(candidate: %s).</p>"
                       "<p>Please try again in a few minutes.</p>"
-                      % (current_job_id or "unknown"))
+                      % html_escape(current_job_id or "unknown"))
         return
 
     # No job running and no cache - check if a previous job failed
@@ -505,7 +538,19 @@ def main():
                   % MAX_REQUESTS_PER_HOUR)
         return
 
-    # Step 5: Record request and launch wrapper
+    # Step 5: Check disk space
+    disk_ok, free_kb = check_disk_space(fastplot_dir)
+    if not disk_ok:
+        free_gb = free_kb / (1024 * 1024)
+        min_gb = MIN_FREE_DISK_SPACE_KB / (1024 * 1024)
+        send_html(507, "Insufficient Storage",
+                  "<h2>Insufficient Disk Space</h2>"
+                  "<p>Only %.1f GB free, need at least %.0f GB to run.</p>"
+                  "<p>Please contact the server administrator.</p>"
+                  % (free_gb, min_gb))
+        return
+
+    # Step 6: Record request and launch wrapper
     record_request(fastplot_dir)
 
     wrapper_path = os.path.join(script_dir, 'fastplot_wrapper.sh')
@@ -534,7 +579,7 @@ def main():
                   "<p>Failed to launch fastplot wrapper: %s</p>" % str(e))
         return
 
-    # Step 6: Return processing page
+    # Step 7: Return processing page
     send_processing_page(candidate_id, raw_url)
 
 

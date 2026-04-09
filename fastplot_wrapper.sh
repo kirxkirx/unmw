@@ -131,6 +131,16 @@ for STALE_DIR in "$DATA_PROCESSING_ROOT"/vast_fastplot_* ; do
  fi
 done
 
+# --- Check Disk Space ---
+# Require at least 5 GB free before proceeding
+MIN_FREE_KB=5242880
+FREE_KB=$(df -k "$DATA_PROCESSING_ROOT" 2>/dev/null | awk 'NR==2{print $4}')
+if [ -n "$FREE_KB" ] && [ "$FREE_KB" -lt "$MIN_FREE_KB" ] 2>/dev/null; then
+ FREE_GB=$(echo "$FREE_KB" | awk '{printf "%.1f", $1/1024/1024}')
+ echo "ERROR: Insufficient disk space: ${FREE_GB} GB free, need at least 5 GB"
+ exit 1
+fi
+
 # --- Create Disposable VaST Copy ---
 
 FASTPLOT_VAST_WORKDIR="$DATA_PROCESSING_ROOT/vast_fastplot_${CANDIDATE_ID}_$$"
