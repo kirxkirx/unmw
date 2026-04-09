@@ -91,19 +91,64 @@ def _expand_shell_vars(value, script_dir):
     return value
 
 
+def _parse_all_config_values(config_path):
+    """Read all variable assignments from a bash-style config file."""
+    all_vars = {}
+    try:
+        with open(config_path) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('#') or '=' not in line:
+                    continue
+                if line.startswith('export '):
+                    line = line[7:]
+                key, _, value = line.partition('=')
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                comment_pos = value.find(' #')
+                if comment_pos >= 0:
+                    value = value[:comment_pos].strip()
+                if key:
+                    all_vars[key] = value
+    except (FileNotFoundError, PermissionError):
+        pass
+    return all_vars
+
+
 def get_config():
-    """Load configuration from environment or local_config.sh."""
+    """Load configuration from environment or local_config.sh.
+
+    Handles cross-references between config variables, e.g.
+    DATA_PROCESSING_ROOT="$IMAGE_DATA_ROOT" where IMAGE_DATA_ROOT
+    is defined in the same file.
+    """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(script_dir, 'local_config.sh')
 
+    # Read all variables from config to resolve cross-references
+    all_config_vars = _parse_all_config_values(config_path)
+
+    # Build a lookup that checks env first, then config file
+    def expand_var(m):
+        var = m.group(1) or m.group(2)
+        # Environment takes precedence over config file
+        val = os.environ.get(var)
+        if val:
+            return val
+        return all_config_vars.get(var, m.group(0))
+
+    needed = ('DATA_PROCESSING_ROOT', 'VAST_REFERENCE_COPY',
+              'URL_OF_DATA_PROCESSING_ROOT')
     config = {}
-    for var_name in ('DATA_PROCESSING_ROOT', 'VAST_REFERENCE_COPY',
-                     'URL_OF_DATA_PROCESSING_ROOT'):
+    for var_name in needed:
         val = os.environ.get(var_name)
         if not val:
-            val = _parse_config_value(config_path, var_name)
+            val = all_config_vars.get(var_name)
         if val:
             val = _expand_shell_vars(val, script_dir)
+            # Resolve cross-references to other config variables
+            # (e.g. $IMAGE_DATA_ROOT defined in the same file)
+            val = re.sub(r'\$\{(\w+)\}|\$(\w+)', expand_var, val)
         config[var_name] = val
 
     return config
