@@ -560,51 +560,20 @@ def main():
                   "<p>fastplot_wrapper.sh not found or not executable.</p>")
         return
 
-    # Launch wrapper fully detached from the CGI process.
-    # Use double-fork daemonization to survive Apache/systemd CGI cleanup.
-    # A simple Popen with start_new_session=True is not enough — systemd's
-    # KillMode=control-group kills all processes in the cgroup regardless
-    # of session, which kills the long-running wrapper when Apache cleans
-    # up the CGI process.
+    # Launch wrapper detached from the CGI process.
+    # Apache kills child processes when the CGI exits, even with setsid()
+    # and double-fork. The reliable approach: use nohup + shell backgrounding
+    # with explicit fd redirection, matching how upload.py3 launches its
+    # long-running jobs.
     log_path = os.path.join(fastplot_dir, 'fastplot_%s.log' % candidate_id)
     try:
-        pid = os.fork()
-        if pid == 0:
-            # First child — detach from parent's session and process group
-            os.setsid()
-            pid2 = os.fork()
-            if pid2 == 0:
-                # Grandchild — fully detached, runs the wrapper
-                # Redirect stdin/stdout/stderr to log file
-                os.chdir(script_dir)
-                devnull = os.open(os.devnull, os.O_RDONLY)
-                os.dup2(devnull, 0)
-                os.close(devnull)
-                log_fd = os.open(log_path,
-                                 os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-                                 0o644)
-                os.dup2(log_fd, 1)
-                os.dup2(log_fd, 2)
-                os.close(log_fd)
-                # Close all other inherited file descriptors
-                try:
-                    max_fd = os.sysconf('SC_OPEN_MAX')
-                except (AttributeError, ValueError):
-                    max_fd = 1024
-                for fd in range(3, max_fd):
-                    try:
-                        os.close(fd)
-                    except OSError:
-                        pass
-                # exec the wrapper — replaces this process entirely
-                os.execvp(wrapper_path,
-                          [wrapper_path, safe_url, candidate_id])
-            else:
-                # First child exits immediately — grandchild is reparented
-                os._exit(0)
-        else:
-            # Parent (CGI) — wait for first child to exit (instant)
-            os.waitpid(pid, 0)
+        # Use os.system with nohup to fully detach from Apache.
+        # The arguments are already validated (candidate_id is [a-zA-Z0-9_.-]+,
+        # safe_url is reconstructed from server-side config), so shell
+        # interpolation is safe here.
+        cmd = ('nohup "%s" "%s" "%s" > "%s" 2>&1 &'
+               % (wrapper_path, safe_url, candidate_id, log_path))
+        os.system(cmd)
     except Exception as e:
         send_html(500, "Server Error",
                   "<h2>Server Error</h2>"
