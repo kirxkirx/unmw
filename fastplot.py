@@ -214,6 +214,11 @@ def validate_candidate_url(raw_url, config):
     if not rel_path:
         raise ValueError("Cannot extract report path from URL")
 
+    # Strip trailing slash and append index.html if path is a directory URL
+    rel_path = rel_path.rstrip('/')
+    if not rel_path.endswith('.html'):
+        rel_path = rel_path + '/index.html'
+
     # Validate each path component for safety
     if '..' in rel_path:
         raise ValueError("Path traversal detected")
