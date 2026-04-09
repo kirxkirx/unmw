@@ -13,6 +13,12 @@ LC_ALL=C
 LANGUAGE=C
 export LANGUAGE LC_ALL
 
+# Log signals for debugging — helps diagnose if we're being killed
+# by Apache, systemd, OOM killer, etc.
+trap 'echo "CAUGHT SIGNAL: SIGHUP (1) at $(date)" >&2' HUP
+trap 'echo "CAUGHT SIGNAL: SIGTERM (15) at $(date)" >&2; exit 1' TERM
+trap 'echo "CAUGHT SIGNAL: SIGPIPE (13) at $(date)" >&2' PIPE
+
 # --- Configuration ---
 
 SCRIPTDIR=$(dirname "$0")
