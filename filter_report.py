@@ -51,10 +51,12 @@ def is_variable_star(pre_el_text, star_type):
 
 def is_in_neverexclude_list(pre_el_text):
     try:
+        marker = 'This object is listed in neverexclude_list.txt'
         for line in pre_el_text.split('\n'):
-            if ('galactic' in line
-                    and 'Second-epoch detections are separated by' in line
-                    and 'This object is listed in neverexclude_list.txt' in line):
+            has_galactic = 'galactic' in line
+            has_second_epoch = 'Second-epoch detections are separated by' in line
+            has_marker = marker in line
+            if has_galactic and has_second_epoch and has_marker:
                 return True
         return False
     except (ValueError, IndexError) as e:
@@ -156,11 +158,15 @@ def filter_report(path_to_report):
             soup = BeautifulSoup(transient, features="lxml")
             pre_text = soup.pre.text
 
+            is_vsx = is_variable_star(pre_text, "VSX")
+            is_asassn = is_variable_star(pre_text, "ASASSN-V")
+            is_known_varstar = is_vsx or is_asassn
+            keep_visible = is_in_neverexclude_list(pre_text)
+
             if is_asteroid(pre_text):
                 css_class = "transient-asteroid"
                 asteroid_count += 1
-            elif (is_variable_star(pre_text, "VSX") or is_variable_star(pre_text, "ASASSN-V")) \
-                    and not is_in_neverexclude_list(pre_text):
+            elif is_known_varstar and not keep_visible:
                 css_class = "transient-varstar"
                 varstar_count += 1
             else:
