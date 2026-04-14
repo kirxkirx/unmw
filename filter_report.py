@@ -49,6 +49,19 @@ def is_variable_star(pre_el_text, star_type):
         return False
 
 
+def is_in_neverexclude_list(pre_el_text):
+    try:
+        for line in pre_el_text.split('\n'):
+            if ('galactic' in line
+                    and 'Second-epoch detections are separated by' in line
+                    and 'This object is listed in neverexclude_list.txt' in line):
+                return True
+        return False
+    except (ValueError, IndexError) as e:
+        print("Error in is_in_neverexclude_list: {}".format(e))
+        return False
+
+
 def is_ast_or_vs(pre_el_text):
     return (
         is_asteroid(pre_el_text) or is_variable_star(pre_el_text, "VSX") or is_variable_star(pre_el_text, "ASASSN-V")
@@ -146,7 +159,8 @@ def filter_report(path_to_report):
             if is_asteroid(pre_text):
                 css_class = "transient-asteroid"
                 asteroid_count += 1
-            elif is_variable_star(pre_text, "VSX") or is_variable_star(pre_text, "ASASSN-V"):
+            elif (is_variable_star(pre_text, "VSX") or is_variable_star(pre_text, "ASASSN-V")) \
+                    and not is_in_neverexclude_list(pre_text):
                 css_class = "transient-varstar"
                 varstar_count += 1
             else:
