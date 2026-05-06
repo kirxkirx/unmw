@@ -496,6 +496,78 @@ def render_thumbnail_link(thumb_name, hires_name, label, base, url_prefix, sub):
                           b=html_escape(base)))
 
 
+def render_distance_cell(pix, mean_scale):
+    """Three-line cell: arcmin, deg, pix. Pix-only when scale unknown."""
+    if mean_scale is None:
+        return '{} pix'.format(pix)
+    arcmin = pix * mean_scale / 60.0
+    deg = arcmin / 60.0
+    return "{:.1f}'<br>{:.1f}&deg;<br>{} pix".format(arcmin, deg, pix)
+
+
+def emit_match_row(r, url_prefix, sub):
+    """Emit one <tr> for the coord-search results table and flush stdout."""
+    base = os.path.basename(r['path'])
+    field = field_name_from_fits(r['path'])
+    size_html = render_image_size(
+        r['arcmin_str'], r['deg_str'], r['nx'], r['ny'])
+    scale_html, mean_scale = render_mean_scale(r['scale_x'], r['scale_y'])
+    edge_html = render_distance_cell(r['edge'], mean_scale)
+    center_html = render_distance_cell(r['from_center'], mean_scale)
+    zi_cell = render_thumbnail_link(
+        r.get('png_zoomin'), r.get('png_zoomin_hires'),
+        'zoom-in', base, url_prefix, sub)
+    zo_cell = render_thumbnail_link(
+        r.get('png_zoomout'), r.get('png_zoomout_hires'),
+        'zoom-out', base, url_prefix, sub)
+    print("<tr>"
+          "<td><b>{f}</b></td>"
+          "<td title='{full}'>{base}</td>"
+          "<td>{x:.1f}, {y:.1f}</td>"
+          "<td>{ch}</td>"
+          "<td>{eh}</td>"
+          "<td>{s}</td>"
+          "<td>{sc}</td>"
+          "<td>{zo}</td>"
+          "<td>{zi}</td>"
+          "</tr>".format(
+              f=html_escape(field),
+              full=html_escape(r['path']),
+              base=html_escape(base),
+              x=r['x'], y=r['y'],
+              ch=center_html, eh=edge_html,
+              s=size_html, sc=scale_html,
+              zi=zi_cell, zo=zo_cell), flush=True)
+
+
+def emit_listall_row(r, url_prefix, sub):
+    """Emit one <tr> for the show-all table and flush stdout."""
+    base = os.path.basename(r['path'])
+    field = field_name_from_fits(r['path'])
+    size_html = render_image_size(
+        r['arcmin_str'], r['deg_str'], r['nx'], r['ny'])
+    scale_html, _ = render_mean_scale(r['scale_x'], r['scale_y'])
+    zo_cell = render_thumbnail_link(
+        r.get('png_zoomout'), r.get('png_zoomout_hires'),
+        'zoom-out', base, url_prefix, sub)
+    print("<tr>"
+          "<td><b>{f}</b></td>"
+          "<td title='{full}'>{base}</td>"
+          "<td>{s}</td>"
+          "<td>{sc}</td>"
+          "<td>{zo}</td>"
+          "</tr>".format(
+              f=html_escape(field),
+              full=html_escape(r['path']),
+              base=html_escape(base),
+              s=size_html, sc=scale_html, zo=zo_cell), flush=True)
+
+
+# Number of columns in each table — used for inline error rows.
+COORD_SEARCH_TABLE_COLS = 9
+LIST_ALL_TABLE_COLS = 5
+
+
 # ---------- main ----------
 
 def main():
@@ -658,12 +730,44 @@ def main():
 
         if list_all_mode:
             # ---- Catalogue mode: list every WCS-calibrated reference image.
+            # Streaming response: header + table opener flushed up front so
+            # the user sees progress, rows emitted as their futures finish.
+            page_title = "All reference images"
+            print("Content-Type: text/html\n", flush=True)
+            print("<html><head><title>{}</title>".format(
+                html_escape(page_title)))
+            print(_PAGE_CSS)
+            print("</head><body>")
+            # Push past Apache's CGI output buffer so the heading shows up
+            # immediately rather than waiting for more data.
+            print("<!-- {} -->".format(' ' * 4000))
+            print("<h2>{}</h2>".format(html_escape(page_title)))
+            print("<p>Listing reference images from "
+                  "<span class='code'>{}</span> ...</p>".format(
+                      html_escape(ref_dir)), flush=True)
             fits_paths = list_fits_files(ref_dir)
             if len(fits_paths) > LIST_ALL_MAX_FILES:
                 fits_paths = fits_paths[:LIST_ALL_MAX_FILES]
                 paths_truncated = True
             else:
                 paths_truncated = False
+            # Sort upfront by field name so streaming output order matches
+            # the sorted view.
+            fits_paths.sort(key=lambda p: (field_name_from_fits(p), p))
+
+            print("<p>Found {} FITS file(s); generating thumbnails as they "
+                  "complete ...</p>".format(len(fits_paths)), flush=True)
+            if paths_truncated:
+                print("<div class='notice'>Reference image directory contains "
+                      "more than {} files; only the first {} (alphabetical) "
+                      "are listed.</div>".format(
+                          LIST_ALL_MAX_FILES, LIST_ALL_MAX_FILES), flush=True)
+
+            print("<table class='main'>", flush=True)
+            print("<tr><th>Field</th><th>Reference image</th>"
+                  "<th>Image size</th>"
+                  "<th>Scale (&quot;/pix)</th>"
+                  "<th>Zoom-out</th></tr>", flush=True)
 
             deadline = time.time() + LIST_ALL_TIMEOUT_SECONDS
 
@@ -700,91 +804,81 @@ def main():
                 })
 
             timed_out = False
-            results = []
+            n_emitted = 0
             with ThreadPoolExecutor(max_workers=parallel_workers) as ex:
-                for status, row in ex.map(_process_listall_entry, fits_paths):
+                # Submit all tasks; iterate futures in submission order so
+                # rows appear in the user-expected (alphabetical) order even
+                # though completion order may differ. The bottleneck is the
+                # current-position task; subsequent already-finished ones
+                # appear in quick succession after each blocking wait.
+                futures = [ex.submit(_process_listall_entry, p)
+                           for p in fits_paths]
+                for fut, path in zip(futures, fits_paths):
+                    try:
+                        status, row = fut.result()
+                    except Exception as err:
+                        print("<tr><td colspan='{}'><b>render failed for "
+                              "{}:</b> {}</td></tr>".format(
+                                  LIST_ALL_TABLE_COLS,
+                                  html_escape(os.path.basename(path)),
+                                  html_escape(err)), flush=True)
+                        continue
                     if status == 'timeout':
                         timed_out = True
                     elif status == 'ok':
-                        results.append(row)
+                        emit_listall_row(row, url_prefix, sub)
+                        n_emitted += 1
 
-            results.sort(
-                key=lambda r: (field_name_from_fits(r['path']), r['path']))
+            print("</table>", flush=True)
 
-            print("Content-Type: text/html\n")
-            print("<html><head><title>All reference images</title>")
-            print(_PAGE_CSS)
-            print("</head><body>")
-            print("<h2>All reference images</h2>")
-            print("<p>{} reference image(s) listed from "
-                  "<span class='code'>{}</span></p>".format(
-                      len(results), html_escape(ref_dir)))
-            if paths_truncated:
-                print("<div class='notice'>Reference image directory contains "
-                      "more than {} files; only the first {} (alphabetical) "
-                      "are listed.</div>".format(
-                          LIST_ALL_MAX_FILES, LIST_ALL_MAX_FILES))
             if timed_out:
                 print("<div class='notice'>Listing stopped after {} s; "
                       "results may be incomplete.</div>".format(
-                          LIST_ALL_TIMEOUT_SECONDS))
-
-            if not results:
-                print("<p>No WCS-calibrated reference images found.</p>")
-            else:
-                print("<table class='main'>")
-                print("<tr><th>Field</th><th>Reference image</th>"
-                      "<th>Image size</th>"
-                      "<th>Scale (&quot;/pix)</th>"
-                      "<th>Zoom-out</th></tr>")
-                for r in results:
-                    base = os.path.basename(r['path'])
-                    field = field_name_from_fits(r['path'])
-                    size_html = render_image_size(
-                        r['arcmin_str'], r['deg_str'], r['nx'], r['ny'])
-                    scale_html, _ = render_mean_scale(
-                        r['scale_x'], r['scale_y'])
-                    zo_cell = render_thumbnail_link(
-                        r['png_zoomout'], r['png_zoomout_hires'], 'zoom-out',
-                        base, url_prefix, sub)
-                    print("<tr>"
-                          "<td><b>{f}</b></td>"
-                          "<td title='{full}'>{base}</td>"
-                          "<td>{s}</td>"
-                          "<td>{sc}</td>"
-                          "<td>{zo}</td>"
-                          "</tr>".format(
-                              f=html_escape(field),
-                              full=html_escape(r['path']),
-                              base=html_escape(base),
-                              s=size_html,
-                              sc=scale_html,
-                              zo=zo_cell))
-                print("</table>")
+                          LIST_ALL_TIMEOUT_SECONDS), flush=True)
+            if n_emitted == 0:
+                print("<p>No WCS-calibrated reference images found.</p>",
+                      flush=True)
 
             print("<br><br><a href='{}'>Search again</a>".format(
-                html_escape(back_link_url())))
+                html_escape(back_link_url())), flush=True)
             print("<p style='color: #888; font-size: 90%;'>"
                   "Page generated in {:.1f} s.</p>".format(
-                      time.time() - request_start))
-            print("</body></html>")
+                      time.time() - request_start), flush=True)
+            print("</body></html>", flush=True)
             return  # done with list-all flow
 
-        # ---- Coord-search mode (default).
-        matches, truncated = run_sky2xy_scan(ref_dir, ra, dec, vast_dir)
+        # ---- Coord-search mode (streaming).
+        page_title = "Coordinate search results"
+        print("Content-Type: text/html\n", flush=True)
+        print("<html><head><title>{}</title>".format(html_escape(page_title)))
+        print(_PAGE_CSS)
+        print("</head><body>")
+        print("<!-- {} -->".format(' ' * 4000))
+        print("<h2>{}</h2>".format(html_escape(page_title)))
+        print("<p>Searched for R.A. <b>{}</b>, Dec. <b>{}</b> (J2000) "
+              "in <span class='code'>{}</span></p>".format(
+                  html_escape(ra), html_escape(dec), html_escape(ref_dir)),
+              flush=True)
 
-        # Annotate with image metadata and computed distances; drop ones we
-        # cannot size (no useful row to display).
-        results = []
-        for path, x, y in matches:
+        print("<p>Scanning reference images for matches ...</p>", flush=True)
+        matches, truncated = run_sky2xy_scan(ref_dir, ra, dec, vast_dir)
+        if truncated:
+            print("<div class='notice'>Scan stopped after {} s; "
+                  "results may be incomplete.</div>".format(
+                      SCAN_TIMEOUT_SECONDS), flush=True)
+
+        # Parallel metadata fetch (fast: ~1 s per image, no PNG yet) so we
+        # can compute from-center and sort before opening the table.
+        def _fetch_match_meta(item):
+            path, x, y = item
             meta = get_image_metadata(path, vast_dir)
             if meta is None:
-                continue
+                return None
             nx, ny = meta['nx'], meta['ny']
             edge = int(round(min(x, y, nx - x, ny - y)))
             cx, cy = nx / 2.0, ny / 2.0
             from_center = int(round(((x - cx) ** 2 + (y - cy) ** 2) ** 0.5))
-            results.append({
+            return {
                 'path': path,
                 'x': x, 'y': y,
                 'nx': nx, 'ny': ny,
@@ -794,125 +888,87 @@ def main():
                 'deg_str': meta['deg_str'],
                 'scale_x': meta['scale_x'],
                 'scale_y': meta['scale_y'],
-            })
+            }
 
-        # Best-centred first: smallest distance to image centre.
+        print("<p>Found {} candidate match(es); fetching image metadata "
+              "...</p>".format(len(matches)), flush=True)
+        results = []
+        if matches:
+            with ThreadPoolExecutor(max_workers=parallel_workers) as ex:
+                for row in ex.map(_fetch_match_meta, matches):
+                    if row is not None:
+                        results.append(row)
+
+        # Best-centred first: smallest distance to image centre. Sort BEFORE
+        # submitting render tasks so the streaming order matches the sort.
         results.sort(key=lambda r: r['from_center'])
 
-        def _render_match(r):
-            """All four PNGs for one matched FITS, rendered sequentially.
-
-            Each thread owns one FITS file, so the four pgfv calls (which all
-            write '<basename>.png' to cwd before being renamed) cannot collide
-            with other threads working on different files. Sequential calls
-            within the thread guarantee that each rename completes before the
-            next call writes a new '<basename>.png'.
-            """
-            r['png_zoomin'] = make_zoomin_thumbnail(
-                r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
-                thumb_pixels, zoomin_pixels, suffix='zoomin')
-            r['png_zoomin_hires'] = make_zoomin_thumbnail(
-                r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
-                hires_pixels, zoomin_pixels, suffix='zoomin_hires')
-            r['png_zoomout'] = make_zoomout_thumbnail(
-                r['path'], r['x'], r['y'], r['nx'], r['ny'],
-                out_dir_abs, vast_dir, thumb_pixels, suffix='zoomout')
-            r['png_zoomout_hires'] = make_zoomout_thumbnail(
-                r['path'], r['x'], r['y'], r['nx'], r['ny'],
-                out_dir_abs, vast_dir, hires_pixels, suffix='zoomout_hires')
-            return r
-
-        if results:
-            with ThreadPoolExecutor(max_workers=parallel_workers) as ex:
-                # ex.map mutates each r in place; consume the iterator to
-                # surface any exceptions and wait for completion.
-                list(ex.map(_render_match, results))
-
-        # Build response page.
-        print("Content-Type: text/html\n")
-        print("<html><head><title>Coordinate search results</title>")
-        print(_PAGE_CSS)
-        print("</head><body>")
-        print("<h2>Coordinate search results</h2>")
-        print("<p>Searched for R.A. <b>{}</b>, Dec. <b>{}</b> (J2000) "
-              "in <span class='code'>{}</span></p>".format(
-                  html_escape(ra), html_escape(dec), html_escape(ref_dir)))
-
-        if truncated:
-            print("<div class='notice'>Scan stopped after {} s; "
-                  "results may be incomplete.</div>".format(SCAN_TIMEOUT_SECONDS))
-
         if not results:
-            print("<p>No reference images cover this sky position.</p>")
+            print("<p>No reference images cover this sky position.</p>",
+                  flush=True)
         else:
             print("<p>{} reference image(s) cover this position, sorted by "
-                  "distance from image centre (best-centred first):</p>".format(
-                      len(results)))
-            print("<table class='main'>")
+                  "distance from image centre (best-centred first); rows "
+                  "appear as thumbnails finish:</p>".format(len(results)),
+                  flush=True)
+            print("<table class='main'>", flush=True)
             print("<tr><th>Field</th><th>Reference image</th>"
                   "<th>X, Y (pix)</th>"
                   "<th>From center</th>"
                   "<th>Nearest edge</th>"
                   "<th>Image size</th>"
                   "<th>Scale (&quot;/pix)</th>"
-                  "<th>Zoom-out</th><th>Zoom-in</th></tr>")
-            for r in results:
-                base = os.path.basename(r['path'])
-                size_html = render_image_size(
-                    r['arcmin_str'], r['deg_str'], r['nx'], r['ny'])
-                scale_html, mean_scale = render_mean_scale(
-                    r['scale_x'], r['scale_y'])
+                  "<th>Zoom-out</th><th>Zoom-in</th></tr>", flush=True)
 
-                # Convert pixel distances using the mean scale (arcsec/pix).
-                # Three lines per cell, matching the Image size column:
-                # arcminutes, degrees, pixels.
-                def _distance_cell(pix):
-                    if mean_scale is None:
-                        return '{} pix'.format(pix)
-                    arcmin = pix * mean_scale / 60.0
-                    deg = arcmin / 60.0
-                    return "{:.1f}'<br>{:.1f}&deg;<br>{} pix".format(
-                        arcmin, deg, pix)
+            def _render_match(r):
+                """All four PNGs for one matched FITS, rendered sequentially.
 
-                edge_html = _distance_cell(r['edge'])
-                center_html = _distance_cell(r['from_center'])
+                Each thread owns one FITS file, so the four pgfv calls (each
+                of which writes '<basename>.png' to cwd before being renamed)
+                cannot collide with threads on other files. Sequential within
+                the thread guarantees each rename completes before the next
+                call writes a new '<basename>.png'.
+                """
+                r['png_zoomin'] = make_zoomin_thumbnail(
+                    r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
+                    thumb_pixels, zoomin_pixels, suffix='zoomin')
+                r['png_zoomin_hires'] = make_zoomin_thumbnail(
+                    r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
+                    hires_pixels, zoomin_pixels, suffix='zoomin_hires')
+                r['png_zoomout'] = make_zoomout_thumbnail(
+                    r['path'], r['x'], r['y'], r['nx'], r['ny'],
+                    out_dir_abs, vast_dir, thumb_pixels, suffix='zoomout')
+                r['png_zoomout_hires'] = make_zoomout_thumbnail(
+                    r['path'], r['x'], r['y'], r['nx'], r['ny'],
+                    out_dir_abs, vast_dir, hires_pixels,
+                    suffix='zoomout_hires')
+                return r
 
-                field = field_name_from_fits(r['path'])
-                zi_cell = render_thumbnail_link(
-                    r['png_zoomin'], r['png_zoomin_hires'], 'zoom-in',
-                    base, url_prefix, sub)
-                zo_cell = render_thumbnail_link(
-                    r['png_zoomout'], r['png_zoomout_hires'], 'zoom-out',
-                    base, url_prefix, sub)
-                print("<tr>"
-                      "<td><b>{f}</b></td>"
-                      "<td title='{full}'>{base}</td>"
-                      "<td>{x:.1f}, {y:.1f}</td>"
-                      "<td>{ch}</td>"
-                      "<td>{eh}</td>"
-                      "<td>{s}</td>"
-                      "<td>{sc}</td>"
-                      "<td>{zo}</td>"
-                      "<td>{zi}</td>"
-                      "</tr>".format(
-                          f=html_escape(field),
-                          full=html_escape(r['path']),
-                          base=html_escape(base),
-                          x=r['x'], y=r['y'],
-                          ch=center_html,
-                          eh=edge_html,
-                          s=size_html,
-                          sc=scale_html,
-                          zi=zi_cell,
-                          zo=zo_cell))
-            print("</table>")
+            with ThreadPoolExecutor(max_workers=parallel_workers) as ex:
+                # Submit in sort order; iterate futures in submission order
+                # so rows appear sorted by from_center even though the
+                # workers may finish out of submission order.
+                futures = [ex.submit(_render_match, r) for r in results]
+                for fut, r in zip(futures, results):
+                    try:
+                        fut.result()
+                    except Exception as err:
+                        print("<tr><td colspan='{}'><b>render failed for "
+                              "{}:</b> {}</td></tr>".format(
+                                  COORD_SEARCH_TABLE_COLS,
+                                  html_escape(os.path.basename(r['path'])),
+                                  html_escape(err)), flush=True)
+                        continue
+                    emit_match_row(r, url_prefix, sub)
+
+            print("</table>", flush=True)
 
         print("<br><br><a href='{}'>Search again</a>".format(
-            html_escape(back_link_url())))
+            html_escape(back_link_url())), flush=True)
         print("<p style='color: #888; font-size: 90%;'>"
               "Page generated in {:.1f} s.</p>".format(
-                  time.time() - request_start))
-        print("</body></html>")
+                  time.time() - request_start), flush=True)
+        print("</body></html>", flush=True)
     finally:
         try:
             slot.close()  # releases the flock
