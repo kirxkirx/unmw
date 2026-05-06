@@ -899,15 +899,6 @@ echo "
 $MSG
 
 "  | tee -a "$AUTOPROCESS_LOG"
-if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workstartemail" ];then
- if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ] && [ $TEST_RUN -eq 0 ] ;then
-  curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
- fi
-fi
-WORKENDEMAIL="off"
-if [ -f "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE/workendemail" ] && [ $TEST_RUN -eq 0 ];then
- WORKENDEMAIL="on"
-fi
 ############################################################################
 echo "Starting work"  | tee -a "$AUTOPROCESS_LOG"
 UNIXSEC_START=$(date +%s)
@@ -1045,11 +1036,6 @@ echo "
 $MSG
 
 " | tee -a "$AUTOPROCESS_LOG"
-if [ "$WORKENDEMAIL" = "on" ];then
- if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ] && [ $TEST_RUN -eq 0 ];then
-  curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=$NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
- fi
-fi
 
 echo "########################### $(date +'%Y-%m-%d %H:%M:%S %Z') ###########################
 $MSG" >> autoprocess.txt

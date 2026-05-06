@@ -92,15 +92,6 @@ fullhostname=socket.getfqdn()
 message = message + '<br><br>The output will be written to <a href=\"http://' + fullhostname + '/nmw/proc/upload/' + dirname + '\">http://' + fullhostname + '/nmw/proc/upload/' + dirname + '</a><br><br>'
 
 
-if form.getvalue('workstartemail') :
- syscmd = 'touch ' + dirname + 'workstartemail'
- CmdReturnStatus = os.system(syscmd)
- message = message + ' ' + syscmd + ' '
-
-if form.getvalue('workendemail') :
- syscmd = 'touch ' + dirname + 'workendemail'
- CmdReturnStatus = os.system(syscmd)
- message = message + ' ' + syscmd + ' '
 
 if form.getvalue('nonexistingfield') :
  syscmd = 'touch ' + dirname + 'nonexistingfield'

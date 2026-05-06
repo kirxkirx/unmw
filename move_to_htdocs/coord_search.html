@@ -41,7 +41,7 @@ hr.break { max-width: 720px; margin: 18pt auto; }
 
 <!-- Primary action: coordinate search -->
 <div class="section">
-<p>Enter J2000 sky coordinates to find every reference image that covers
+<p>Enter J2000 sky coordinates to find reference images that covers
 that position. Results show, for each matching image, the pixel position
 of the target, the distance to the image centre and to the nearest edge,
 and small zoom-in / zoom-out thumbnails so you can see at a glance
@@ -50,7 +50,7 @@ edge.</p>
 
 <table style="margin: 0 auto; border-spacing: 5pt;">
 <tr>
-  <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec., J2000):</td>
+  <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec.):</td>
   <td style="padding: 0;">
     <input type="text" name="coords" size="36" placeholder="17:45:37.199 -28:56:10.22">
     <input type="submit" id="coord-search-button" value="Search">
@@ -66,7 +66,7 @@ Accepted coordinate formats:
 <li>Sexagesimal with spaces: <span class="code">17 45 37.199 -28 56 10.22</span></li>
 <li>Decimal degrees: <span class="code">266.4050 -28.9362</span></li>
 </ul>
-The Dec. sign may be <span class="code">+</span>, <span class="code">-</span>, or omitted for positive Dec.
+The Dec. sign may be <span class="code">-</span>, <span class="code">+</span>, or omitted for positive Dec.
 </p>
 </div>
 
@@ -75,9 +75,8 @@ The Dec. sign may be <span class="code">+</span>, <span class="code">-</span>, o
 <!-- Secondary action: browse all reference images -->
 <div class="section" style="text-align: center;">
 <p class="secondary" style="text-align: center;">
-No coordinates handy? You can also list every reference image
-(field name, image size, scale, full-frame thumbnail) without
-specifying a position:
+You can also list every reference image (field name, image size,
+scale, full-frame thumbnail) without specifying a position:
 </p>
 <p style="text-align: center;">
 <input type="submit" id="coord-list-all-button" value="Show all reference images">

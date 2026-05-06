@@ -540,7 +540,7 @@ cat "$UPLOADS_DIR/sthttpd_http_server.log" 2>/dev/null | tail -n5
 
 echo "DEBUG: Now attempting POST upload..."
 # Save response to file first to diagnose capture issues
-curl --max-time 600 --silent --show-error -w "\nHTTP_CODE:%{http_code}\nSIZE:%{size_download}" -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' "http://localhost:$UNMW_FREE_PORT/upload.py" -o /tmp/upload_response.txt 2>/tmp/upload_stderr.txt
+curl --max-time 600 --silent --show-error -w "\nHTTP_CODE:%{http_code}\nSIZE:%{size_download}" -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' "http://localhost:$UNMW_FREE_PORT/upload.py" -o /tmp/upload_response.txt 2>/tmp/upload_stderr.txt
 curl_exit_code=$?
 echo "DEBUG: curl exit code: $curl_exit_code"
 echo "DEBUG: curl stderr:"
@@ -625,7 +625,7 @@ fi
 echo "------------------------------------"
 unset results_server_reply
 unset results_url
-results_server_reply=$(curl --max-time 600 --silent --show-error -X POST -F 'file=@2025-01-07_Vul8_183150_Stas.rar' -F 'workstartemail=' -F 'workendemail=' "http://localhost:$UNMW_FREE_PORT/upload.py")
+results_server_reply=$(curl --max-time 600 --silent --show-error -X POST -F 'file=@2025-01-07_Vul8_183150_Stas.rar' "http://localhost:$UNMW_FREE_PORT/upload.py")
 if [ -z "$results_server_reply" ];then
  echo "$0 test error: empty HTTP server reply"
  exit 1
@@ -960,7 +960,7 @@ if [ ! -f NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
 else
  echo "$0 test: double-checking that NMW__NovaVul24_Stas__WebCheck__NotReal.zip is stil here"
 fi
-results_server_reply=$(curl --max-time 600 --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' -F 'workstartemail=' -F 'workendemail=' "http://localhost:$UNMW_FREE_PORT/upload.py")
+results_server_reply=$(curl --max-time 600 --silent --show-error -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' "http://localhost:$UNMW_FREE_PORT/upload.py")
 if [ -z "$results_server_reply" ];then
  echo "$0 test error: empty HTTP server reply"
  exit 1

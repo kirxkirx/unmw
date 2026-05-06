@@ -421,12 +421,6 @@ def main():
 
     # Run processing
     if dirname:
-        # Handle email notifications
-        if form.getvalue('workstartemail'):
-            os.system(f'touch {dirname}workstartemail')
-        if form.getvalue('workendemail'):
-            os.system(f'touch {dirname}workendemail')
-
         # Log upload details
         os.system(f'ls -lh {dirname}* >> {dirname}upload.log')
         
