@@ -29,12 +29,13 @@ a:hover {color: #55f; text-decoration: underline}
 <h2>Find fields covering a sky position</h2><br>
 
 <form id="coord-search-form" action="../cgi-bin/unmw/coord_search.py" method="post">
+<input type="hidden" name="action" id="coord-action" value="search">
 <TABLE width="750">
 <tr><td>Coordinates (R.A. Dec., J2000):</td>
     <td><input type="text" name="coords" size="40" placeholder="17:45:37.199 -28:56:10.22"></td></tr>
 <tr><td></td><td>
-  <input type="submit" name="submit_search" id="coord-search-button" value="Search">
-  <input type="submit" name="submit_list_all" id="coord-list-all-button" value="Show all reference images">
+  <input type="submit" id="coord-search-button" value="Search">
+  <input type="submit" id="coord-list-all-button" value="Show all reference images">
   <span id="coord-search-status" style="margin-left: 1em; color: #888; visibility: hidden;">Working...</span>
 </td></tr>
 <tr><td colspan=2><hr></td></tr>
@@ -45,11 +46,22 @@ a:hover {color: #55f; text-decoration: underline}
 <script type="text/javascript">
 (function () {
   var form = document.getElementById('coord-search-form');
-  var buttons = [
-    document.getElementById('coord-search-button'),
-    document.getElementById('coord-list-all-button')
-  ];
+  var actionField = document.getElementById('coord-action');
+  var searchButton = document.getElementById('coord-search-button');
+  var listAllButton = document.getElementById('coord-list-all-button');
+  var buttons = [searchButton, listAllButton];
   var status = document.getElementById('coord-search-status');
+
+  // Capture which button was clicked into the hidden input. Using a hidden
+  // field instead of submit-button name/value avoids browser quirks where
+  // disabling buttons during the submit event can drop the clicked button
+  // from the form data.
+  searchButton.addEventListener('click', function () {
+    actionField.value = 'search';
+  });
+  listAllButton.addEventListener('click', function () {
+    actionField.value = 'list_all';
+  });
 
   function reset() {
     for (var i = 0; i < buttons.length; i++) buttons[i].disabled = false;
