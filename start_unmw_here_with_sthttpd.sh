@@ -197,6 +197,7 @@ echo "Created upload.py symlink"
 mkdir -p cgi-bin/unmw
 ln -sf ../../upload.py3 cgi-bin/unmw/upload.py
 ln -sf ../../fastplot.py cgi-bin/unmw/fastplot.py
+ln -sf ../../coord_search.py cgi-bin/unmw/coord_search.py
 echo "Created cgi-bin/unmw/ directory with CGI symlinks"
 
 # Set up web interface directory

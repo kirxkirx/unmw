@@ -1,0 +1,59 @@
+<html>
+<head>
+<style type="text/css">
+body { color: #000;
+ background: #fff;
+ font-family: arial, helvetica, sans-serif;
+ font-size: 12pt;
+ line-height: 16pt;
+ margin-top: 3mm;
+ margin-bottom: 3mm;
+ margin-left: 10mm;
+ margin-right: 10mm;
+}
+
+p {text-align: justify; text-indent: 6mm; line-height: 16pt}
+.code {text-align: left; font-family: courier; background: #ccc; color:
+#000}
+table.main {border-spacing: 5pt}
+td { padding-left: 20pt; padding-right: 20pt; padding-bottom: 3pt }
+
+a:link {color: #55f; text-decoration: none}
+a:visited {color: #33f; text-decoration: none}
+a:active {color: #55f; text-decoration: none}
+a:hover {color: #55f; text-decoration: underline}
+</style>
+</head>
+
+<CENTER>
+<h2>Find reference fields covering a sky position</h2><br>
+
+<form action="../cgi-bin/unmw/coord_search.py" method="post">
+<TABLE width="750">
+<tr><td>Coordinates (R.A. Dec., J2000):</td>
+    <td><input type="text" name="coords" size="40" placeholder="17:45:37.199 -28:56:10.22"></td></tr>
+<tr><td></td><td><input type="submit" value="Search"></td></tr>
+<tr><td colspan=2><hr></td></tr>
+</TABLE>
+</form>
+</CENTER>
+<br>
+The tool runs <span class="code">sky2xy</span> on every reference image and lists the
+fields covering the requested position, with pixel coordinates, distance to the nearest
+image edge, and a small thumbnail showing the position so you can judge whether the
+target is near the centre of a field or close to its edge.
+<br><br>
+
+Accepted coordinate formats:
+<ul>
+<li>Sexagesimal with colons: <span class="code">17:45:37.199 -28:56:10.22</span></li>
+<li>Sexagesimal with spaces: <span class="code">17 45 37.199 -28 56 10.22</span></li>
+<li>Decimal degrees: <span class="code">266.4050 -28.9362</span></li>
+</ul>
+The Dec. sign may be <span class="code">+</span>, <span class="code">-</span>, or omitted for positive Dec.
+<br><br><br>
+
+If you have questions, bug reports or suggestions how to improve this
+service, please feel free to contact the author (Kirill Sokolovsky) via e-mail: <b>kirx[at]scan&#046;sai&#046;msu&#046;ru</b><br>
+
+</html>

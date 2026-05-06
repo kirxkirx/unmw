@@ -7,6 +7,11 @@ export URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
 
 export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 
+# Thumbnail width/height in pixels for the coord_search.py CGI tool.
+# Default 128 matches make_small_field_preview_png in
+# util/transients/transient_factory_test31.sh
+#export COORD_SEARCH_THUMBNAIL_PIXELS=128
+
 # Note that $HOME is typically not defined in CGI environment, so use absolute paths!
 
 
