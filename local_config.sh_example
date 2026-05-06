@@ -12,6 +12,11 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # util/transients/transient_factory_test31.sh
 #export COORD_SEARCH_THUMBNAIL_PIXELS=128
 
+# Half-width in source-image pixels of the zoom-in thumbnail produced by
+# coord_search.py (passed to util/make_finding_chart --width). The output
+# covers a 2N x 2N pixel square centred on the target.
+#export COORD_SEARCH_ZOOMIN_PIXELS=200
+
 # Note that $HOME is typically not defined in CGI environment, so use absolute paths!
 
 

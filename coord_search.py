@@ -55,6 +55,7 @@ MIN_THUMBNAIL_PIXELS = 32
 MAX_THUMBNAIL_PIXELS = 4096
 MAX_RESULTS_TO_PROCESS = 200         # safety cap on matches per request
 DEFAULT_FORM_PATH = '/unmw/coord_search.html'
+DEFAULT_ZOOMIN_PIXELS = 200          # half-width of zoom-in thumbnail in source pix
 
 # Whitelist of characters allowed in the raw coordinate string.
 # Defends every later subprocess that takes the parsed values.
@@ -279,11 +280,15 @@ def run_sky2xy_scan(ref_dir, ra, dec, vast_dir):
 
 # ---------- per-image helpers ----------
 
-def get_image_dimensions(fits_path, vast_dir):
-    """Return (NX, NY) from util/fov_of_wcs_calibrated_image.sh, or None.
+def get_image_metadata(fits_path, vast_dir):
+    """Return image metadata dict from util/fov_of_wcs_calibrated_image.sh.
 
     Going through the script (rather than reading NAXIS directly) makes
     this work for compressed FITS files as well.
+
+    Keys: nx, ny (int, pixels), arcmin_str (e.g. "941.5'x626.9'"),
+    deg_str (e.g. "15.7degx10.4deg"), scale_x, scale_y (float, arcsec/pix).
+    Returns None on failure.
     """
     try:
         result = subprocess.run(
@@ -294,26 +299,56 @@ def get_image_dimensions(fits_path, vast_dir):
         )
     except (subprocess.TimeoutExpired, OSError):
         return None
-    m = re.search(r'(\d+)\s*x\s*(\d+)\s*pix', result.stdout)
-    if not m:
+
+    out = result.stdout
+    pix_m = re.search(r'(\d+)\s*x\s*(\d+)\s*pix', out)
+    if not pix_m:
         return None
-    return int(m.group(1)), int(m.group(2))
+
+    info = {
+        'nx': int(pix_m.group(1)),
+        'ny': int(pix_m.group(2)),
+        'arcmin_str': '',
+        'deg_str': '',
+        'scale_x': None,
+        'scale_y': None,
+    }
+
+    arcmin_m = re.search(r"(\d+\.?\d*)'\s*x\s*(\d+\.?\d*)'", out)
+    if arcmin_m:
+        info['arcmin_str'] = "{}'x{}'".format(arcmin_m.group(1), arcmin_m.group(2))
+
+    deg_m = re.search(r'(\d+\.?\d*)\s*\(deg\)\s*x\s*(\d+\.?\d*)\s*\(deg\)', out)
+    if deg_m:
+        info['deg_str'] = '{}degx{}deg'.format(deg_m.group(1), deg_m.group(2))
+
+    scale_m = re.search(
+        r'(\d+\.?\d*)"/pix along the X axis and (\d+\.?\d*)"/pix along the Y axis',
+        out)
+    if scale_m:
+        try:
+            info['scale_x'] = float(scale_m.group(1))
+            info['scale_y'] = float(scale_m.group(2))
+        except ValueError:
+            pass
+
+    return info
 
 
-def make_thumbnail(fits_path, ra, dec, out_dir, vast_dir, thumb_pixels):
-    """Run util/fits2png from out_dir to produce a marked PNG.
+def _run_pgfv_tool(argv, out_dir, png_w, png_h, fits_path, suffix):
+    """Run a pgfv-family tool that writes <basename>.png to cwd, then rename.
 
-    Running from the per-request out_dir avoids name collisions between
-    concurrent requests that hit the same field. Returns the PNG basename
-    (relative to out_dir) on success, or None on failure.
+    Returns the suffixed PNG name (relative to out_dir) on success, else None.
+    Each request has its own out_dir, so no cross-request name collisions.
+    Within one request, sequential calls would collide on '<base>.png' until
+    we rename, so we rename immediately after each call.
     """
     env = os.environ.copy()
-    env['PGPLOT_PNG_WIDTH'] = str(thumb_pixels)
-    env['PGPLOT_PNG_HEIGHT'] = str(thumb_pixels)
-    fits2png = os.path.join(vast_dir, 'util', 'fits2png')
+    env['PGPLOT_PNG_WIDTH'] = str(png_w)
+    env['PGPLOT_PNG_HEIGHT'] = str(png_h)
     try:
         subprocess.run(
-            [fits2png, fits_path, ra, dec],
+            argv,
             cwd=out_dir,
             env=env,
             capture_output=True,
@@ -322,11 +357,57 @@ def make_thumbnail(fits_path, ra, dec, out_dir, vast_dir, thumb_pixels):
     except (subprocess.TimeoutExpired, OSError):
         return None
     base = os.path.splitext(os.path.basename(fits_path))[0]
-    png_name = '{}.png'.format(base)
-    full = os.path.join(out_dir, png_name)
-    if os.path.isfile(full) and os.path.getsize(full) > 0:
-        return png_name
-    return None
+    src = os.path.join(out_dir, '{}.png'.format(base))
+    if not (os.path.isfile(src) and os.path.getsize(src) > 0):
+        return None
+    dst_name = '{}_{}.png'.format(base, suffix)
+    dst = os.path.join(out_dir, dst_name)
+    try:
+        os.replace(src, dst)
+    except OSError:
+        return None
+    return dst_name
+
+
+def zoomout_png_dims(nx, ny, thumb_pixels):
+    """PNG dimensions for the zoom-out thumbnail.
+
+    The zoom-in PNG is square (thumb_pixels x thumb_pixels). To keep both
+    thumbnails the same length along at least one axis, the zoom-out PNG
+    matches the source image aspect ratio with the longer axis equal to
+    thumb_pixels.
+    """
+    if nx >= ny:
+        png_w = thumb_pixels
+        png_h = max(1, int(round(thumb_pixels * ny / float(nx))))
+    else:
+        png_h = thumb_pixels
+        png_w = max(1, int(round(thumb_pixels * nx / float(ny))))
+    return png_w, png_h
+
+
+def make_zoomout_thumbnail(fits_path, x, y, nx, ny, out_dir, vast_dir,
+                           thumb_pixels):
+    """Full-frame view with marker at pixel (x, y). Requires pgfv.c edits.
+
+    PNG dimensions follow source aspect ratio so the longer axis is
+    thumb_pixels, matching the zoom-in's axes.
+    """
+    fits2png = os.path.join(vast_dir, 'util', 'fits2png')
+    png_w, png_h = zoomout_png_dims(nx, ny, thumb_pixels)
+    return _run_pgfv_tool(
+        [fits2png, fits_path, '{:.3f}'.format(x), '{:.3f}'.format(y)],
+        out_dir, png_w, png_h, fits_path, 'zoomout')
+
+
+def make_zoomin_thumbnail(fits_path, x, y, out_dir, vast_dir, thumb_pixels,
+                          zoomin_pixels):
+    """Square zoom-in centred on (x, y), 2N x 2N source pixels."""
+    tool = os.path.join(vast_dir, 'util', 'make_finding_chart')
+    return _run_pgfv_tool(
+        [tool, '--width', str(zoomin_pixels), '--nolabels', '--',
+         fits_path, '{:.3f}'.format(x), '{:.3f}'.format(y)],
+        out_dir, thumb_pixels, thumb_pixels, fits_path, 'zoomin')
 
 
 # ---------- main ----------
@@ -382,11 +463,13 @@ def main():
             'VAST_REFERENCE_COPY',
             'URL_OF_DATA_PROCESSING_ROOT',
             'COORD_SEARCH_THUMBNAIL_PIXELS',
+            'COORD_SEARCH_ZOOMIN_PIXELS',
         )
         ref_dir = cfg['REFERENCE_IMAGES'].strip()
         vast_dir = cfg['VAST_REFERENCE_COPY'].strip()
         url_prefix = cfg['URL_OF_DATA_PROCESSING_ROOT'].strip().rstrip('/')
         thumb_raw = cfg['COORD_SEARCH_THUMBNAIL_PIXELS'].strip()
+        zoomin_raw = cfg['COORD_SEARCH_ZOOMIN_PIXELS'].strip()
 
         try:
             thumb_pixels = int(thumb_raw) if thumb_raw else DEFAULT_THUMBNAIL_PIXELS
@@ -394,6 +477,13 @@ def main():
             thumb_pixels = DEFAULT_THUMBNAIL_PIXELS
         if thumb_pixels < MIN_THUMBNAIL_PIXELS or thumb_pixels > MAX_THUMBNAIL_PIXELS:
             thumb_pixels = DEFAULT_THUMBNAIL_PIXELS
+
+        try:
+            zoomin_pixels = int(zoomin_raw) if zoomin_raw else DEFAULT_ZOOMIN_PIXELS
+        except ValueError:
+            zoomin_pixels = DEFAULT_ZOOMIN_PIXELS
+        if zoomin_pixels < 5:
+            zoomin_pixels = DEFAULT_ZOOMIN_PIXELS
 
         if not ref_dir or not os.path.isdir(ref_dir):
             emit_message_page(
@@ -456,26 +546,39 @@ def main():
 
         matches, truncated = run_sky2xy_scan(ref_dir, ra, dec, vast_dir)
 
-        # Annotate with image dimensions and edge distance; drop ones we can't size.
+        # Annotate with image metadata and computed distances; drop ones we
+        # cannot size (no useful row to display).
         results = []
         for path, x, y in matches:
-            dims = get_image_dimensions(path, vast_dir)
-            if dims is None:
+            meta = get_image_metadata(path, vast_dir)
+            if meta is None:
                 continue
-            nx, ny = dims
-            distance = int(round(min(x, y, nx - x, ny - y)))
+            nx, ny = meta['nx'], meta['ny']
+            edge = int(round(min(x, y, nx - x, ny - y)))
+            cx, cy = nx / 2.0, ny / 2.0
+            from_center = int(round(((x - cx) ** 2 + (y - cy) ** 2) ** 0.5))
             results.append({
                 'path': path,
                 'x': x, 'y': y,
                 'nx': nx, 'ny': ny,
-                'distance': distance,
+                'edge': edge,
+                'from_center': from_center,
+                'arcmin_str': meta['arcmin_str'],
+                'deg_str': meta['deg_str'],
+                'scale_x': meta['scale_x'],
+                'scale_y': meta['scale_y'],
             })
 
-        results.sort(key=lambda r: r['distance'], reverse=True)
+        # Best-centred first: smallest distance to image centre.
+        results.sort(key=lambda r: r['from_center'])
 
         for r in results:
-            r['png'] = make_thumbnail(
-                r['path'], ra, dec, out_dir_abs, vast_dir, thumb_pixels)
+            r['png_zoomin'] = make_zoomin_thumbnail(
+                r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
+                thumb_pixels, zoomin_pixels)
+            r['png_zoomout'] = make_zoomout_thumbnail(
+                r['path'], r['x'], r['y'], r['nx'], r['ny'],
+                out_dir_abs, vast_dir, thumb_pixels)
 
         # Build response page.
         print("Content-Type: text/html\n")
@@ -492,43 +595,70 @@ def main():
                   "results may be incomplete.</div>".format(SCAN_TIMEOUT_SECONDS))
 
         if not results:
-            print("<p>No reference fields cover this sky position.</p>")
+            print("<p>No reference images cover this sky position.</p>")
         else:
-            print("<p>{} reference field(s) cover this position, sorted from "
-                  "best-centred to nearest-edge:</p>".format(len(results)))
+            print("<p>{} reference image(s) cover this position, sorted by "
+                  "distance from image centre (best-centred first):</p>".format(
+                      len(results)))
             print("<table class='main'>")
             print("<tr><th>#</th><th>Reference image</th>"
-                  "<th>X (pix)</th><th>Y (pix)</th>"
-                  "<th>Distance from nearest edge (pix)</th>"
-                  "<th>Image size (pix)</th>"
-                  "<th>Thumbnail</th></tr>")
+                  "<th>X, Y (pix)</th>"
+                  "<th>From center (pix)</th>"
+                  "<th>Nearest edge (pix)</th>"
+                  "<th>Image size</th>"
+                  "<th>Scale (arcsec/pix)</th>"
+                  "<th>Zoom-in</th><th>Zoom-out</th></tr>")
             for i, r in enumerate(results, 1):
                 base = os.path.basename(r['path'])
-                if r['png']:
-                    img_url = '{}/{}/{}'.format(url_prefix, sub, r['png'])
-                    img_url_esc = html_escape(img_url)
-                    thumb_html = (
-                        "<a href='{u}' target='_blank'>"
-                        "<img src='{u}' alt='thumbnail of {b}' border='0'>"
-                        "</a>".format(u=img_url_esc, b=html_escape(base)))
+
+                def _img_cell(png_name, label):
+                    if not png_name:
+                        return "<i>unavailable</i>"
+                    url = '{}/{}/{}'.format(url_prefix, sub, png_name)
+                    url_esc = html_escape(url)
+                    return ("<a href='{u}' target='_blank'>"
+                            "<img src='{u}' alt='{l} of {b}' border='0'>"
+                            "</a>".format(u=url_esc, l=label,
+                                          b=html_escape(base)))
+
+                size_lines = []
+                if r['arcmin_str']:
+                    size_lines.append(html_escape(r['arcmin_str']))
+                if r['deg_str']:
+                    size_lines.append(html_escape(r['deg_str']))
+                size_lines.append('{}x{} pix'.format(r['nx'], r['ny']))
+                size_html = '<br>'.join(size_lines)
+
+                if r['scale_x'] is None:
+                    scale_html = '-'
+                elif (r['scale_y'] is not None
+                      and abs(r['scale_x'] - r['scale_y']) >= 0.005):
+                    scale_html = '{:.2f} / {:.2f}'.format(
+                        r['scale_x'], r['scale_y'])
                 else:
-                    thumb_html = "<i>thumbnail unavailable</i>"
+                    scale_html = '{:.2f}'.format(r['scale_x'])
+
                 print("<tr>"
                       "<td>{i}</td>"
                       "<td title='{full}'>{base}</td>"
-                      "<td>{x:.1f}</td>"
-                      "<td>{y:.1f}</td>"
-                      "<td>{d}</td>"
-                      "<td>{nx}x{ny}</td>"
-                      "<td>{t}</td>"
+                      "<td>{x:.1f}, {y:.1f}</td>"
+                      "<td>{c}</td>"
+                      "<td>{e}</td>"
+                      "<td>{s}</td>"
+                      "<td>{sc}</td>"
+                      "<td>{zi}</td>"
+                      "<td>{zo}</td>"
                       "</tr>".format(
                           i=i,
                           full=html_escape(r['path']),
                           base=html_escape(base),
                           x=r['x'], y=r['y'],
-                          d=r['distance'],
-                          nx=r['nx'], ny=r['ny'],
-                          t=thumb_html))
+                          c=r['from_center'],
+                          e=r['edge'],
+                          s=size_html,
+                          sc=scale_html,
+                          zi=_img_cell(r['png_zoomin'], 'zoom-in'),
+                          zo=_img_cell(r['png_zoomout'], 'zoom-out')))
             print("</table>")
 
         print("<br><br><a href='{}'>Search again</a>".format(
