@@ -615,14 +615,14 @@ def main():
                   "distance from image centre (best-centred first):</p>".format(
                       len(results)))
             print("<table class='main'>")
-            print("<tr><th>Field</th><th>#</th><th>Reference image</th>"
+            print("<tr><th>Field</th><th>Reference image</th>"
                   "<th>X, Y (pix)</th>"
                   "<th>From center (pix)</th>"
                   "<th>Nearest edge (pix)</th>"
                   "<th>Image size</th>"
                   "<th>Scale (arcsec/pix)</th>"
-                  "<th>Zoom-in</th><th>Zoom-out</th></tr>")
-            for i, r in enumerate(results, 1):
+                  "<th>Zoom-out</th><th>Zoom-in</th></tr>")
+            for r in results:
                 base = os.path.basename(r['path'])
 
                 def _img_cell(png_name, label):
@@ -657,18 +657,16 @@ def main():
                 field = field_name_from_fits(r['path'])
                 print("<tr>"
                       "<td><b>{f}</b></td>"
-                      "<td>{i}</td>"
                       "<td title='{full}'>{base}</td>"
                       "<td>{x:.1f}, {y:.1f}</td>"
                       "<td>{c}</td>"
                       "<td>{e}</td>"
                       "<td>{s}</td>"
                       "<td>{sc}</td>"
-                      "<td>{zi}</td>"
                       "<td>{zo}</td>"
+                      "<td>{zi}</td>"
                       "</tr>".format(
                           f=html_escape(field),
-                          i=i,
                           full=html_escape(r['path']),
                           base=html_escape(base),
                           x=r['x'], y=r['y'],
