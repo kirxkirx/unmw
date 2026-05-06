@@ -50,7 +50,8 @@ FOV_TIMEOUT_SECONDS = 30
 LOCK_DIR = '/tmp'
 TEMP_PARENT = 'uploads'              # mirrors upload.py's upload_dir
 TEMP_DIR_PREFIX = 'coord_search_'
-DEFAULT_THUMBNAIL_PIXELS = 128       # fallback if local_config.sh omits the var
+DEFAULT_THUMBNAIL_PIXELS = 256       # fallback for in-page thumbnail size
+DEFAULT_THUMBNAIL_HIRES_PIXELS = 512 # fallback for click-through hi-res size
 MIN_THUMBNAIL_PIXELS = 32
 MAX_THUMBNAIL_PIXELS = 4096
 MAX_RESULTS_TO_PROCESS = 200         # safety cap on matches per request
@@ -401,7 +402,7 @@ def zoomout_png_dims(nx, ny, thumb_pixels):
 
 
 def make_zoomout_thumbnail(fits_path, x, y, nx, ny, out_dir, vast_dir,
-                           thumb_pixels):
+                           thumb_pixels, suffix='zoomout'):
     """Full-frame view with marker at pixel (x, y). Requires pgfv.c edits.
 
     PNG dimensions follow source aspect ratio so the longer axis is
@@ -411,17 +412,17 @@ def make_zoomout_thumbnail(fits_path, x, y, nx, ny, out_dir, vast_dir,
     png_w, png_h = zoomout_png_dims(nx, ny, thumb_pixels)
     return _run_pgfv_tool(
         [fits2png, fits_path, '{:.3f}'.format(x), '{:.3f}'.format(y)],
-        out_dir, png_w, png_h, fits_path, 'zoomout')
+        out_dir, png_w, png_h, fits_path, suffix)
 
 
 def make_zoomin_thumbnail(fits_path, x, y, out_dir, vast_dir, thumb_pixels,
-                          zoomin_pixels):
+                          zoomin_pixels, suffix='zoomin'):
     """Square zoom-in centred on (x, y), 2N x 2N source pixels."""
     tool = os.path.join(vast_dir, 'util', 'make_finding_chart')
     return _run_pgfv_tool(
         [tool, '--width', str(zoomin_pixels), '--nolabels', '--',
          fits_path, '{:.3f}'.format(x), '{:.3f}'.format(y)],
-        out_dir, thumb_pixels, thumb_pixels, fits_path, 'zoomin')
+        out_dir, thumb_pixels, thumb_pixels, fits_path, suffix)
 
 
 # ---------- main ----------
@@ -477,12 +478,14 @@ def main():
             'VAST_REFERENCE_COPY',
             'URL_OF_DATA_PROCESSING_ROOT',
             'COORD_SEARCH_THUMBNAIL_PIXELS',
+            'COORD_SEARCH_THUMBNAIL_HIRES_PIXELS',
             'COORD_SEARCH_ZOOMIN_PIXELS',
         )
         ref_dir = cfg['REFERENCE_IMAGES'].strip()
         vast_dir = cfg['VAST_REFERENCE_COPY'].strip()
         url_prefix = cfg['URL_OF_DATA_PROCESSING_ROOT'].strip().rstrip('/')
         thumb_raw = cfg['COORD_SEARCH_THUMBNAIL_PIXELS'].strip()
+        hires_raw = cfg['COORD_SEARCH_THUMBNAIL_HIRES_PIXELS'].strip()
         zoomin_raw = cfg['COORD_SEARCH_ZOOMIN_PIXELS'].strip()
 
         try:
@@ -491,6 +494,15 @@ def main():
             thumb_pixels = DEFAULT_THUMBNAIL_PIXELS
         if thumb_pixels < MIN_THUMBNAIL_PIXELS or thumb_pixels > MAX_THUMBNAIL_PIXELS:
             thumb_pixels = DEFAULT_THUMBNAIL_PIXELS
+
+        try:
+            hires_pixels = int(hires_raw) if hires_raw else DEFAULT_THUMBNAIL_HIRES_PIXELS
+        except ValueError:
+            hires_pixels = DEFAULT_THUMBNAIL_HIRES_PIXELS
+        if hires_pixels < MIN_THUMBNAIL_PIXELS or hires_pixels > MAX_THUMBNAIL_PIXELS:
+            hires_pixels = DEFAULT_THUMBNAIL_HIRES_PIXELS
+        if hires_pixels < thumb_pixels:
+            hires_pixels = thumb_pixels
 
         try:
             zoomin_pixels = int(zoomin_raw) if zoomin_raw else DEFAULT_ZOOMIN_PIXELS
@@ -587,12 +599,20 @@ def main():
         results.sort(key=lambda r: r['from_center'])
 
         for r in results:
+            # Two PNGs per view: an in-page thumbnail and a higher-resolution
+            # version that opens when the user clicks the thumbnail.
             r['png_zoomin'] = make_zoomin_thumbnail(
                 r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
-                thumb_pixels, zoomin_pixels)
+                thumb_pixels, zoomin_pixels, suffix='zoomin')
+            r['png_zoomin_hires'] = make_zoomin_thumbnail(
+                r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
+                hires_pixels, zoomin_pixels, suffix='zoomin_hires')
             r['png_zoomout'] = make_zoomout_thumbnail(
                 r['path'], r['x'], r['y'], r['nx'], r['ny'],
-                out_dir_abs, vast_dir, thumb_pixels)
+                out_dir_abs, vast_dir, thumb_pixels, suffix='zoomout')
+            r['png_zoomout_hires'] = make_zoomout_thumbnail(
+                r['path'], r['x'], r['y'], r['nx'], r['ny'],
+                out_dir_abs, vast_dir, hires_pixels, suffix='zoomout_hires')
 
         # Build response page.
         print("Content-Type: text/html\n")
@@ -625,15 +645,20 @@ def main():
             for r in results:
                 base = os.path.basename(r['path'])
 
-                def _img_cell(png_name, label):
-                    if not png_name:
+                def _img_cell(thumb_name, hires_name, label):
+                    if not thumb_name:
                         return "<i>unavailable</i>"
-                    url = '{}/{}/{}'.format(url_prefix, sub, png_name)
-                    url_esc = html_escape(url)
-                    return ("<a href='{u}' target='_blank'>"
-                            "<img src='{u}' alt='{l} of {b}' border='0'>"
-                            "</a>".format(u=url_esc, l=label,
-                                          b=html_escape(base)))
+                    thumb_url = html_escape(
+                        '{}/{}/{}'.format(url_prefix, sub, thumb_name))
+                    # Click-through URL: hi-res if available, else fall back
+                    # to the same thumbnail so the link still works.
+                    target = hires_name if hires_name else thumb_name
+                    target_url = html_escape(
+                        '{}/{}/{}'.format(url_prefix, sub, target))
+                    return ("<a href='{tu}' target='_blank'>"
+                            "<img src='{su}' alt='{l} of {b}' border='0'>"
+                            "</a>".format(tu=target_url, su=thumb_url,
+                                          l=label, b=html_escape(base)))
 
                 size_lines = []
                 if r['arcmin_str']:
@@ -645,22 +670,34 @@ def main():
                 size_html = '<br>'.join(size_lines)
 
                 if r['scale_x'] is None and r['scale_y'] is None:
-                    scale_html = '-'
+                    mean_scale = None
                 elif r['scale_y'] is None:
-                    scale_html = '{:.2f}'.format(r['scale_x'])
+                    mean_scale = r['scale_x']
                 elif r['scale_x'] is None:
-                    scale_html = '{:.2f}'.format(r['scale_y'])
+                    mean_scale = r['scale_y']
                 else:
-                    scale_html = '{:.2f}'.format(
-                        (r['scale_x'] + r['scale_y']) / 2.0)
+                    mean_scale = (r['scale_x'] + r['scale_y']) / 2.0
+                scale_html = '-' if mean_scale is None else '{:.2f}'.format(mean_scale)
+
+                # Convert pixel distances to arcminutes using the mean scale
+                # (1 arcmin = 60 arcsec; mean_scale is in arcsec/pix).
+                if mean_scale is None:
+                    edge_html = '{}'.format(r['edge'])
+                    center_html = '{}'.format(r['from_center'])
+                else:
+                    edge_arcmin = r['edge'] * mean_scale / 60.0
+                    center_arcmin = r['from_center'] * mean_scale / 60.0
+                    edge_html = "{} ({:.1f}')".format(r['edge'], edge_arcmin)
+                    center_html = "{} ({:.1f}')".format(
+                        r['from_center'], center_arcmin)
 
                 field = field_name_from_fits(r['path'])
                 print("<tr>"
                       "<td><b>{f}</b></td>"
                       "<td title='{full}'>{base}</td>"
                       "<td>{x:.1f}, {y:.1f}</td>"
-                      "<td>{c}</td>"
-                      "<td>{e}</td>"
+                      "<td>{ch}</td>"
+                      "<td>{eh}</td>"
                       "<td>{s}</td>"
                       "<td>{sc}</td>"
                       "<td>{zo}</td>"
@@ -670,12 +707,14 @@ def main():
                           full=html_escape(r['path']),
                           base=html_escape(base),
                           x=r['x'], y=r['y'],
-                          c=r['from_center'],
-                          e=r['edge'],
+                          ch=center_html,
+                          eh=edge_html,
                           s=size_html,
                           sc=scale_html,
-                          zi=_img_cell(r['png_zoomin'], 'zoom-in'),
-                          zo=_img_cell(r['png_zoomout'], 'zoom-out')))
+                          zi=_img_cell(r['png_zoomin'],
+                                       r['png_zoomin_hires'], 'zoom-in'),
+                          zo=_img_cell(r['png_zoomout'],
+                                       r['png_zoomout_hires'], 'zoom-out')))
             print("</table>")
 
         print("<br><br><a href='{}'>Search again</a>".format(
