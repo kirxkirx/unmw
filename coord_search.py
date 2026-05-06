@@ -41,6 +41,7 @@ import string
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 
 # Code-level operational constants (not deployment-specific).
@@ -61,6 +62,9 @@ LIST_ALL_MAX_FILES = 2000            # safety cap on the "show all" listing
 LIST_ALL_TIMEOUT_SECONDS = 300       # wall-clock cap for the "show all" flow
 DEFAULT_FORM_PATH = '/unmw/coord_search.html'
 DEFAULT_ZOOMIN_PIXELS = 200          # half-width of zoom-in thumbnail in source pix
+DEFAULT_PARALLEL_WORKERS = 4         # threads rendering PNGs concurrently
+MIN_PARALLEL_WORKERS = 1
+MAX_PARALLEL_WORKERS = 32
 
 # Whitelist of characters allowed in the raw coordinate string.
 # Defends every later subprocess that takes the parsed values.
@@ -496,6 +500,7 @@ def render_thumbnail_link(thumb_name, hires_name, label, base, url_prefix, sub):
 
 def main():
     cgitb.enable()
+    request_start = time.time()
 
     # Make our cwd the directory containing this script, even if it was
     # reached via symlink (e.g. cgi-bin/unmw/coord_search.py -> ../../coord_search.py).
@@ -555,12 +560,14 @@ def main():
             'URL_OF_DATA_PROCESSING_ROOT',
             'COORD_SEARCH_THUMBNAIL_PIXELS',
             'COORD_SEARCH_ZOOMIN_PIXELS',
+            'COORD_SEARCH_PARALLEL_WORKERS',
         )
         ref_dir = cfg['REFERENCE_IMAGES'].strip()
         vast_dir = cfg['VAST_REFERENCE_COPY'].strip()
         url_prefix = cfg['URL_OF_DATA_PROCESSING_ROOT'].strip().rstrip('/')
         thumb_raw = cfg['COORD_SEARCH_THUMBNAIL_PIXELS'].strip()
         zoomin_raw = cfg['COORD_SEARCH_ZOOMIN_PIXELS'].strip()
+        workers_raw = cfg['COORD_SEARCH_PARALLEL_WORKERS'].strip()
 
         try:
             thumb_pixels = int(thumb_raw) if thumb_raw else DEFAULT_THUMBNAIL_PIXELS
@@ -580,6 +587,15 @@ def main():
             zoomin_pixels = DEFAULT_ZOOMIN_PIXELS
         if zoomin_pixels < 5:
             zoomin_pixels = DEFAULT_ZOOMIN_PIXELS
+
+        try:
+            parallel_workers = (int(workers_raw) if workers_raw
+                                else DEFAULT_PARALLEL_WORKERS)
+        except ValueError:
+            parallel_workers = DEFAULT_PARALLEL_WORKERS
+        if (parallel_workers < MIN_PARALLEL_WORKERS
+                or parallel_workers > MAX_PARALLEL_WORKERS):
+            parallel_workers = DEFAULT_PARALLEL_WORKERS
 
         if not ref_dir or not os.path.isdir(ref_dir):
             emit_message_page(
@@ -650,30 +666,47 @@ def main():
                 paths_truncated = False
 
             deadline = time.time() + LIST_ALL_TIMEOUT_SECONDS
-            timed_out = False
-            results = []
-            for path in fits_paths:
+
+            def _process_listall_entry(path):
+                """Per-FITS: get metadata, render preview + hi-res zoom-out.
+
+                Each thread owns one FITS file, so the two pgfv calls (which
+                both write '<basename>.png' to cwd before being renamed) do
+                not collide with other threads working on different files.
+                Sequential within the thread guarantees that 'preview' is
+                renamed before 'hires' overwrites it.
+                """
                 if time.time() > deadline:
-                    timed_out = True
-                    break
+                    return ('timeout', None)
                 meta = get_image_metadata(path, vast_dir)
                 if meta is None:
-                    continue
+                    return ('no_meta', None)
                 nx, ny = meta['nx'], meta['ny']
-                # Preview-only thumbnail (no marker, no hi-res), to keep the
-                # all-images flow tractable on directories with many fields.
-                png = make_zoomout_thumbnail(
+                png_preview = make_zoomout_thumbnail(
                     path, None, None, nx, ny,
                     out_dir_abs, vast_dir, thumb_pixels, suffix='zoomout')
-                results.append({
+                png_hires = make_zoomout_thumbnail(
+                    path, None, None, nx, ny,
+                    out_dir_abs, vast_dir, hires_pixels, suffix='zoomout_hires')
+                return ('ok', {
                     'path': path,
                     'nx': nx, 'ny': ny,
                     'arcmin_str': meta['arcmin_str'],
                     'deg_str': meta['deg_str'],
                     'scale_x': meta['scale_x'],
                     'scale_y': meta['scale_y'],
-                    'png_zoomout': png,
+                    'png_zoomout': png_preview,
+                    'png_zoomout_hires': png_hires,
                 })
+
+            timed_out = False
+            results = []
+            with ThreadPoolExecutor(max_workers=parallel_workers) as ex:
+                for status, row in ex.map(_process_listall_entry, fits_paths):
+                    if status == 'timeout':
+                        timed_out = True
+                    elif status == 'ok':
+                        results.append(row)
 
             results.sort(
                 key=lambda r: (field_name_from_fits(r['path']), r['path']))
@@ -711,10 +744,8 @@ def main():
                         r['arcmin_str'], r['deg_str'], r['nx'], r['ny'])
                     scale_html, _ = render_mean_scale(
                         r['scale_x'], r['scale_y'])
-                    # The all-images view does not produce a separate hi-res
-                    # PNG; clicking the thumbnail opens the same preview.
                     zo_cell = render_thumbnail_link(
-                        r['png_zoomout'], None, 'zoom-out',
+                        r['png_zoomout'], r['png_zoomout_hires'], 'zoom-out',
                         base, url_prefix, sub)
                     print("<tr>"
                           "<td><b>{f}</b></td>"
@@ -733,6 +764,9 @@ def main():
 
             print("<br><br><a href='{}'>Search again</a>".format(
                 html_escape(back_link_url())))
+            print("<p style='color: #888; font-size: 90%;'>"
+                  "Page generated in {:.1f} s.</p>".format(
+                      time.time() - request_start))
             print("</body></html>")
             return  # done with list-all flow
 
@@ -765,9 +799,15 @@ def main():
         # Best-centred first: smallest distance to image centre.
         results.sort(key=lambda r: r['from_center'])
 
-        for r in results:
-            # Two PNGs per view: an in-page thumbnail and a higher-resolution
-            # version that opens when the user clicks the thumbnail.
+        def _render_match(r):
+            """All four PNGs for one matched FITS, rendered sequentially.
+
+            Each thread owns one FITS file, so the four pgfv calls (which all
+            write '<basename>.png' to cwd before being renamed) cannot collide
+            with other threads working on different files. Sequential calls
+            within the thread guarantee that each rename completes before the
+            next call writes a new '<basename>.png'.
+            """
             r['png_zoomin'] = make_zoomin_thumbnail(
                 r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
                 thumb_pixels, zoomin_pixels, suffix='zoomin')
@@ -780,6 +820,13 @@ def main():
             r['png_zoomout_hires'] = make_zoomout_thumbnail(
                 r['path'], r['x'], r['y'], r['nx'], r['ny'],
                 out_dir_abs, vast_dir, hires_pixels, suffix='zoomout_hires')
+            return r
+
+        if results:
+            with ThreadPoolExecutor(max_workers=parallel_workers) as ex:
+                # ex.map mutates each r in place; consume the iterator to
+                # surface any exceptions and wait for completion.
+                list(ex.map(_render_match, results))
 
         # Build response page.
         print("Content-Type: text/html\n")
@@ -862,6 +909,9 @@ def main():
 
         print("<br><br><a href='{}'>Search again</a>".format(
             html_escape(back_link_url())))
+        print("<p style='color: #888; font-size: 90%;'>"
+              "Page generated in {:.1f} s.</p>".format(
+                  time.time() - request_start))
         print("</body></html>")
     finally:
         try:
