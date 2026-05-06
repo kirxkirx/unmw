@@ -598,6 +598,11 @@ def main():
         # Best-centred first: smallest distance to image centre.
         results.sort(key=lambda r: r['from_center'])
 
+        # Zoom-in click-through is 4x the in-page preview (more pixels are
+        # useful for looking at faint stars near the target). Zoom-out
+        # click-through follows the configured hires_pixels.
+        zoomin_hires_pixels = min(MAX_THUMBNAIL_PIXELS, thumb_pixels * 4)
+
         for r in results:
             # Two PNGs per view: an in-page thumbnail and a higher-resolution
             # version that opens when the user clicks the thumbnail.
@@ -606,7 +611,7 @@ def main():
                 thumb_pixels, zoomin_pixels, suffix='zoomin')
             r['png_zoomin_hires'] = make_zoomin_thumbnail(
                 r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
-                hires_pixels, zoomin_pixels, suffix='zoomin_hires')
+                zoomin_hires_pixels, zoomin_pixels, suffix='zoomin_hires')
             r['png_zoomout'] = make_zoomout_thumbnail(
                 r['path'], r['x'], r['y'], r['nx'], r['ny'],
                 out_dir_abs, vast_dir, thumb_pixels, suffix='zoomout')
@@ -637,8 +642,8 @@ def main():
             print("<table class='main'>")
             print("<tr><th>Field</th><th>Reference image</th>"
                   "<th>X, Y (pix)</th>"
-                  "<th>From center (pix)</th>"
-                  "<th>Nearest edge (pix)</th>"
+                  "<th>From center</th>"
+                  "<th>Nearest edge</th>"
                   "<th>Image size</th>"
                   "<th>Scale (arcsec/pix)</th>"
                   "<th>Zoom-out</th><th>Zoom-in</th></tr>")
@@ -679,17 +684,19 @@ def main():
                     mean_scale = (r['scale_x'] + r['scale_y']) / 2.0
                 scale_html = '-' if mean_scale is None else '{:.2f}'.format(mean_scale)
 
-                # Convert pixel distances to arcminutes using the mean scale
-                # (1 arcmin = 60 arcsec; mean_scale is in arcsec/pix).
-                if mean_scale is None:
-                    edge_html = '{}'.format(r['edge'])
-                    center_html = '{}'.format(r['from_center'])
-                else:
-                    edge_arcmin = r['edge'] * mean_scale / 60.0
-                    center_arcmin = r['from_center'] * mean_scale / 60.0
-                    edge_html = "{} ({:.1f}')".format(r['edge'], edge_arcmin)
-                    center_html = "{} ({:.1f}')".format(
-                        r['from_center'], center_arcmin)
+                # Convert pixel distances using the mean scale (arcsec/pix).
+                # Three lines per cell, matching the Image size column:
+                # arcminutes, degrees, pixels.
+                def _distance_cell(pix):
+                    if mean_scale is None:
+                        return '{} pix'.format(pix)
+                    arcmin = pix * mean_scale / 60.0
+                    deg = arcmin / 60.0
+                    return "{:.1f}'<br>{:.1f}&deg;<br>{} pix".format(
+                        arcmin, deg, pix)
+
+                edge_html = _distance_cell(r['edge'])
+                center_html = _distance_cell(r['from_center'])
 
                 field = field_name_from_fits(r['path'])
                 print("<tr>"
