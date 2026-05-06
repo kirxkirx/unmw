@@ -635,7 +635,7 @@ def main():
                   "<th>From center</th>"
                   "<th>Nearest edge</th>"
                   "<th>Image size</th>"
-                  "<th>Scale (arcsec/pix)</th>"
+                  "<th>Scale (&quot;/pix)</th>"
                   "<th>Zoom-out</th><th>Zoom-in</th></tr>")
             for r in results:
                 base = os.path.basename(r['path'])
