@@ -68,6 +68,21 @@ def html_escape(s):
     return html.escape(str(s), quote=True)
 
 
+def field_name_from_fits(path):
+    """Extract the NMW field name from a reference FITS basename.
+
+    Mirrors util/transients/transient_factory_test31.sh:1423 -- strip an
+    optional 'wcs_fd_' / 'wcs_' / 'fd_' calibration-status prefix, then take
+    everything before the first underscore.
+    """
+    base = os.path.basename(path)
+    for prefix in ('wcs_fd_', 'wcs_', 'fd_'):
+        if base.startswith(prefix):
+            base = base[len(prefix):]
+            break
+    return base.split('_', 1)[0]
+
+
 _PAGE_CSS = """<style type="text/css">
 body { color: #000; background: #fff;
  font-family: arial, helvetica, sans-serif;
@@ -320,7 +335,11 @@ def get_image_metadata(fits_path, vast_dir):
 
     deg_m = re.search(r'(\d+\.?\d*)\s*\(deg\)\s*x\s*(\d+\.?\d*)\s*\(deg\)', out)
     if deg_m:
-        info['deg_str'] = '{}degx{}deg'.format(deg_m.group(1), deg_m.group(2))
+        # Store as ready-to-render HTML using the &deg; entity (CLAUDE.md
+        # forbids non-ASCII source). Numeric captures are \d+\.?\d* so it is
+        # safe to splice them into HTML without further escaping.
+        info['deg_str'] = '{}&deg;x{}&deg;'.format(
+            deg_m.group(1), deg_m.group(2))
 
     scale_m = re.search(
         r'(\d+\.?\d*)"/pix along the X axis and (\d+\.?\d*)"/pix along the Y axis',
@@ -372,17 +391,12 @@ def _run_pgfv_tool(argv, out_dir, png_w, png_h, fits_path, suffix):
 def zoomout_png_dims(nx, ny, thumb_pixels):
     """PNG dimensions for the zoom-out thumbnail.
 
-    The zoom-in PNG is square (thumb_pixels x thumb_pixels). To keep both
-    thumbnails the same length along at least one axis, the zoom-out PNG
-    matches the source image aspect ratio with the longer axis equal to
-    thumb_pixels.
+    Height is fixed to thumb_pixels so zoom-in and zoom-out line up
+    vertically when shown side-by-side in the results table; the width
+    follows the source image aspect ratio.
     """
-    if nx >= ny:
-        png_w = thumb_pixels
-        png_h = max(1, int(round(thumb_pixels * ny / float(nx))))
-    else:
-        png_h = thumb_pixels
-        png_w = max(1, int(round(thumb_pixels * nx / float(ny))))
+    png_h = thumb_pixels
+    png_w = max(1, int(round(thumb_pixels * nx / float(ny))))
     return png_w, png_h
 
 
@@ -601,7 +615,7 @@ def main():
                   "distance from image centre (best-centred first):</p>".format(
                       len(results)))
             print("<table class='main'>")
-            print("<tr><th>#</th><th>Reference image</th>"
+            print("<tr><th>Field</th><th>#</th><th>Reference image</th>"
                   "<th>X, Y (pix)</th>"
                   "<th>From center (pix)</th>"
                   "<th>Nearest edge (pix)</th>"
@@ -625,20 +639,24 @@ def main():
                 if r['arcmin_str']:
                     size_lines.append(html_escape(r['arcmin_str']))
                 if r['deg_str']:
-                    size_lines.append(html_escape(r['deg_str']))
+                    # Pre-rendered HTML with &deg; entity, do not re-escape.
+                    size_lines.append(r['deg_str'])
                 size_lines.append('{}x{} pix'.format(r['nx'], r['ny']))
                 size_html = '<br>'.join(size_lines)
 
-                if r['scale_x'] is None:
+                if r['scale_x'] is None and r['scale_y'] is None:
                     scale_html = '-'
-                elif (r['scale_y'] is not None
-                      and abs(r['scale_x'] - r['scale_y']) >= 0.005):
-                    scale_html = '{:.2f} / {:.2f}'.format(
-                        r['scale_x'], r['scale_y'])
-                else:
+                elif r['scale_y'] is None:
                     scale_html = '{:.2f}'.format(r['scale_x'])
+                elif r['scale_x'] is None:
+                    scale_html = '{:.2f}'.format(r['scale_y'])
+                else:
+                    scale_html = '{:.2f}'.format(
+                        (r['scale_x'] + r['scale_y']) / 2.0)
 
+                field = field_name_from_fits(r['path'])
                 print("<tr>"
+                      "<td><b>{f}</b></td>"
                       "<td>{i}</td>"
                       "<td title='{full}'>{base}</td>"
                       "<td>{x:.1f}, {y:.1f}</td>"
@@ -649,6 +667,7 @@ def main():
                       "<td>{zi}</td>"
                       "<td>{zo}</td>"
                       "</tr>".format(
+                          f=html_escape(field),
                           i=i,
                           full=html_escape(r['path']),
                           base=html_escape(base),
