@@ -62,7 +62,7 @@ LIST_ALL_MAX_FILES = 2000            # safety cap on the "show all" listing
 LIST_ALL_TIMEOUT_SECONDS = 300       # wall-clock cap for the "show all" flow
 DEFAULT_FORM_PATH = '/unmw/coord_search.html'
 DEFAULT_ZOOMIN_PIXELS = 200          # half-width of zoom-in thumbnail in source pix
-DEFAULT_PARALLEL_WORKERS = 4         # threads rendering PNGs concurrently
+DEFAULT_PARALLEL_WORKERS = 1         # threads rendering PNGs concurrently
 MIN_PARALLEL_WORKERS = 1
 MAX_PARALLEL_WORKERS = 32
 
