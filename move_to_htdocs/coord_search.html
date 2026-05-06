@@ -28,15 +28,44 @@ a:hover {color: #55f; text-decoration: underline}
 <CENTER>
 <h2>Find fields covering a sky position</h2><br>
 
-<form action="../cgi-bin/unmw/coord_search.py" method="post">
+<form id="coord-search-form" action="../cgi-bin/unmw/coord_search.py" method="post">
 <TABLE width="750">
 <tr><td>Coordinates (R.A. Dec., J2000):</td>
     <td><input type="text" name="coords" size="40" placeholder="17:45:37.199 -28:56:10.22"></td></tr>
-<tr><td></td><td><input type="submit" value="Search"></td></tr>
+<tr><td></td><td>
+  <input type="submit" id="coord-search-button" value="Search">
+  <span id="coord-search-status" style="margin-left: 1em; color: #888; visibility: hidden;">Working...</span>
+</td></tr>
 <tr><td colspan=2><hr></td></tr>
 </TABLE>
 </form>
 </CENTER>
+
+<script type="text/javascript">
+(function () {
+  var form = document.getElementById('coord-search-form');
+  var button = document.getElementById('coord-search-button');
+  var status = document.getElementById('coord-search-status');
+
+  function reset() {
+    button.disabled = false;
+    status.style.visibility = 'hidden';
+  }
+
+  form.addEventListener('submit', function () {
+    // Disable on submit so impatient double-clicks do not trigger a second
+    // search. Browsers continue with the in-flight submission even though
+    // the button is now disabled.
+    button.disabled = true;
+    status.style.visibility = 'visible';
+  });
+
+  // pageshow fires on every initial load AND when the page is restored from
+  // the back/forward cache, so the button is re-enabled and the status text
+  // is hidden if the user comes back via the back button.
+  window.addEventListener('pageshow', reset);
+})();
+</script>
 <br>
 The tool runs <span class="code">sky2xy</span> on every reference image and lists the
 fields covering the requested position, with pixel coordinates, distance to the nearest
