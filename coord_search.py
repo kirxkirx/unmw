@@ -40,6 +40,7 @@ import re
 import string
 import subprocess
 import sys
+import time
 
 
 # Code-level operational constants (not deployment-specific).
@@ -56,6 +57,7 @@ HIRES_THUMBNAIL_MULTIPLIER = 4       # click-through PNG is this many times
 MIN_THUMBNAIL_PIXELS = 32
 MAX_THUMBNAIL_PIXELS = 4096
 MAX_RESULTS_TO_PROCESS = 200         # safety cap on matches per request
+LIST_ALL_TIMEOUT_SECONDS = 300       # wall-clock cap for the "show all" flow
 DEFAULT_FORM_PATH = '/unmw/coord_search.html'
 DEFAULT_ZOOMIN_PIXELS = 200          # half-width of zoom-in thumbnail in source pix
 
@@ -404,16 +406,19 @@ def zoomout_png_dims(nx, ny, thumb_pixels):
 
 def make_zoomout_thumbnail(fits_path, x, y, nx, ny, out_dir, vast_dir,
                            thumb_pixels, suffix='zoomout'):
-    """Full-frame view with marker at pixel (x, y). Requires pgfv.c edits.
+    """Full-frame view of the FITS image. If x and y are not None, draws a
+    marker at pixel (x, y) (requires the pgfv.c edits). Pass x=y=None to
+    render a plain full-frame preview with no marker.
 
     PNG dimensions follow source aspect ratio so the longer axis is
     thumb_pixels, matching the zoom-in's axes.
     """
     fits2png = os.path.join(vast_dir, 'util', 'fits2png')
     png_w, png_h = zoomout_png_dims(nx, ny, thumb_pixels)
-    return _run_pgfv_tool(
-        [fits2png, fits_path, '{:.3f}'.format(x), '{:.3f}'.format(y)],
-        out_dir, png_w, png_h, fits_path, suffix)
+    args = [fits2png, fits_path]
+    if x is not None and y is not None:
+        args.extend(['{:.3f}'.format(x), '{:.3f}'.format(y)])
+    return _run_pgfv_tool(args, out_dir, png_w, png_h, fits_path, suffix)
 
 
 def make_zoomin_thumbnail(fits_path, x, y, out_dir, vast_dir, thumb_pixels,
@@ -424,6 +429,66 @@ def make_zoomin_thumbnail(fits_path, x, y, out_dir, vast_dir, thumb_pixels,
         [tool, '--width', str(zoomin_pixels), '--nolabels', '--',
          fits_path, '{:.3f}'.format(x), '{:.3f}'.format(y)],
         out_dir, thumb_pixels, thumb_pixels, fits_path, suffix)
+
+
+def list_fits_files(ref_dir):
+    """Return a sorted list of absolute paths to FITS files in ref_dir.
+
+    Only top-level files (no recursion) with a recognised FITS extension are
+    returned, matching the convention of run_sky2xy_scan.
+    """
+    paths = []
+    try:
+        entries = os.listdir(ref_dir)
+    except OSError:
+        return paths
+    for name in entries:
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in ('.fits', '.fit', '.fts'):
+            continue
+        full = os.path.join(ref_dir, name)
+        if os.path.isfile(full):
+            paths.append(full)
+    paths.sort()
+    return paths
+
+
+def render_image_size(arcmin_str, deg_str, nx, ny):
+    """Three-line HTML for the Image size cell."""
+    lines = []
+    if arcmin_str:
+        lines.append(html_escape(arcmin_str))
+    if deg_str:
+        # Already pre-rendered HTML with the &deg; entity.
+        lines.append(deg_str)
+    lines.append('{}x{} pix'.format(nx, ny))
+    return '<br>'.join(lines)
+
+
+def render_mean_scale(scale_x, scale_y):
+    """Returns (formatted_html, mean_scale_value_or_None)."""
+    if scale_x is None and scale_y is None:
+        return '-', None
+    if scale_y is None:
+        m = scale_x
+    elif scale_x is None:
+        m = scale_y
+    else:
+        m = (scale_x + scale_y) / 2.0
+    return '{:.2f}'.format(m), m
+
+
+def render_thumbnail_link(thumb_name, hires_name, label, base, url_prefix, sub):
+    """Anchor+image HTML cell for a thumbnail, opening the hi-res on click."""
+    if not thumb_name:
+        return "<i>unavailable</i>"
+    thumb_url = html_escape('{}/{}/{}'.format(url_prefix, sub, thumb_name))
+    target = hires_name if hires_name else thumb_name
+    target_url = html_escape('{}/{}/{}'.format(url_prefix, sub, target))
+    return ("<a href='{tu}' target='_blank'>"
+            "<img src='{su}' alt='{l} of {b}' border='0'>"
+            "</a>".format(tu=target_url, su=thumb_url, l=label,
+                          b=html_escape(base)))
 
 
 # ---------- main ----------
@@ -447,20 +512,28 @@ def main():
         return
 
     form = cgi.FieldStorage()
-    raw_coords = form.getfirst('coords', '') or ''
-    raw_coords = raw_coords.strip()
 
-    try:
-        ra, dec = parse_coordinates(raw_coords)
-    except ValueError as err:
-        emit_message_page(
-            "Invalid coordinates",
-            "<p>Could not parse coordinates: <b>{}</b></p>"
-            "<p>You typed: <span class='code'>{}</span></p>"
-            "<p>Please use one of the accepted formats and try again.</p>".format(
-                html_escape(err), html_escape(raw_coords)),
-        )
-        return
+    # The landing-page form has two submit buttons: "submit_search" (the
+    # default coord-search flow) and "submit_list_all" (catalogue mode).
+    # Whichever button the user clicks supplies its name in the POST.
+    list_all_mode = form.getfirst('submit_list_all') is not None
+
+    if list_all_mode:
+        ra = dec = None
+        raw_coords = ''
+    else:
+        raw_coords = (form.getfirst('coords', '') or '').strip()
+        try:
+            ra, dec = parse_coordinates(raw_coords)
+        except ValueError as err:
+            emit_message_page(
+                "Invalid coordinates",
+                "<p>Could not parse coordinates: <b>{}</b></p>"
+                "<p>You typed: <span class='code'>{}</span></p>"
+                "<p>Please use one of the accepted formats and try again.</p>".format(
+                    html_escape(err), html_escape(raw_coords)),
+            )
+            return
 
     slot = acquire_concurrency_slot()
     if slot is None:
@@ -565,6 +638,103 @@ def main():
             return
         out_dir_abs = os.path.abspath(out_dir)
 
+        if list_all_mode:
+            # ---- Catalogue mode: list every WCS-calibrated reference image.
+            fits_paths = list_fits_files(ref_dir)
+            if len(fits_paths) > MAX_RESULTS_TO_PROCESS:
+                fits_paths = fits_paths[:MAX_RESULTS_TO_PROCESS]
+                paths_truncated = True
+            else:
+                paths_truncated = False
+
+            deadline = time.time() + LIST_ALL_TIMEOUT_SECONDS
+            timed_out = False
+            results = []
+            for path in fits_paths:
+                if time.time() > deadline:
+                    timed_out = True
+                    break
+                meta = get_image_metadata(path, vast_dir)
+                if meta is None:
+                    continue
+                nx, ny = meta['nx'], meta['ny']
+                # Preview-only thumbnail (no marker, no hi-res), to keep the
+                # all-images flow tractable on directories with many fields.
+                png = make_zoomout_thumbnail(
+                    path, None, None, nx, ny,
+                    out_dir_abs, vast_dir, thumb_pixels, suffix='zoomout')
+                results.append({
+                    'path': path,
+                    'nx': nx, 'ny': ny,
+                    'arcmin_str': meta['arcmin_str'],
+                    'deg_str': meta['deg_str'],
+                    'scale_x': meta['scale_x'],
+                    'scale_y': meta['scale_y'],
+                    'png_zoomout': png,
+                })
+
+            results.sort(
+                key=lambda r: (field_name_from_fits(r['path']), r['path']))
+
+            print("Content-Type: text/html\n")
+            print("<html><head><title>All reference images</title>")
+            print(_PAGE_CSS)
+            print("</head><body>")
+            print("<h2>All reference images</h2>")
+            print("<p>{} reference image(s) listed from "
+                  "<span class='code'>{}</span></p>".format(
+                      len(results), html_escape(ref_dir)))
+            if paths_truncated:
+                print("<div class='notice'>Reference image directory contains "
+                      "more than {} files; only the first {} (alphabetical) "
+                      "are listed.</div>".format(
+                          MAX_RESULTS_TO_PROCESS, MAX_RESULTS_TO_PROCESS))
+            if timed_out:
+                print("<div class='notice'>Listing stopped after {} s; "
+                      "results may be incomplete.</div>".format(
+                          LIST_ALL_TIMEOUT_SECONDS))
+
+            if not results:
+                print("<p>No WCS-calibrated reference images found.</p>")
+            else:
+                print("<table class='main'>")
+                print("<tr><th>Field</th><th>Reference image</th>"
+                      "<th>Image size</th>"
+                      "<th>Scale (&quot;/pix)</th>"
+                      "<th>Zoom-out</th></tr>")
+                for r in results:
+                    base = os.path.basename(r['path'])
+                    field = field_name_from_fits(r['path'])
+                    size_html = render_image_size(
+                        r['arcmin_str'], r['deg_str'], r['nx'], r['ny'])
+                    scale_html, _ = render_mean_scale(
+                        r['scale_x'], r['scale_y'])
+                    # The all-images view does not produce a separate hi-res
+                    # PNG; clicking the thumbnail opens the same preview.
+                    zo_cell = render_thumbnail_link(
+                        r['png_zoomout'], None, 'zoom-out',
+                        base, url_prefix, sub)
+                    print("<tr>"
+                          "<td><b>{f}</b></td>"
+                          "<td title='{full}'>{base}</td>"
+                          "<td>{s}</td>"
+                          "<td>{sc}</td>"
+                          "<td>{zo}</td>"
+                          "</tr>".format(
+                              f=html_escape(field),
+                              full=html_escape(r['path']),
+                              base=html_escape(base),
+                              s=size_html,
+                              sc=scale_html,
+                              zo=zo_cell))
+                print("</table>")
+
+            print("<br><br><a href='{}'>Search again</a>".format(
+                html_escape(back_link_url())))
+            print("</body></html>")
+            return  # done with list-all flow
+
+        # ---- Coord-search mode (default).
         matches, truncated = run_sky2xy_scan(ref_dir, ra, dec, vast_dir)
 
         # Annotate with image metadata and computed distances; drop ones we
@@ -639,40 +809,10 @@ def main():
                   "<th>Zoom-out</th><th>Zoom-in</th></tr>")
             for r in results:
                 base = os.path.basename(r['path'])
-
-                def _img_cell(thumb_name, hires_name, label):
-                    if not thumb_name:
-                        return "<i>unavailable</i>"
-                    thumb_url = html_escape(
-                        '{}/{}/{}'.format(url_prefix, sub, thumb_name))
-                    # Click-through URL: hi-res if available, else fall back
-                    # to the same thumbnail so the link still works.
-                    target = hires_name if hires_name else thumb_name
-                    target_url = html_escape(
-                        '{}/{}/{}'.format(url_prefix, sub, target))
-                    return ("<a href='{tu}' target='_blank'>"
-                            "<img src='{su}' alt='{l} of {b}' border='0'>"
-                            "</a>".format(tu=target_url, su=thumb_url,
-                                          l=label, b=html_escape(base)))
-
-                size_lines = []
-                if r['arcmin_str']:
-                    size_lines.append(html_escape(r['arcmin_str']))
-                if r['deg_str']:
-                    # Pre-rendered HTML with &deg; entity, do not re-escape.
-                    size_lines.append(r['deg_str'])
-                size_lines.append('{}x{} pix'.format(r['nx'], r['ny']))
-                size_html = '<br>'.join(size_lines)
-
-                if r['scale_x'] is None and r['scale_y'] is None:
-                    mean_scale = None
-                elif r['scale_y'] is None:
-                    mean_scale = r['scale_x']
-                elif r['scale_x'] is None:
-                    mean_scale = r['scale_y']
-                else:
-                    mean_scale = (r['scale_x'] + r['scale_y']) / 2.0
-                scale_html = '-' if mean_scale is None else '{:.2f}'.format(mean_scale)
+                size_html = render_image_size(
+                    r['arcmin_str'], r['deg_str'], r['nx'], r['ny'])
+                scale_html, mean_scale = render_mean_scale(
+                    r['scale_x'], r['scale_y'])
 
                 # Convert pixel distances using the mean scale (arcsec/pix).
                 # Three lines per cell, matching the Image size column:
@@ -689,6 +829,12 @@ def main():
                 center_html = _distance_cell(r['from_center'])
 
                 field = field_name_from_fits(r['path'])
+                zi_cell = render_thumbnail_link(
+                    r['png_zoomin'], r['png_zoomin_hires'], 'zoom-in',
+                    base, url_prefix, sub)
+                zo_cell = render_thumbnail_link(
+                    r['png_zoomout'], r['png_zoomout_hires'], 'zoom-out',
+                    base, url_prefix, sub)
                 print("<tr>"
                       "<td><b>{f}</b></td>"
                       "<td title='{full}'>{base}</td>"
@@ -708,10 +854,8 @@ def main():
                           eh=edge_html,
                           s=size_html,
                           sc=scale_html,
-                          zi=_img_cell(r['png_zoomin'],
-                                       r['png_zoomin_hires'], 'zoom-in'),
-                          zo=_img_cell(r['png_zoomout'],
-                                       r['png_zoomout_hires'], 'zoom-out')))
+                          zi=zi_cell,
+                          zo=zo_cell))
             print("</table>")
 
         print("<br><br><a href='{}'>Search again</a>".format(
