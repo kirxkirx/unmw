@@ -19,8 +19,8 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # Number of parallel worker threads coord_search.py uses to render PNGs.
 # Each worker takes one FITS file and produces all of its plots
 # sequentially, so workers do not collide on the shared output filename.
-# Default 8; lower it on small servers if memory or CPU is a concern.
-#export COORD_SEARCH_PARALLEL_WORKERS=8
+# Default 16; lower it on small servers if memory or CPU is a concern.
+#export COORD_SEARCH_PARALLEL_WORKERS=16
 
 # Note that $HOME is typically not defined in CGI environment, so use absolute paths!
 

@@ -22,32 +22,70 @@ a:link {color: #55f; text-decoration: none}
 a:visited {color: #33f; text-decoration: none}
 a:active {color: #55f; text-decoration: none}
 a:hover {color: #55f; text-decoration: underline}
+
+.section { max-width: 720px; margin: 0 auto; padding-top: 6pt; }
+.section p { text-indent: 0; }
+.formats { margin-left: 8pt; }
+.working { margin-left: 1em; color: #888; visibility: hidden; }
+.secondary { color: #444; }
+hr.break { max-width: 720px; margin: 18pt auto; }
 </style>
 </head>
 
-<CENTER>
-<h2>Find fields covering a sky position</h2><br>
+<center>
+<h2>Find fields covering a sky position</h2>
+</center>
 
 <form id="coord-search-form" action="../cgi-bin/unmw/coord_search.py" method="post">
 <input type="hidden" name="action" id="coord-action" value="search">
-<TABLE width="750">
-<tr><td>Coordinates (R.A. Dec., J2000):</td>
-    <td><input type="text" name="coords" size="40" placeholder="17:45:37.199 -28:56:10.22"></td></tr>
-<tr><td></td><td>
-  <input type="submit" id="coord-search-button" value="Search">
-</td></tr>
-<tr><td colspan=2><hr></td></tr>
-<tr><td colspan=2 style="text-align: center; padding-top: 6pt; padding-bottom: 6pt;">
-  <span style="color: #666;">or browse the catalogue without specifying coordinates:</span>
-  &nbsp;&nbsp;
-  <input type="submit" id="coord-list-all-button" value="Show all reference images">
-</td></tr>
-<tr><td colspan=2 style="text-align: center;">
-  <span id="coord-search-status" style="color: #888; visibility: hidden;">Working...</span>
-</td></tr>
-</TABLE>
+
+<!-- Primary action: coordinate search -->
+<div class="section">
+<p>Enter J2000 sky coordinates to find every reference image that covers
+that position. Results show, for each matching image, the pixel position
+of the target, the distance to the image centre and to the nearest edge,
+and small zoom-in / zoom-out thumbnails so you can see at a glance
+whether the target falls near the centre of a field or close to its
+edge.</p>
+
+<table style="margin: 0 auto; border-spacing: 5pt;">
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec., J2000):</td>
+  <td style="padding: 0;">
+    <input type="text" name="coords" size="36" placeholder="17:45:37.199 -28:56:10.22">
+    <input type="submit" id="coord-search-button" value="Search">
+    <span id="coord-working-search" class="working">Working...</span>
+  </td>
+</tr>
+</table>
+
+<p class="formats">
+Accepted coordinate formats:
+<ul>
+<li>Sexagesimal with colons: <span class="code">17:45:37.199 -28:56:10.22</span></li>
+<li>Sexagesimal with spaces: <span class="code">17 45 37.199 -28 56 10.22</span></li>
+<li>Decimal degrees: <span class="code">266.4050 -28.9362</span></li>
+</ul>
+The Dec. sign may be <span class="code">+</span>, <span class="code">-</span>, or omitted for positive Dec.
+</p>
+</div>
+
+<hr class="break">
+
+<!-- Secondary action: browse all reference images -->
+<div class="section" style="text-align: center;">
+<p class="secondary" style="text-align: center;">
+No coordinates handy? You can also list every reference image
+(field name, image size, scale, full-frame thumbnail) without
+specifying a position:
+</p>
+<p style="text-align: center;">
+<input type="submit" id="coord-list-all-button" value="Show all reference images">
+<span id="coord-working-listall" class="working">Working...</span>
+</p>
+</div>
+
 </form>
-</CENTER>
 
 <script type="text/javascript">
 (function () {
@@ -56,7 +94,10 @@ a:hover {color: #55f; text-decoration: underline}
   var searchButton = document.getElementById('coord-search-button');
   var listAllButton = document.getElementById('coord-list-all-button');
   var buttons = [searchButton, listAllButton];
-  var status = document.getElementById('coord-search-status');
+  var workingSpans = [
+    document.getElementById('coord-working-search'),
+    document.getElementById('coord-working-listall')
+  ];
 
   // Capture which button was clicked into the hidden input. Using a hidden
   // field instead of submit-button name/value avoids browser quirks where
@@ -71,15 +112,18 @@ a:hover {color: #55f; text-decoration: underline}
 
   function reset() {
     for (var i = 0; i < buttons.length; i++) buttons[i].disabled = false;
-    status.style.visibility = 'hidden';
+    for (var j = 0; j < workingSpans.length; j++) {
+      workingSpans[j].style.visibility = 'hidden';
+    }
   }
 
   form.addEventListener('submit', function () {
-    // Disable on submit so impatient double-clicks do not trigger a second
-    // request. Browsers continue with the in-flight submission even though
-    // the buttons are now disabled.
+    // Disable both buttons on submit so impatient double-clicks do not
+    // trigger a second request. Show the Working... text next to whichever
+    // button corresponds to the chosen action.
     for (var i = 0; i < buttons.length; i++) buttons[i].disabled = true;
-    status.style.visibility = 'visible';
+    var which = actionField.value === 'list_all' ? 1 : 0;
+    workingSpans[which].style.visibility = 'visible';
   });
 
   // pageshow fires on every initial load AND when the page is restored from
@@ -88,20 +132,5 @@ a:hover {color: #55f; text-decoration: underline}
   window.addEventListener('pageshow', reset);
 })();
 </script>
-<br>
-The tool runs <span class="code">sky2xy</span> on every reference image and lists the
-fields covering the requested position, with pixel coordinates, distance to the nearest
-image edge, and a small thumbnail showing the position so you can judge whether the
-target is near the centre of a field or close to its edge.
-<br><br>
-
-Accepted coordinate formats:
-<ul>
-<li>Sexagesimal with colons: <span class="code">17:45:37.199 -28:56:10.22</span></li>
-<li>Sexagesimal with spaces: <span class="code">17 45 37.199 -28 56 10.22</span></li>
-<li>Decimal degrees: <span class="code">266.4050 -28.9362</span></li>
-</ul>
-The Dec. sign may be <span class="code">+</span>, <span class="code">-</span>, or omitted for positive Dec.
-<br>
 
 </html>
