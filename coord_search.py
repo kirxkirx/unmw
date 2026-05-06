@@ -56,7 +56,8 @@ HIRES_THUMBNAIL_MULTIPLIER = 4       # click-through PNG is this many times
                                      # bigger than the in-page thumbnail
 MIN_THUMBNAIL_PIXELS = 32
 MAX_THUMBNAIL_PIXELS = 4096
-MAX_RESULTS_TO_PROCESS = 200         # safety cap on matches per request
+MAX_RESULTS_TO_PROCESS = 200         # safety cap on coord-search matches
+LIST_ALL_MAX_FILES = 2000            # safety cap on the "show all" listing
 LIST_ALL_TIMEOUT_SECONDS = 300       # wall-clock cap for the "show all" flow
 DEFAULT_FORM_PATH = '/unmw/coord_search.html'
 DEFAULT_ZOOMIN_PIXELS = 200          # half-width of zoom-in thumbnail in source pix
@@ -642,8 +643,8 @@ def main():
         if list_all_mode:
             # ---- Catalogue mode: list every WCS-calibrated reference image.
             fits_paths = list_fits_files(ref_dir)
-            if len(fits_paths) > MAX_RESULTS_TO_PROCESS:
-                fits_paths = fits_paths[:MAX_RESULTS_TO_PROCESS]
+            if len(fits_paths) > LIST_ALL_MAX_FILES:
+                fits_paths = fits_paths[:LIST_ALL_MAX_FILES]
                 paths_truncated = True
             else:
                 paths_truncated = False
@@ -689,7 +690,7 @@ def main():
                 print("<div class='notice'>Reference image directory contains "
                       "more than {} files; only the first {} (alphabetical) "
                       "are listed.</div>".format(
-                          MAX_RESULTS_TO_PROCESS, MAX_RESULTS_TO_PROCESS))
+                          LIST_ALL_MAX_FILES, LIST_ALL_MAX_FILES))
             if timed_out:
                 print("<div class='notice'>Listing stopped after {} s; "
                       "results may be incomplete.</div>".format(
