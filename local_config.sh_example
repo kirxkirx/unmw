@@ -8,11 +8,8 @@ export URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
 export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 
 # Thumbnail (in-page) width/height in pixels for the coord_search.py CGI tool.
+# The click-through hi-res image is fixed at 4x this value.
 #export COORD_SEARCH_THUMBNAIL_PIXELS=256
-
-# Hi-res (click-through) width/height in pixels for the coord_search.py CGI
-# tool. The thumbnail in the table opens this larger image when clicked.
-#export COORD_SEARCH_THUMBNAIL_HIRES_PIXELS=512
 
 # Half-width in source-image pixels of the zoom-in thumbnail produced by
 # coord_search.py (passed to util/make_finding_chart --width). The output

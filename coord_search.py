@@ -51,7 +51,8 @@ LOCK_DIR = '/tmp'
 TEMP_PARENT = 'uploads'              # mirrors upload.py's upload_dir
 TEMP_DIR_PREFIX = 'coord_search_'
 DEFAULT_THUMBNAIL_PIXELS = 256       # fallback for in-page thumbnail size
-DEFAULT_THUMBNAIL_HIRES_PIXELS = 512 # fallback for click-through hi-res size
+HIRES_THUMBNAIL_MULTIPLIER = 4       # click-through PNG is this many times
+                                     # bigger than the in-page thumbnail
 MIN_THUMBNAIL_PIXELS = 32
 MAX_THUMBNAIL_PIXELS = 4096
 MAX_RESULTS_TO_PROCESS = 200         # safety cap on matches per request
@@ -478,14 +479,12 @@ def main():
             'VAST_REFERENCE_COPY',
             'URL_OF_DATA_PROCESSING_ROOT',
             'COORD_SEARCH_THUMBNAIL_PIXELS',
-            'COORD_SEARCH_THUMBNAIL_HIRES_PIXELS',
             'COORD_SEARCH_ZOOMIN_PIXELS',
         )
         ref_dir = cfg['REFERENCE_IMAGES'].strip()
         vast_dir = cfg['VAST_REFERENCE_COPY'].strip()
         url_prefix = cfg['URL_OF_DATA_PROCESSING_ROOT'].strip().rstrip('/')
         thumb_raw = cfg['COORD_SEARCH_THUMBNAIL_PIXELS'].strip()
-        hires_raw = cfg['COORD_SEARCH_THUMBNAIL_HIRES_PIXELS'].strip()
         zoomin_raw = cfg['COORD_SEARCH_ZOOMIN_PIXELS'].strip()
 
         try:
@@ -495,14 +494,10 @@ def main():
         if thumb_pixels < MIN_THUMBNAIL_PIXELS or thumb_pixels > MAX_THUMBNAIL_PIXELS:
             thumb_pixels = DEFAULT_THUMBNAIL_PIXELS
 
-        try:
-            hires_pixels = int(hires_raw) if hires_raw else DEFAULT_THUMBNAIL_HIRES_PIXELS
-        except ValueError:
-            hires_pixels = DEFAULT_THUMBNAIL_HIRES_PIXELS
-        if hires_pixels < MIN_THUMBNAIL_PIXELS or hires_pixels > MAX_THUMBNAIL_PIXELS:
-            hires_pixels = DEFAULT_THUMBNAIL_HIRES_PIXELS
-        if hires_pixels < thumb_pixels:
-            hires_pixels = thumb_pixels
+        # Click-through PNGs are HIRES_THUMBNAIL_MULTIPLIER times bigger than
+        # the in-page thumbnails, capped at MAX_THUMBNAIL_PIXELS.
+        hires_pixels = min(MAX_THUMBNAIL_PIXELS,
+                           thumb_pixels * HIRES_THUMBNAIL_MULTIPLIER)
 
         try:
             zoomin_pixels = int(zoomin_raw) if zoomin_raw else DEFAULT_ZOOMIN_PIXELS
@@ -598,11 +593,6 @@ def main():
         # Best-centred first: smallest distance to image centre.
         results.sort(key=lambda r: r['from_center'])
 
-        # Zoom-in click-through is 4x the in-page preview (more pixels are
-        # useful for looking at faint stars near the target). Zoom-out
-        # click-through follows the configured hires_pixels.
-        zoomin_hires_pixels = min(MAX_THUMBNAIL_PIXELS, thumb_pixels * 4)
-
         for r in results:
             # Two PNGs per view: an in-page thumbnail and a higher-resolution
             # version that opens when the user clicks the thumbnail.
@@ -611,7 +601,7 @@ def main():
                 thumb_pixels, zoomin_pixels, suffix='zoomin')
             r['png_zoomin_hires'] = make_zoomin_thumbnail(
                 r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
-                zoomin_hires_pixels, zoomin_pixels, suffix='zoomin_hires')
+                hires_pixels, zoomin_pixels, suffix='zoomin_hires')
             r['png_zoomout'] = make_zoomout_thumbnail(
                 r['path'], r['x'], r['y'], r['nx'], r['ny'],
                 out_dir_abs, vast_dir, thumb_pixels, suffix='zoomout')
