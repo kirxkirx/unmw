@@ -11,8 +11,8 @@ body { color: #000;
  margin-left: 10mm;
  margin-right: 10mm;
 }
- 
-p {text-align: justify; text-indent: 6mm; line-height: 16pt}
+
+p {text-align: justify; line-height: 16pt}
 .code {text-align: left; font-family: courier; background: #ccc; color:
 #000}
 table.main {border-spacing: 5pt}
@@ -22,39 +22,52 @@ a:link {color: #55f; text-decoration: none}
 a:visited {color: #33f; text-decoration: none}
 a:active {color: #55f; text-decoration: none}
 a:hover {color: #55f; text-decoration: underline}
+
+.section { max-width: 720px; margin: 0 auto; padding-top: 6pt; }
+hr.break { max-width: 720px; margin: 18pt auto; }
+.footer { max-width: 720px; margin: 0 auto; text-align: center;
+ font-size: 90%; color: #444; }
 </style>
 </head>
 
-<CENTER>
-<h2>Manually upload RAR or ZIP archive with NMW images for processing</h2><br>
+<center>
+<h2>Manually upload RAR or ZIP archive with NMW images for processing</h2>
+</center>
 
-Please enter the file name:
+<!-- Upload form -->
+<div class="section">
 <form enctype="multipart/form-data" action="../cgi-bin/unmw/upload.py" method="post">
-<TABLE width="750">
-<tr><td>File to upload: </td><td><input type="file" name="file" size=32></td></tr>
-<tr><td></td><td><input type="submit" value="Upload"></td></tr>
-<tr><td colspan=2><hr></td></tr>
-</TABLE>
+<table style="margin: 0 auto; border-spacing: 5pt;">
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">File to upload:</td>
+  <td style="padding: 0;">
+    <input type="file" name="file" size=32>
+    <input type="submit" value="Upload">
+  </td>
+</tr>
+</table>
 </form>
-</CENTER>
-<br>
-Normally the survey images are uploaded automatically by
+
+<p>Normally the survey images are uploaded automatically by
 <a href="https://github.com/kirxkirx/astrocam-go">astrocam-go</a>
 running on the telescope control computer. An archive of images may also
-be uploaded manually through this page if needed for testing.
-<br/><br/>
-It will take a lot of time to upload and process the data. Please be patient
-and hope for the best.
-<br/><br/>
+be uploaded manually through this page if needed for testing.</p>
 
-<hr>
-<br/>
-Reference image catalogue:
-<a href="coord_search.html">browse all reference images or find which fields
-cover a particular sky position</a>.
-<br/><br/><br/>
+<p>It will take a long time to upload and process the data. Please be
+patient and hope for the best.</p>
+</div>
 
-If you have questions, bug reports or suggestions how to improve this
-service, please fell free to contact the author (Kirill Sokolovsky) via e-mail: <b>kirx[at]scan&#046;sai&#046;msu&#046;ru</b><br/>
+<hr class="break">
+
+<!-- Reference images -->
+<center>
+<h2>Reference images</h2>
+</center>
+
+<div class="section">
+<p style="text-align: center;">
+<a href="coord_search.html">Browse all reference images, or find which
+fields cover a particular sky position</a>.</p>
+</div>
 
 </html>

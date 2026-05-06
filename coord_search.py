@@ -592,9 +592,10 @@ def main():
     form = cgi.FieldStorage()
 
     # The landing page sets a hidden 'action' field via JS click handlers
-    # on each submit button: 'search' for coord-search, 'list_all' for the
-    # catalogue. The default value is 'search' (used when JS is disabled
-    # or when the user submits via Enter in the coords input).
+    # on each submit button: 'search' for coord-search, 'list_all' for
+    # the show-all-reference-images view. The default value is 'search'
+    # (used when JS is disabled or when the user submits via Enter in
+    # the coords input).
     list_all_mode = form.getfirst('action') == 'list_all'
 
     if list_all_mode:
