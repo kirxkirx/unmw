@@ -290,11 +290,17 @@ def check_cache(fastplot_dir, candidate_id):
     """Check if a cached archive exists for this candidate.
 
     Returns the archive basename if found, None otherwise.
+
+    Looks for both .tar.gz (current fastplot.sh output) and .tar.bz2
+    (legacy archives from before the compressor switch); .tar.gz wins
+    when both exist.
     """
-    pattern = os.path.join(fastplot_dir, 'fastplot__*__' + candidate_id + '.tar.bz2')
-    matches = glob.glob(pattern)
-    if matches:
-        return os.path.basename(matches[0])
+    for ext in ('.tar.gz', '.tar.bz2'):
+        pattern = os.path.join(
+            fastplot_dir, 'fastplot__*__' + candidate_id + ext)
+        matches = glob.glob(pattern)
+        if matches:
+            return os.path.basename(matches[0])
     return None
 
 

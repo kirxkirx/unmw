@@ -193,10 +193,14 @@ fi
 
 # --- Move Output ---
 
-# Find the output archive in the disposable VaST directory
-# fastplot.sh creates: fastplot__${CAMERA_NAME}__${TRANSIENT_ID}.tar.bz2
+# Find the output archive in the disposable VaST directory.
+# fastplot.sh creates: fastplot__${CAMERA_NAME}__${TRANSIENT_ID}.tar.gz
+# (older versions of fastplot.sh produced .tar.bz2; check that too in case
+# the wrapper is run against an older VaST copy).
 OUTPUT_ARCHIVE=""
-for CANDIDATE_ARCHIVE in "$FASTPLOT_VAST_WORKDIR"/fastplot__*__"${CANDIDATE_ID}".tar.bz2 ; do
+for CANDIDATE_ARCHIVE in \
+ "$FASTPLOT_VAST_WORKDIR"/fastplot__*__"${CANDIDATE_ID}".tar.gz \
+ "$FASTPLOT_VAST_WORKDIR"/fastplot__*__"${CANDIDATE_ID}".tar.bz2 ; do
  if [ -f "$CANDIDATE_ARCHIVE" ]; then
   OUTPUT_ARCHIVE="$CANDIDATE_ARCHIVE"
   break
@@ -205,7 +209,7 @@ done
 
 if [ -z "$OUTPUT_ARCHIVE" ] || [ ! -f "$OUTPUT_ARCHIVE" ]; then
  echo "ERROR: Cannot find output archive for candidate $CANDIDATE_ID"
- echo "Expected pattern: $FASTPLOT_VAST_WORKDIR/fastplot__*__${CANDIDATE_ID}.tar.bz2"
+ echo "Expected pattern: $FASTPLOT_VAST_WORKDIR/fastplot__*__${CANDIDATE_ID}.tar.gz (or .tar.bz2)"
  ls -la "$FASTPLOT_VAST_WORKDIR"/fastplot__* 2>/dev/null
  rm -rf "$FASTPLOT_VAST_WORKDIR"
  exit 1
