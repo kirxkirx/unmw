@@ -611,6 +611,10 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
   MAX_CANDIDATES_FOR_COMBINED_LIST=60
  fi
  if { [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt $MAX_CANDIDATES_FOR_COMBINED_LIST ] && [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -lt 20 ]; } || [ "$IS_GALACTIC_CENTER_CANDIDATE_LIMIT_EXEMPT_FIELD" = "yes" ]; then
+  # The second sed rewrites the "$FIELD field processing log" self-link emitted by
+  # VaST's make_report_in_HTML.sh (href='./') so that on the combined page each
+  # candidate links back to the originating field's results directory rather than
+  # the directory holding the combined HTML. Matched on the class marker by contract.
   grep --max-count=1 -A100000 'Processing fields' "$INPUT_DIR/index.html" | grep -B100000 'Processing complete!' | grep -v -e 'Processing fields' -e 'Processing complete' | sed "s:src=\":src=\"$INPUT_DIR/:g" | sed "s:class='field-processing-log-link' href='\./':class='field-processing-log-link' href='$INPUT_DIR/':g" >> "$OUTPUT_COMBINED_HTML_NAME"
   INCLUDE_REPORT_IN_COMBINED_LIST="OK"
  elif [ "$NUMBER_OF_UNIDENTIFIED_CANDIDATES" = "99999" ];then 
