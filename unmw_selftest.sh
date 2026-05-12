@@ -726,6 +726,66 @@ else
   exit 1
  fi
 fi
+
+# Check that filter_report.py also produced a JSON sibling next to _filtered.html,
+# that it parses as JSON, contains the required top-level keys, and (when the
+# jsonschema package is installed) validates against the permissive schema.
+LATEST_FILTERED_HTML=$(ls -t ./*_filtered.html 2>/dev/null | head -n 1)
+if [ -z "$LATEST_FILTERED_HTML" ];then
+ echo "$0 test error: no *_filtered.html files in $PWD to pair JSON against"
+ exit 1
+fi
+LATEST_FILTERED_JSON="${LATEST_FILTERED_HTML%.html}.json"
+if [ ! -f "$LATEST_FILTERED_JSON" ];then
+ echo "$0 test error: missing JSON paired with $LATEST_FILTERED_HTML: $LATEST_FILTERED_JSON"
+ exit 1
+fi
+if [ ! -s "$LATEST_FILTERED_JSON" ];then
+ echo "$0 test error: empty JSON file $LATEST_FILTERED_JSON"
+ exit 1
+fi
+echo "The latest filtered JSON report is:"
+ls -lh "$LATEST_FILTERED_JSON"
+JSON_SCHEMA_FILE="$SCRIPTDIR/filter_report_json_schema.json"
+if [ ! -f "$JSON_SCHEMA_FILE" ];then
+ echo "$0 test error: schema file not found at $JSON_SCHEMA_FILE"
+ exit 1
+fi
+python3 - "$LATEST_FILTERED_JSON" "$JSON_SCHEMA_FILE" <<'PYEOF'
+import json, sys
+data_path, schema_path = sys.argv[1], sys.argv[2]
+try:
+    with open(data_path) as fp:
+        data = json.load(fp)
+except Exception as exc:
+    print("JSON parse failed for {}: {}".format(data_path, exc))
+    sys.exit(1)
+for key in ("schema_version", "generated_at_utc", "candidates"):
+    if key not in data:
+        print("Missing required top-level key '{}'".format(key))
+        sys.exit(1)
+if not isinstance(data["candidates"], list):
+    print("'candidates' is not a list")
+    sys.exit(1)
+try:
+    import jsonschema
+except ImportError:
+    print("jsonschema not installed; minimum top-level checks passed for {}".format(data_path))
+    sys.exit(0)
+with open(schema_path) as fp:
+    schema = json.load(fp)
+try:
+    jsonschema.validate(data, schema)
+except jsonschema.ValidationError as exc:
+    print("Schema validation failed for {}: {}".format(data_path, exc.message))
+    sys.exit(1)
+print("JSON validates against schema {}".format(schema_path))
+PYEOF
+if [ $? -ne 0 ];then
+ echo "$0 test error: JSON file $LATEST_FILTERED_JSON failed validation"
+ exit 1
+fi
+
 # Check that the png image previews were actually created
 for PNG_FILE_TO_TEST in $(grep 'img src=' "$LATEST_COMBINED_HTML_REPORT" | awk -F"img src=" '{print $2}' | awk -F'"'  '{print $2}' | grep '.png') ;do
  if [ ! -f "$PNG_FILE_TO_TEST" ];then

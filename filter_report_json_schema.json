@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "unmw filter_report JSON",
+  "description": "Permissive schema for the JSON sibling of each _filtered.html report produced by filter_report.py. Most fields are nullable and additional properties are allowed so that the producer can evolve without breaking validation.",
+  "type": "object",
+  "required": ["schema_version", "generated_at_utc", "candidates"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": { "type": "integer", "minimum": 1 },
+    "generated_at_utc": { "type": "string" },
+    "source_report": { "type": ["string", "null"] },
+    "url_of_data_processing_root": { "type": ["string", "null"] },
+    "error": { "type": ["string", "null"] },
+    "parse_warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "session": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "date_utc": { "type": ["string", "null"] },
+        "session":  { "type": ["string", "null"] },
+        "camera":   { "type": ["string", "null"] }
+      }
+    },
+    "totals": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "properties": {
+        "total":           { "type": ["integer", "null"], "minimum": 0 },
+        "new":             { "type": ["integer", "null"], "minimum": 0 },
+        "known_asteroid":  { "type": ["integer", "null"], "minimum": 0 },
+        "known_variable":  { "type": ["integer", "null"], "minimum": 0 },
+        "known_transient": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "classification"],
+        "additionalProperties": true,
+        "properties": {
+          "id":             { "type": "string" },
+          "field":          { "type": ["string", "null"] },
+          "classification": { "enum": ["new", "known_asteroid", "known_variable", "known_transient"] },
+          "mean": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "properties": {
+              "date_utc_iso":         { "type": ["string", "null"] },
+              "date_utc_dayfraction": { "type": ["string", "null"] },
+              "jd_utc":               { "type": ["number", "null"] },
+              "mag":                  { "type": ["number", "null"] },
+              "ra_hms":               { "type": ["string", "null"] },
+              "dec_dms":              { "type": ["string", "null"] },
+              "ra_deg":               { "type": ["number", "null"] },
+              "dec_deg":              { "type": ["number", "null"] },
+              "galactic_l_deg":       { "type": ["number", "null"] },
+              "galactic_b_deg":       { "type": ["number", "null"] },
+              "constellation":        { "type": ["string", "null"] }
+            }
+          },
+          "second_epoch_separation": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "properties": {
+              "arcsec": { "type": ["number", "null"] },
+              "pix":    { "type": ["number", "null"] }
+            }
+          },
+          "cutouts": {
+            "type": ["object", "null"],
+            "additionalProperties": { "type": ["string", "null"] }
+          },
+          "discovery_images": {
+            "type": ["array", "null"],
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "properties": {
+                "label":                { "type": ["string", "null"] },
+                "date_utc_iso":         { "type": ["string", "null"] },
+                "date_utc_dayfraction": { "type": ["string", "null"] },
+                "jd_utc":               { "type": ["number", "null"] },
+                "mag":                  { "type": ["number", "null"] },
+                "ra_hms":               { "type": ["string", "null"] },
+                "dec_dms":              { "type": ["string", "null"] },
+                "x_pix":                { "type": ["number", "null"] },
+                "y_pix":                { "type": ["number", "null"] },
+                "fits_path":            { "type": ["string", "null"] },
+                "fits_url":             { "type": ["string", "null"] }
+              }
+            }
+          },
+          "crossmatches": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "patternProperties": {
+              "^[A-Za-z0-9_]+$": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": ["found"],
+                "properties": {
+                  "found": { "type": "boolean" },
+                  "raw":   { "type": ["string", "null"] }
+                }
+              }
+            }
+          },
+          "forced_photometry": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "properties": {
+              "per_image": {
+                "type": ["array", "null"],
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "wcs_fits":     { "type": ["string", "null"] },
+                    "position_hms": { "type": ["string", "null"] },
+                    "mag":          { "type": ["number", "null"] },
+                    "mag_err":      { "type": ["number", "null"] },
+                    "flag":         { "type": ["string", "null"] }
+                  }
+                }
+              },
+              "reference_weighted_avg": {
+                "type": ["object", "null"],
+                "additionalProperties": true,
+                "properties": {
+                  "mag":     { "type": ["number", "null"] },
+                  "mag_err": { "type": ["number", "null"] }
+                }
+              }
+            }
+          },
+          "external_links": {
+            "type": ["object", "null"],
+            "additionalProperties": { "type": ["string", "null"] }
+          },
+          "report_stubs": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "properties": {
+              "mpc_mean":      { "type": ["string", "null"] },
+              "mpc_per_image": { "type": ["array", "null"], "items": { "type": "string" } },
+              "tocp":          { "type": ["string", "null"] },
+              "aavso":         { "type": ["string", "null"] },
+              "vsnet":         { "type": ["string", "null"] }
+            }
+          },
+          "parse_warnings": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}
