@@ -26,13 +26,13 @@ JSON_SCHEMA_VERSION = 2
 # candidate when its position matches one of these exclusion lists. We map
 # the source filenames to JSON keys exposed under `crossmatches`.
 EXCLUSION_LIST_FILE_TO_JSON_KEY = {
-    'tocp_transients_list.txt':   'tocp',
+    'tocp_transients_list.txt': 'tocp',
     'asassn_transients_list.txt': 'asassn_transients',
-    'tns_transients_list.txt':    'tns_transients',
-    'neverexclude_list.txt':      'neverexclude_list',
-    'moons.txt':                  'moons',
-    'planets.txt':                'planets',
-    'spacecraft.txt':             'spacecraft',
+    'tns_transients_list.txt': 'tns_transients',
+    'neverexclude_list.txt': 'neverexclude_list',
+    'moons.txt': 'moons',
+    'planets.txt': 'planets',
+    'spacecraft.txt': 'spacecraft',
 }
 
 # A match against any of these promotes the candidate to "known_transient"
@@ -503,7 +503,7 @@ def _extract_exclusion_list_match(plain_text):
 def _extract_crossmatches(pre_text, warnings):
     out = {}
     lookup = [
-        ('vsx',      'VSX'),
+        ('vsx', 'VSX'),
         ('asassn_v', 'ASASSN-V'),
         ('astcheck', 'astcheck'),
     ]
@@ -540,10 +540,10 @@ def _extract_crossmatches(pre_text, warnings):
             # Stop earlier at known terminators that come after crossmatches.
             for j in range(idx + 1, end):
                 stripped = lines[j].strip()
-                if (stripped.startswith('Forced photometry')
-                        or stripped.startswith('online_id')
-                        or stripped.startswith('Check this position in')
-                        or stripped.startswith('Online MPChecker')):
+                if (stripped.startswith('Forced photometry') or
+                        stripped.startswith('online_id') or
+                        stripped.startswith('Check this position in') or
+                        stripped.startswith('Online MPChecker')):
                     end = j
                     break
             raw = '\n'.join(lines[idx + 1:end]).rstrip()
@@ -607,13 +607,13 @@ def _extract_forced_photometry(pre_text, warnings):
 
 
 _EXTERNAL_LINK_RULES = [
-    ('tns',         'wis-tns.org'),
+    ('tns', 'wis-tns.org'),
     ('asassn_list', 'astronomy.ohio-state.edu/asassn'),
-    ('simbad',      'simbad.u-strasbg.fr'),
-    ('vizier',      'vizier.u-strasbg.fr'),
-    ('wise',        'irsa.ipac.caltech.edu'),
+    ('simbad', 'simbad.u-strasbg.fr'),
+    ('vizier', 'vizier.u-strasbg.fr'),
+    ('wise', 'irsa.ipac.caltech.edu'),
     ('aladin_lite', 'aladin.u-strasbg.fr'),
-    ('snad_ztf',    'ztf.snad.space'),
+    ('snad_ztf', 'ztf.snad.space'),
 ]
 
 
