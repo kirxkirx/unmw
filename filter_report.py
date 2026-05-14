@@ -540,10 +540,12 @@ def _extract_crossmatches(pre_text, warnings):
             # Stop earlier at known terminators that come after crossmatches.
             for j in range(idx + 1, end):
                 stripped = lines[j].strip()
-                if (stripped.startswith('Forced photometry') or
-                        stripped.startswith('online_id') or
-                        stripped.startswith('Check this position in') or
-                        stripped.startswith('Online MPChecker')):
+                if stripped.startswith((
+                    'Forced photometry',
+                    'online_id',
+                    'Check this position in',
+                    'Online MPChecker',
+                )):
                     end = j
                     break
             raw = '\n'.join(lines[idx + 1:end]).rstrip()
