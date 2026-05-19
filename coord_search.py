@@ -311,7 +311,8 @@ def get_image_metadata(fits_path, vast_dir):
     this work for compressed FITS files as well.
 
     Keys: nx, ny (int, pixels), arcmin_str (e.g. "941.5'x626.9'"),
-    deg_str (e.g. "15.7degx10.4deg"), scale_x, scale_y (float, arcsec/pix).
+    deg_str (e.g. "15.7degx10.4deg"), scale_x, scale_y (float, arcsec/pix),
+    center_radec (e.g. "21:00:00.47 +30:00:01.6", or None).
     Returns None on failure.
     """
     try:
@@ -336,7 +337,20 @@ def get_image_metadata(fits_path, vast_dir):
         'deg_str': '',
         'scale_x': None,
         'scale_y': None,
+        'center_radec': None,
     }
+
+    # "Image center: 21:00:00.467 +30:00:01.62 J2000 4789.000 3195.000"
+    # Reformat to the requested HH:MM:SS.SS +DD:MM:SS.s precision.
+    center_m = re.search(
+        r'Image center:\s*'
+        r'(\d{1,2}:\d{2}:\d{2}\.?\d*)\s+'
+        r'([+\-]\d{1,2}:\d{2}:\d{2}\.?\d*)',
+        out)
+    if center_m:
+        ra = _reformat_sexagesimal(center_m.group(1), 2)
+        dec = _reformat_sexagesimal(center_m.group(2), 1)
+        info['center_radec'] = '{} {}'.format(ra, dec)
 
     arcmin_m = re.search(r"(\d+\.?\d*)'\s*x\s*(\d+\.?\d*)'", out)
     if arcmin_m:
@@ -361,6 +375,38 @@ def get_image_metadata(fits_path, vast_dir):
             pass
 
     return info
+
+
+def _reformat_sexagesimal(token, sec_decimals):
+    """Round a 'HH:MM:SS.sss' / '[+-]DD:MM:SS.ss' token to sec_decimals
+    decimal places on the seconds field, handling carry into minutes/hours.
+
+    Returns the reformatted string, or the token unchanged if it does not
+    look like sexagesimal.
+    """
+    sign = ''
+    body = token
+    if body[:1] in ('+', '-'):
+        sign = body[0]
+        body = body[1:]
+    parts = body.split(':')
+    if len(parts) != 3:
+        return token
+    try:
+        a = int(parts[0])
+        m = int(parts[1])
+        s = round(float(parts[2]), sec_decimals)
+    except ValueError:
+        return token
+    if s >= 60.0:
+        s -= 60.0
+        m += 1
+    if m >= 60:
+        m -= 60
+        a += 1
+    width = 3 + sec_decimals if sec_decimals > 0 else 2
+    return '{sign}{a:02d}:{m:02d}:{s:0{w}.{d}f}'.format(
+        sign=sign, a=a, m=m, s=s, w=width, d=sec_decimals)
 
 
 def _run_pgfv_tool(argv, out_dir, png_w, png_h, fits_path, suffix):
@@ -547,12 +593,14 @@ def emit_listall_row(r, url_prefix, sub):
     size_html = render_image_size(
         r['arcmin_str'], r['deg_str'], r['nx'], r['ny'])
     scale_html, _ = render_mean_scale(r['scale_x'], r['scale_y'])
+    center_radec = r.get('center_radec') or '-'
     zo_cell = render_thumbnail_link(
         r.get('png_zoomout'), r.get('png_zoomout_hires'),
         'zoom-out', base, url_prefix, sub)
     print("<tr>"
           "<td><b>{f}</b></td>"
           "<td title='{full}'>{base}</td>"
+          "<td>{cr}</td>"
           "<td>{s}</td>"
           "<td>{sc}</td>"
           "<td>{zo}</td>"
@@ -560,12 +608,13 @@ def emit_listall_row(r, url_prefix, sub):
               f=html_escape(field),
               full=html_escape(r['path']),
               base=html_escape(base),
+              cr=html_escape(center_radec),
               s=size_html, sc=scale_html, zo=zo_cell), flush=True)
 
 
 # Number of columns in each table — used for inline error rows.
 COORD_SEARCH_TABLE_COLS = 9
-LIST_ALL_TABLE_COLS = 5
+LIST_ALL_TABLE_COLS = 6
 
 
 # ---------- main ----------
@@ -766,6 +815,7 @@ def main():
 
             print("<table class='main'>", flush=True)
             print("<tr><th>Field</th><th>Reference image</th>"
+                  "<th>Image center (J2000)</th>"
                   "<th>Image size</th>"
                   "<th>Scale (&quot;/pix)</th>"
                   "<th>Zoom-out</th></tr>", flush=True)
@@ -800,6 +850,7 @@ def main():
                     'deg_str': meta['deg_str'],
                     'scale_x': meta['scale_x'],
                     'scale_y': meta['scale_y'],
+                    'center_radec': meta['center_radec'],
                     'png_zoomout': png_preview,
                     'png_zoomout_hires': png_hires,
                 })
