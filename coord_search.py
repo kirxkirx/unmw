@@ -115,6 +115,52 @@ def back_link_url():
     return DEFAULT_FORM_PATH
 
 
+def form_page_url():
+    """Absolute URL of the input form page, derived from the current request.
+
+    Mirrors the request's scheme and host:port so the redirect lands on the
+    same deployment, e.g. a request to
+      http://scan.sai.msu.ru:8889/cgi-bin/unmw/coord_search.py
+    redirects to
+      http://scan.sai.msu.ru:8889/unmw/coord_search.html
+    and likewise for the :8888 and the https://tau.kirx.net deployments.
+    Falls back to the bare path (DEFAULT_FORM_PATH) when the request
+    environment does not identify the host.
+    """
+    # Scheme: HTTPS is "on"/"1" behind TLS; some servers set REQUEST_SCHEME.
+    scheme = os.environ.get('REQUEST_SCHEME', '').strip().lower()
+    if not scheme:
+        https = os.environ.get('HTTPS', '').strip().lower()
+        scheme = 'https' if https in ('on', '1') else 'http'
+
+    # HTTP_HOST already carries the port the client connected to (when it is
+    # not the scheme default), so prefer it over SERVER_NAME/SERVER_PORT.
+    host = os.environ.get('HTTP_HOST', '').strip()
+    if not host:
+        name = os.environ.get('SERVER_NAME', '').strip()
+        port = os.environ.get('SERVER_PORT', '').strip()
+        if name:
+            if port and port not in ('80', '443'):
+                host = '{}:{}'.format(name, port)
+            else:
+                host = name
+    if not host:
+        return DEFAULT_FORM_PATH
+    return '{}://{}{}'.format(scheme, host, DEFAULT_FORM_PATH)
+
+
+def emit_redirect(url):
+    """Send a 302 redirect to url, with an HTML fallback body."""
+    print("Status: 302 Found")
+    print("Location: {}".format(url))
+    print("Content-Type: text/html\n")
+    safe = html_escape(url)
+    print("<html><head><title>Redirecting</title>"
+          "<meta http-equiv='refresh' content='0; url={u}'></head>"
+          "<body>Redirecting to <a href='{u}'>{u}</a></body></html>".format(
+              u=safe))
+
+
 def emit_message_page(title, body_html, status_line=None):
     if status_line:
         print(status_line)
@@ -652,6 +698,11 @@ def main():
         raw_coords = ''
     else:
         raw_coords = (form.getfirst('coords', '') or '').strip()
+        # No search parameters supplied (e.g. the .py was opened directly):
+        # send the user to the input form rather than showing an error.
+        if not raw_coords:
+            emit_redirect(form_page_url())
+            return
         try:
             ra, dec = parse_coordinates(raw_coords)
         except ValueError as err:
