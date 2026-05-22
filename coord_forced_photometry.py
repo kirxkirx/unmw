@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-CGI: forced-photometry lightcurve at a sky position over the last two weeks.
+CGI: forced-photometry lightcurve at a sky position over the last one week.
 
 The user enters one sky position; the page finds every wcs_fd_ image in the
-uploads/ directory (last 14 days, by the img_<YYYY-MM-DD> directory date) whose
+uploads/ directory (last 7 days, by the img_<YYYY-MM-DD> directory date) whose
 field covers that position, runs the C forced-photometry implementation on each
 (util/forced_photometry.sh with FORCED_PHOTOMETRY_ONLY_C=yes), and presents the
 results -- newest first -- as an HTML table (with a full-frame preview and a
@@ -68,7 +68,7 @@ ncl.DEFAULT_FORM_PATH = DEFAULT_FORM_PATH
 # ---------- code-level constants (not deployment-specific) ----------
 TEMP_PARENT = 'uploads'                 # mirrors upload.py's upload_dir
 TEMP_DIR_PREFIX = 'forced_phot_'
-WINDOW_DAYS = 14                        # "last two weeks"
+WINDOW_DAYS = 7                         # "last one week"
 FORCED_PHOT_MAX_CONCURRENT = 5          # each request uses its own VaST working copy, so this only caps server load
 FORCED_PHOT_TIMEOUT_SECONDS = 600       # per-image safety cap on forced_photometry.sh
 VAST_COPY_TIMEOUT_SECONDS = 300         # cap on the per-request rsync of the VaST tree
@@ -86,6 +86,15 @@ VALID_BANDS = ('B', 'V', 'R', 'Rc', 'I', 'Ic', 'r', 'i', 'g')
 # Per-upload directory name: img_<YYYY-MM-DD>_<...>. Only these are considered.
 IMG_DIR_RE = re.compile(r'^img_(\d{4})-(\d{2})-(\d{2})_')
 FITS_EXTENSIONS = ('.fits', '.fit', '.fts')
+
+# Extracts the YYYY-MM-DD_HH-MM-SS timestamp embedded in a wcs_fd_ filename;
+# sorting on this alone reproduces JD order closely enough for streamed output.
+_IMG_TS_RE = re.compile(r'(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})')
+
+# Apache's CGI buffer is ~4 KB. Each streamed table row is appended with this
+# whitespace comment so the buffer crosses the flush threshold within a couple
+# of rows instead of stalling until many rows have accumulated.
+_ROW_FLUSH_PAD = "<!-- " + (" " * 1500) + " -->\n"
 
 FACTORY_REL_PATH = os.path.join('util', 'transients', 'transient_factory_test31.sh')
 
@@ -573,6 +582,14 @@ def main():
         if covering_fields:
             images = list_recent_field_images(TEMP_PARENT, covering_fields,
                                               WINDOW_DAYS)
+            # Stream rows in (approximate) newest-first order without waiting
+            # for all images to be measured. The timestamp embedded in the
+            # wcs_fd_ filename closely tracks JD and is known without opening
+            # the file, so it makes a cheap proxy sort key.
+            def _img_ts(p):
+                m = _IMG_TS_RE.search(os.path.basename(p))
+                return m.group(1) if m else ''
+            images.sort(key=_img_ts, reverse=True)
 
         # ---- Stream the page header. ----
         page_title = "Forced-photometry lightcurve"
@@ -604,6 +621,11 @@ def main():
             return
         print("<p>Measuring {} image(s) with C forced photometry; this can "
               "take a while ...</p>".format(len(images)), flush=True)
+        # Give the user something to watch during the ~30 s rsync that builds
+        # the per-request working copy of VaST; without this line the page
+        # sits silent until the first measurement row arrives.
+        print("<p class='secondary'>Preparing working copy of VaST "
+              "(one-off rsync, ~30 s)...</p>", flush=True)
 
         # ---- Disposable VaST working copy (autoprocess.sh style) so forced
         # photometry's scratch stays isolated from $VAST_REFERENCE_COPY. ----
@@ -616,17 +638,37 @@ def main():
             print("</body></html>")
             return
 
-        # ---- Measure each image sequentially. ----
-        # Why-skipped diagnostics for any image that yields no measurement are
-        # appended here (kept with the request output for inspection).
+        # ---- Streamed results table. We open the table immediately and emit
+        # one <tr> per image as it finishes (success or skip) so the page
+        # fills in instead of waiting for all measurements before any output
+        # appears. The ASCII table is rendered once at the end, because its
+        # column widths depend on the full result set.
+        # Page-local CSS for the faint skipped rows.
+        print("<style type='text/css'>"
+              "tr.skipped td { color: #888; font-size: 90%; "
+              "background: #f8f8f8; }"
+              "</style>")
+        # Why-skipped diagnostics for any image that produced no measurement
+        # are appended here (kept with the request output for inspection).
         skip_log = os.path.join(out_dir, 'forced_phot_skipped.log')
         factory_text = _read_factory_text(vast_dir)
+        sub_name = os.path.basename(out_dir)
+        print("<table class='main'>")
+        print("<tr><th>Date (UT)</th><th>JD</th><th>mag</th><th>err</th>"
+              "<th>status</th><th>band</th><th>field</th>"
+              "<th>preview</th><th>cutout</th><th>FITS</th></tr>", flush=True)
         results = []
         for img in images:
             band = derive_band(factory_text, img, band_override)
             fp = run_forced_photometry_c(work_dir, local_config_path, img, ra, dec, band,
                                          debug_log=skip_log)
             if fp is None:
+                # Faint placeholder so processing progress stays visible even
+                # when several images in a row produce no measurement.
+                print(_html_skipped_row(
+                    img, field_name_from_fits(img),
+                    fits_url(url_prefix, img, uploads_abs)) + _ROW_FLUSH_PAD,
+                    flush=True)
                 continue
             jd, atel = get_jd_and_atel_date(vast_dir, img)
             if jd is None:
@@ -644,44 +686,31 @@ def main():
             png_cutout = make_zoomin_thumbnail(
                 img, fp['x'], fp['y'], out_dir, vast_dir, thumb_pixels,
                 zoomin_pixels, aperture_circle_diameter=fp['aperture'])
-            results.append({
+            r = {
                 'jd': jd, 'atel': atel, 'mag': fp['mag'], 'err': fp['err'],
                 'status': fp['status'], 'band': band,
                 'field': field_name_from_fits(img),
                 'basename': fp['basename'],
                 'fits_url': fits_url(url_prefix, img, uploads_abs),
                 'png_preview': png_preview, 'png_cutout': png_cutout,
-            })
+            }
+            results.append(r)
+            print(_html_row(r, url_prefix, sub_name) + _ROW_FLUSH_PAD,
+                  flush=True)
+        print("</table>", flush=True)
 
-        if not results:
+        # ---- ASCII table for copy/paste -- rendered only after the loop so
+        # column widths reflect the full result set. ----
+        if results:
+            print("<h3>ASCII table</h3>")
+            print("<textarea rows='{}' cols='110' readonly "
+                  "onclick='this.select()'>{}</textarea>".format(
+                      min(40, len(results) + 2),
+                      html_escape(ascii_table(results))))
+        else:
             print("<div class='notice'>None of the {} image(s) yielded a "
                   "measurement (target off-frame or calibration failed).</div>".format(
                       len(images)))
-            print("<br><a href='{}'>Search again</a>".format(
-                html_escape(back_link_url())))
-            print("</body></html>")
-            return
-
-        # Newest first, by JD.
-        results.sort(key=lambda r: (float(r['jd']) if _is_float(r['jd']) else 0.0),
-                     reverse=True)
-
-        # ---- HTML results table. ----
-        sub_name = os.path.basename(out_dir)
-        print("<table class='main'>")
-        print("<tr><th>Date (UT)</th><th>JD</th><th>mag</th><th>err</th>"
-              "<th>status</th><th>band</th><th>field</th>"
-              "<th>preview</th><th>cutout</th><th>FITS</th></tr>", flush=True)
-        for r in results:
-            print(_html_row(r, url_prefix, sub_name), flush=True)
-        print("</table>")
-
-        # ---- ASCII table for copy/paste. ----
-        print("<h3>ASCII table</h3>")
-        print("<textarea rows='{}' cols='110' readonly "
-              "onclick='this.select()'>{}</textarea>".format(
-                  min(40, len(results) + 2),
-                  html_escape(ascii_table(results))))
 
         print("<br><br><a href='{}'>Search again</a>".format(
             html_escape(back_link_url())))
@@ -728,6 +757,27 @@ def _html_row(r, url_prefix, sub):
                 cut=_thumb_cell(r['png_cutout'], url_prefix, sub,
                                 'cutout', r['basename']),
                 fits=fits_cell))
+
+
+def _html_skipped_row(img_path, field_name, fits_link_url):
+    """Faint placeholder row for an image that produced no measurement.
+
+    The cells before "field" are dashed out so each streamed skip still
+    advances the table by one row -- the user can see processing progressing
+    even when several images in a row fail (off-frame or calibration failure).
+    """
+    base = os.path.basename(img_path)
+    fits_cell = "<i>n/a</i>"
+    if fits_link_url:
+        fits_cell = "<a href='{u}' target='_blank'>FITS</a>".format(
+            u=html_escape(fits_link_url))
+    return ("<tr class='skipped'>"
+            "<td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td>"
+            "<td><i>skipped</i></td><td>&mdash;</td><td><b>{field}</b></td>"
+            "<td colspan='2'><span class='code'>{base}</span> "
+            "&mdash; off-frame or no measurement</td><td>{fits}</td>"
+            "</tr>".format(field=html_escape(field_name),
+                           base=html_escape(base), fits=fits_cell))
 
 
 if __name__ == "__main__":

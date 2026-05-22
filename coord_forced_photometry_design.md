@@ -15,7 +15,7 @@ done
 ```
 
 A user enters sky coordinates and receives forced aperture photometry at that
-position for every image covering it taken in the last two weeks that is found
+position for every image covering it taken in the last week that is found
 in the `uploads/` directory, in reverse chronological order, with image
 previews, cutouts, links to the FITS files, and a copy-paste ASCII table.
 
@@ -34,7 +34,7 @@ previews, cutouts, links to the FITS files, and a copy-paste ASCII table.
     aperture used for that image;
   - a link to the (world-viewable) `wcs_fd_` FITS file that was measured.
 - A separate ASCII-only table that can be copied verbatim.
-- Time window: last 14 days, fixed, by the `img_YYYY-MM-DD` directory date.
+- Time window: last 7 days, fixed, by the `img_YYYY-MM-DD` directory date.
 
 ## 3. Architecture and data flow
 
@@ -117,7 +117,7 @@ for any camera known to `transient_factory_test31.sh` and `combine_reports.sh`
 - Camera detection: parse the `*"PATTERN"* -> CAMERA_SETTINGS` rules near the
   top of `transient_factory_test31.sh` and apply them to each field/image name.
 - Date window: consider only directories whose names start with
-  `img_<YYYY-MM-DD>`; parse that date and keep the last 14 days. Any other
+  `img_<YYYY-MM-DD>`; parse that date and keep the last 7 days. Any other
   directories in `uploads/` are unrelated and ignored (their names do not start
   with `img_<YYYY-MM-DD>`).
 
