@@ -245,6 +245,11 @@ from the main transient pipeline that also runs there), the CGI makes a
   exactly as `autoprocess.sh` does;
 - `forced_photometry.sh` is run with its cwd inside this copy, so all its
   scratch lands there and is fully isolated per request;
+- `local_config.sh` is sourced before running it -- exactly as `autoprocess.sh`
+  does before `transient_factory_test31.sh` -- so the calibration runs with the
+  production environment (Python venv, `VAST_SEXTRACTOR_CACHE_DIR`, data-root
+  exports). Without this the bare Apache CGI environment makes the calibration
+  fail and every image yields no measurement;
 - the CGI `rm -rf`s the working copy when the request finishes (like
   `autoprocess.sh`), so it does not accumulate.
 

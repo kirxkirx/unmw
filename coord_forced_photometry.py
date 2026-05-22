@@ -197,7 +197,7 @@ def get_jd_and_atel_date(vast_dir, fits_path):
     return jd, atel
 
 
-def run_forced_photometry_c(work_dir, fits_path, ra, dec, band):
+def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, band):
     """Run the C-only forced photometry on one image inside the working copy.
 
     work_dir is a per-request rsync copy of the VaST tree (see
@@ -208,15 +208,28 @@ def run_forced_photometry_c(work_dir, fits_path, ra, dec, band):
     working copy keeps that scratch isolated and leaves $VAST_REFERENCE_COPY
     untouched.
 
+    local_config.sh is sourced first -- exactly as autoprocess.sh does before
+    it runs transient_factory_test31.sh -- so the calibration runs with the same
+    environment the production pipeline uses (Python venv, VAST_SEXTRACTOR_CACHE_DIR,
+    data-root exports). The bare Apache CGI environment lacks this, which is why
+    forced photometry failed for every image until we matched autoprocess.sh.
+
     Returns a dict with keys jd, mag, err, status, basename, aperture, x, y,
     or None if the target is off the frame / the tool failed.
     """
     script = os.path.join(work_dir, 'util', 'forced_photometry.sh')
     env = os.environ.copy()
     env['FORCED_PHOTOMETRY_ONLY_C'] = 'yes'
+    if local_config_path and os.path.isfile(local_config_path):
+        # Source local_config.sh (its stdout sent to stderr so it cannot pollute
+        # the forced-photometry result on stdout), then exec the script.
+        cmd = ['bash', '-c', '. "$1" 1>&2; exec "$2" "$3" "$4" "$5" "$6"',
+               'bash', local_config_path, script, fits_path, ra, dec, band]
+    else:
+        cmd = [script, fits_path, ra, dec, band]
     try:
         result = subprocess.run(
-            [script, fits_path, ra, dec, band],
+            cmd,
             cwd=work_dir, env=env, capture_output=True, text=True,
             timeout=FORCED_PHOT_TIMEOUT_SECONDS)
     except (subprocess.TimeoutExpired, OSError):
@@ -386,6 +399,9 @@ def main():
     # cwd = the directory of this script (even if reached via a symlink), so
     # ./local_config.sh and uploads/ resolve correctly.
     script_dir = os.path.dirname(os.path.realpath(__file__))
+    # local_config.sh sits next to this script; forced photometry sources it
+    # (like autoprocess.sh) so it runs with the production VaST environment.
+    local_config_path = os.path.join(script_dir, 'local_config.sh')
     try:
         os.chdir(script_dir)
     except OSError as err:
@@ -564,7 +580,7 @@ def main():
         results = []
         for img in images:
             band = derive_band(factory_text, img, band_override)
-            fp = run_forced_photometry_c(work_dir, img, ra, dec, band)
+            fp = run_forced_photometry_c(work_dir, local_config_path, img, ra, dec, band)
             if fp is None:
                 continue
             jd, atel = get_jd_and_atel_date(vast_dir, img)
