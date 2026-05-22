@@ -327,8 +327,11 @@ def setup_vast_working_copy(vast_ref, parent_dir):
     """
     vast_ref = os.path.realpath(vast_ref)
     rand = ''.join(random.choice(string.ascii_letters) for _ in range(8))
-    work = os.path.join(parent_dir, '{}{}{}'.format(
-        VAST_WORK_DIR_PREFIX, os.getpid(), rand))
+    # Must be absolute: forced_photometry.sh is later run with cwd=work, and a
+    # relative work path would make bash resolve the script path against that
+    # same cwd, doubling the path (parent_dir 'uploads' is relative to cwd).
+    work = os.path.abspath(os.path.join(parent_dir, '{}{}{}'.format(
+        VAST_WORK_DIR_PREFIX, os.getpid(), rand)))
     cmd = ['rsync', '-a', '--whole-file', '--no-times', '--omit-dir-times']
     for ex in VAST_COPY_EXCLUDES:
         cmd.extend(['--exclude', ex])
