@@ -197,7 +197,31 @@ def get_jd_and_atel_date(vast_dir, fits_path):
     return jd, atel
 
 
-def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, band):
+def _log_skip(debug_log, fits_path, reason, returncode, stderr):
+    """Append a diagnostic record for a skipped image to debug_log.
+
+    Best-effort and never raises -- it records why an image yielded no
+    measurement (returncode + the tail of forced_photometry.sh's stderr) so the
+    operator can see the real cause instead of only the summary count.
+    """
+    if not debug_log:
+        return
+    try:
+        with open(debug_log, 'a') as fh:
+            fh.write('=== %s ===\n' % os.path.basename(fits_path))
+            fh.write('reason: %s\n' % reason)
+            if returncode is not None:
+                fh.write('returncode: %s\n' % returncode)
+            if stderr:
+                tail = '\n'.join(stderr.splitlines()[-20:])
+                fh.write('stderr tail:\n%s\n' % tail)
+            fh.write('\n')
+    except OSError:
+        pass
+
+
+def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, band,
+                            debug_log=None):
     """Run the C-only forced photometry on one image inside the working copy.
 
     work_dir is a per-request rsync copy of the VaST tree (see
@@ -232,10 +256,19 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
             cmd,
             cwd=work_dir, env=env, capture_output=True, text=True,
             timeout=FORCED_PHOT_TIMEOUT_SECONDS)
-    except (subprocess.TimeoutExpired, OSError):
+    except subprocess.TimeoutExpired as exc:
+        _log_skip(debug_log, fits_path,
+                  'timeout after %ds' % FORCED_PHOT_TIMEOUT_SECONDS,
+                  None, getattr(exc, 'stderr', None))
+        return None
+    except OSError as exc:
+        _log_skip(debug_log, fits_path, 'OSError: %s' % exc, None, None)
         return None
     if result.returncode != 0:
         # Non-zero exit includes the target-off-image case -> skip this image.
+        _log_skip(debug_log, fits_path,
+                  'forced_photometry.sh exited %d' % result.returncode,
+                  result.returncode, result.stderr)
         return None
     aperture = None
     x = y = None
@@ -259,9 +292,14 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
             if idx + 1 < len(lines):
                 c_line = lines[idx + 1].strip()
     if not c_line or x is None or y is None:
+        _log_skip(debug_log, fits_path,
+                  'missing output markers (c_line=%s x=%s y=%s)'
+                  % (bool(c_line), x, y), result.returncode, result.stderr)
         return None
     toks = c_line.split()
     if len(toks) < 5:
+        _log_skip(debug_log, fits_path, 'malformed C line: %r' % c_line,
+                  result.returncode, result.stderr)
         return None
     return {
         'jd': toks[0],
@@ -576,11 +614,15 @@ def main():
             return
 
         # ---- Measure each image sequentially. ----
+        # Why-skipped diagnostics for any image that yields no measurement are
+        # appended here (kept with the request output for inspection).
+        skip_log = os.path.join(out_dir, 'forced_phot_skipped.log')
         factory_text = _read_factory_text(vast_dir)
         results = []
         for img in images:
             band = derive_band(factory_text, img, band_override)
-            fp = run_forced_photometry_c(work_dir, local_config_path, img, ra, dec, band)
+            fp = run_forced_photometry_c(work_dir, local_config_path, img, ra, dec, band,
+                                         debug_log=skip_log)
             if fp is None:
                 continue
             jd, atel = get_jd_and_atel_date(vast_dir, img)
