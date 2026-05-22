@@ -1,0 +1,119 @@
+<html>
+<head>
+<style type="text/css">
+body { color: #000;
+ background: #fff;
+ font-family: arial, helvetica, sans-serif;
+ font-size: 12pt;
+ line-height: 16pt;
+ margin-top: 3mm;
+ margin-bottom: 3mm;
+ margin-left: 10mm;
+ margin-right: 10mm;
+}
+
+p {text-align: justify; text-indent: 6mm; line-height: 16pt}
+.code {text-align: left; font-family: courier; background: #ccc; color:
+#000}
+table.main {border-spacing: 5pt}
+td { padding-left: 20pt; padding-right: 20pt; padding-bottom: 3pt }
+
+a:link {color: #55f; text-decoration: none}
+a:visited {color: #33f; text-decoration: none}
+a:active {color: #55f; text-decoration: none}
+a:hover {color: #55f; text-decoration: underline}
+
+.section { max-width: 720px; margin: 0 auto; padding-top: 6pt; }
+.section p { text-indent: 0; }
+.formats { margin-left: 8pt; }
+.working { margin-left: 1em; color: #888; visibility: hidden; }
+.secondary { color: #444; }
+hr.break { max-width: 720px; margin: 18pt auto; }
+</style>
+</head>
+
+<center>
+<h2>Forced-photometry lightcurve at a sky position</h2>
+</center>
+
+<form id="forced-phot-form" action="../cgi-bin/unmw/coord_forced_photometry.py" method="post">
+
+<div class="section">
+<p>Enter J2000 sky coordinates to get forced aperture photometry at that
+position on every image covering it that was taken in the last two weeks and
+is found in the uploads directory. Results are shown newest first, each with a
+full-frame preview, a zoom-in cutout marked with a red circle of the aperture
+used, and a link to the FITS file, plus a copy-paste ASCII table.</p>
+
+<table style="margin: 0 auto; border-spacing: 5pt;">
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec.):</td>
+  <td style="padding: 0;">
+    <input type="text" name="coords" size="36" placeholder="19:20:11.64 +01:40:40.6">
+  </td>
+</tr>
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">Band:</td>
+  <td style="padding: 0;">
+    <select name="band">
+      <option value="">auto (from camera settings)</option>
+      <option value="B">B</option>
+      <option value="V">V</option>
+      <option value="R">R</option>
+      <option value="Rc">Rc</option>
+      <option value="I">I</option>
+      <option value="Ic">Ic</option>
+      <option value="r">r</option>
+      <option value="i">i</option>
+      <option value="g">g</option>
+    </select>
+    <input type="submit" id="forced-phot-button" value="Measure">
+    <span id="forced-phot-working" class="working">Working...</span>
+  </td>
+</tr>
+</table>
+
+<p class="formats">
+Accepted coordinate formats:
+<ul>
+<li>Sexagesimal with colons: <span class="code">19:20:11.64 +01:40:40.6</span></li>
+<li>Sexagesimal with spaces: <span class="code">19 20 11.64 +01 40 40.6</span></li>
+<li>Decimal degrees: <span class="code">290.0485 +1.6779</span></li>
+</ul>
+The Dec. sign may be <span class="code">-</span>, <span class="code">+</span>, or omitted for positive Dec.
+Leave the band on <span class="code">auto</span> to use the band derived from the camera settings.
+</p>
+
+<p class="secondary" style="text-align: center;">
+Measuring many images can take a while, since each image is calibrated and
+measured in turn. Please be patient after pressing Measure.
+</p>
+</div>
+
+</form>
+
+<script type="text/javascript">
+(function () {
+  var form = document.getElementById('forced-phot-form');
+  var button = document.getElementById('forced-phot-button');
+  var working = document.getElementById('forced-phot-working');
+
+  function reset() {
+    button.disabled = false;
+    working.style.visibility = 'hidden';
+  }
+
+  form.addEventListener('submit', function () {
+    // Disable the button on submit so impatient double-clicks do not trigger
+    // a second (expensive) request.
+    button.disabled = true;
+    working.style.visibility = 'visible';
+  });
+
+  // pageshow fires on initial load AND on back/forward-cache restore, so the
+  // button is re-enabled if the user returns via the back button.
+  window.addEventListener('pageshow', reset);
+})();
+</script>
+
+</html>
