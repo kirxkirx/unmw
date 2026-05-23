@@ -90,7 +90,16 @@ DEFAULT_BAND = 'V'
 VALID_BANDS = ('B', 'V', 'R', 'Rc', 'I', 'Ic', 'r', 'i', 'g')
 # Per-upload directory name: img_<YYYY-MM-DD>_<...>. Only these are considered.
 IMG_DIR_RE = re.compile(r'^img_(\d{4})-(\d{2})-(\d{2})_')
-FITS_EXTENSIONS = ('.fits', '.fit', '.fts')
+# Plain and funpack-compressed FITS endings. The compressed-suffix variants
+# follow the same convention transient_factory_test31.sh uses
+# (FITS_FILE_COMPRESSION_POSTFIX = .fz), so an upload of foo.fits.fz parks the
+# wcs_fd_foo.fits.fz file in the per-night dir.
+FITS_FILE_ENDINGS = ('.fits.fz', '.fit.fz', '.fts.fz', '.fits', '.fit', '.fts')
+
+
+def _looks_like_fits(name):
+    lname = name.lower()
+    return any(lname.endswith(end) for end in FITS_FILE_ENDINGS)
 
 # Extracts the YYYY-MM-DD_HH-MM-SS timestamp embedded in a wcs_fd_ filename;
 # sorting on this alone reproduces JD order closely enough for streamed output.
@@ -296,6 +305,56 @@ def get_jd_and_atel_date(vast_dir, fits_path):
     return jd, atel
 
 
+def _seed_sextractor_catalog(work_dir, fits_path):
+    """If transient_factory_test31.sh has already saved a SExtractor catalog
+    next to fits_path, materialise it inside the per-request VaST working
+    copy and register it in vast_images_catalogs.log so
+    sextract_single_image_noninteractive will use it instead of re-running
+    SExtractor.
+
+    Pipeline-side convention (transient_factory_test31.sh, after the
+    reference-cache save block): writes
+        <dirname(image)>/<basename(image)>.cat
+        <dirname(image)>/<basename(image)>.cat.aperture
+    where basename keeps the trailing .fz when the upload is compressed.
+    Last SExtractor pass wins by overwrite.
+
+    The catalog and aperture files are touched after copying so their mtime
+    is fresh -- defeats the `default.sex` newer-than-catalog check in
+    src/autodetect_aperture.c (find_catalog_in_vast_images_catalogs_log)
+    that would otherwise force a recompute. The log entry's second field
+    must be byte-identical to the FITS path that forced_photometry.sh later
+    hands the binary; since this CGI controls both, we just use fits_path
+    as-is on both sides.
+
+    Returns True on cache hit (catalog materialised, log line written),
+    False otherwise (caller should let forced_photometry.sh run SExtractor
+    normally).
+    """
+    base = os.path.basename(fits_path)
+    cat_src = os.path.join(os.path.dirname(fits_path), base + '.cat')
+    ap_src = cat_src + '.aperture'
+    if not (os.path.isfile(cat_src) and os.path.isfile(ap_src)):
+        return False
+    cat_dst = os.path.join(work_dir, base + '.cat')
+    ap_dst = cat_dst + '.aperture'
+    try:
+        shutil.copy(cat_src, cat_dst)
+        shutil.copy(ap_src, ap_dst)
+        # Bump mtime to now so the mtime check vs default.sex always passes.
+        os.utime(cat_dst, None)
+        os.utime(ap_dst, None)
+    except OSError:
+        return False
+    log_path = os.path.join(work_dir, 'vast_images_catalogs.log')
+    try:
+        with open(log_path, 'a') as fh:
+            fh.write('{}.cat {}\n'.format(base, fits_path))
+    except OSError:
+        return False
+    return True
+
+
 def _log_skip(debug_log, fits_path, reason, returncode, stderr):
     """Append a diagnostic record for a skipped image to debug_log.
 
@@ -492,7 +551,7 @@ def list_recent_field_images(uploads_dir, covering_fields, window_days):
         for fname in sorted(os.listdir(dpath)):
             if not fname.startswith('wcs_fd_'):
                 continue
-            if os.path.splitext(fname)[1].lower() not in FITS_EXTENSIONS:
+            if not _looks_like_fits(fname):
                 continue
             if field_name_from_fits(fname) in covering_fields:
                 images.append(os.path.abspath(os.path.join(dpath, fname)))
@@ -792,6 +851,11 @@ def main():
                         shutil.copy(src_sex, work_dir_default_sex)
                     except OSError:
                         pass  # keep whatever default.sex was already there
+            # Reuse the SExtractor catalog autoprocess saved next to the
+            # image, if present, so this measurement skips its SExtractor
+            # pass entirely. Misses are silent; we fall back to the normal
+            # recompute path.
+            _seed_sextractor_catalog(work_dir, img)
             fp = run_forced_photometry_c(work_dir, local_config_path, img, ra, dec, band,
                                          debug_log=skip_log)
             if fp is None:
