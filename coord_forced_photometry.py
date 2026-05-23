@@ -950,7 +950,17 @@ def main():
                 src_sex = os.path.join(work_dir, sex_config_name)
                 if os.path.isfile(src_sex):
                     try:
-                        shutil.copy(src_sex, work_dir_default_sex)
+                        # copy2, not copy: we need the destination default.sex
+                        # to inherit the source's older mtime (set by the
+                        # request-start rsync) rather than getting bumped to
+                        # "now". Otherwise sextract_single_image_noninteractive
+                        # sees default.sex newer than the cached
+                        # wcs_<basename>.fits.cat (whether produced by Phase 1
+                        # or seeded from the autoprocess artifacts) and the
+                        # mtime check in autodetect_aperture.c forces a full
+                        # SExtractor recompute -- defeating the whole point of
+                        # Phase 1 and the catalog cache.
+                        shutil.copy2(src_sex, work_dir_default_sex)
                     except OSError:
                         pass  # keep whatever default.sex was already there
             fp = run_forced_photometry_c(work_dir, local_config_path, img, ra, dec, band,
