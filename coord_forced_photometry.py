@@ -8,7 +8,7 @@ field covers that position, runs the C forced-photometry implementation on each
 (util/forced_photometry.sh with FORCED_PHOTOMETRY_ONLY_C=yes), and presents the
 results -- newest first -- as an HTML table (with a full-frame preview and a
 zoom-in cutout marked with a red circle of the photometric aperture, plus a
-link to the FITS file) and as a copy-paste ASCII table.
+link to the FITS file) and as a copy-paste plain-text photometry table.
 
 Which fields cover the position is determined exactly like coord_search.py: by
 running lib/bin/sky2xy over $REFERENCE_IMAGES. The reference set contains every
@@ -513,15 +513,15 @@ def fits_url(url_prefix, fits_abs_path, uploads_abs):
 
 
 def ascii_table(rows):
-    """Build the fixed-width, space-padded ASCII table text."""
-    header = ['date', 'JD', 'mag/limit', 'err', 'status', 'field', 'image_basename']
+    """Build the fixed-width, space-padded plain-text photometry table."""
+    header = ['date', 'JD', 'mag/limit', 'err', 'status', 'field', 'image']
     body = [[r['atel'], r['jd'], r['mag'], r['err'], r['status'],
              r['field'], r['basename']] for r in rows]
     widths = [len(h) for h in header]
     for line in body:
         for i, cell in enumerate(line):
             widths[i] = max(widths[i], len(cell))
-    # The image_basename (last column) is not padded -- it is the line's tail.
+    # The "image" basename (last column) is not padded -- it is the line's tail.
     def fmt(cols):
         out = []
         for i, cell in enumerate(cols):
@@ -751,7 +751,7 @@ def main():
         # ---- Streamed results table. We open the table immediately and emit
         # one <tr> per image as it finishes (success or skip) so the page
         # fills in instead of waiting for all measurements before any output
-        # appears. The ASCII table is rendered once at the end, because its
+        # appears. The plain-text photometry table is rendered once at the end, because its
         # column widths depend on the full result set.
         # Why-skipped diagnostics for any image that produced no measurement
         # are appended here (kept with the request output for inspection).
@@ -846,14 +846,13 @@ def main():
                   flush=True)
         print("</table>", flush=True)
 
-        # ---- ASCII table for copy/paste -- rendered only after the loop so
-        # column widths reflect the full result set. ----
+        # ---- Photometry table for copy/paste -- rendered only after the
+        # loop so column widths reflect the full result set. A simple <pre>
+        # block is much more readable than a <textarea>, which was forced to
+        # a fixed character width that wrapped long rows awkwardly.
         if results:
-            print("<h3>ASCII table</h3>")
-            print("<textarea rows='{}' cols='110' readonly "
-                  "onclick='this.select()'>{}</textarea>".format(
-                      min(40, len(results) + 2),
-                      html_escape(ascii_table(results))))
+            print("<h3>Photometry table</h3>")
+            print("<pre>{}</pre>".format(html_escape(ascii_table(results))))
         else:
             print("<div class='notice'>None of the {} image(s) yielded a "
                   "measurement (target off-frame or calibration failed).</div>".format(

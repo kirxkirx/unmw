@@ -17,7 +17,8 @@ done
 A user enters sky coordinates and receives forced aperture photometry at that
 position for every image covering it taken in the last week that is found
 in the `uploads/` directory, in reverse chronological order, with image
-previews, cutouts, links to the FITS files, and a copy-paste ASCII table.
+previews, cutouts, links to the FITS files, and a copy-paste plain-text
+photometry table.
 
 ## 2. User-facing behaviour
 
@@ -72,7 +73,7 @@ coordinates (RA, Dec)
        render preview  (util/fits2png <img> x y)
        render cutout   (util/make_finding_chart --targetaperturecircle <APER> ...)
   -> sort by JD descending
-  -> emit HTML table + ASCII table
+  -> emit HTML table + photometry table
 ```
 
 The reference-image coverage scan and the cutout rendering are exactly the
@@ -231,10 +232,10 @@ image is measured), so the streamed and final orderings match.
   still names the image, the field and a `FITS` link, so each skipped image
   visibly advances the streamed table.
 
-### 9.2 ASCII table (in a `<textarea>` for easy copy)
+### 9.2 Photometry table (plain-text, in a `<pre>` for easy copy)
 
 ```
-date             JD            mag/limit  err   status      field          image_basename
+date             JD            mag/limit  err   status      field          image
 2026-05-20.7822  2461181.2822  13.21      0.02  detection   Aql-02-Q1b1x1  wcs_fd_Aql-02-Q1b1x1_2026-05-20_..._0214.fits
 2026-05-20.7799  2461181.2799  >18.10     -     upperlimit  Aql-02-Q2b1x1  wcs_fd_Aql-02-Q2b1x1_2026-05-20_..._0210.fits
 ```
@@ -320,8 +321,8 @@ housekeeping; only the VaST working copy is deleted by the CGI.
   image; confirm the two forced-photometry tests in `test_vast.sh` still pass.
 - unmw: run `coord_search.py` after the refactor to confirm identical output;
   run the new CGI via `python3` against the CI Aql example coordinates on the
-  real `uploads/` directory and check the HTML table, ASCII table, FITS links,
-  previews, and red-circle cutouts.
+  real `uploads/` directory and check the HTML table, photometry table, FITS
+  links, previews, and red-circle cutouts.
 
 ## 13. Deployment note
 
@@ -348,9 +349,9 @@ Decided:
 - 14-day window by directory date, fixed; only `img_<YYYY-MM-DD>` directories
   are considered.
 - HTML rows carry the photometry result alongside preview/cutout/FITS link;
-  the ASCII table repeats the same numbers (intentional).
-- ASCII columns include field and image name, left-aligned and padded to fixed
-  widths.
+  the plain-text photometry table repeats the same numbers (intentional).
+- Plain-text photometry table columns include field and image name, left-
+  aligned and padded to fixed widths.
 - Dates and JD via `util/get_image_date` (not a private Python conversion).
 - Band derived by parsing `transient_factory_test31.sh`; the band letter is the
   token after the underscore in `PHOTOMETRIC_CALIBRATION` (`APASS_V`/`TYCHO2_V`
