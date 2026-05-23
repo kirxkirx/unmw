@@ -371,21 +371,61 @@ def _phase1_solve_one(work_dir, local_config_path, fits_path):
     already exists from a prior call) the binary returns 0 immediately,
     which is fine for us.
     """
-    script = os.path.join(work_dir, 'util', 'solve_plate_with_UCAC5')
     env = os.environ.copy()
-    if local_config_path and os.path.isfile(local_config_path):
-        cmd = ['bash', '-c', '. "$1" 1>&2; exec "$2" "$3"',
-               'bash', local_config_path, script, fits_path]
-    else:
-        cmd = [script, fits_path]
+    # Two binaries run sequentially per image, both inside the same Phase-1
+    # worker task. Across images, tasks run in parallel.
+    #
+    # 1. lib/sextract_single_image_noninteractive <fits>
+    #    - produces image_pid<PID>.cat in cwd (default.param, 24-column,
+    #      multi-aperture format)
+    #    - APPENDS the catalog<->fits mapping to vast_images_catalogs.log
+    #    This is the catalog Phase 2's forced_photometry.sh Step 1 looks for
+    #    via the log; without it, Phase 2 re-runs SExtractor on every image.
+    #
+    # 2. util/solve_plate_with_UCAC5 <fits>
+    #    - via blind_plate_solve_with_astrometry_net() -> wcs_image_calibration.sh
+    #      -> identify.sh's catalog block, which first calls
+    #      lib/reformat_existing_sextractor_catalog_according_to_wcsparam.sh.
+    #      Because step 1 already populated vast_images_catalogs.log with an
+    #      entry for this fits, reformat succeeds and produces
+    #      wcs_<basename>.fits.cat (wcs.param, 10-column) WITHOUT running
+    #      SExtractor again.
+    #    - solve_plate then reads that wcs_<basename>.fits.cat and runs the
+    #      UCAC5 + APASS network queries, writing the photometric
+    #      wcs_<basename>.fits.cat.ucac5 that Phase 2's
+    #      calibrate_single_image.sh short-circuits on.
+    def _bash_wrap(script_path):
+        if local_config_path and os.path.isfile(local_config_path):
+            return ['bash', '-c', '. "$1" 1>&2; exec "$2" "$3"',
+                    'bash', local_config_path, script_path, fits_path]
+        return [script_path, fits_path]
+    # Step 1: SExtract -- catalog + log entry needed for everything downstream.
+    sextract_script = os.path.join(work_dir, 'lib',
+                                   'sextract_single_image_noninteractive')
+    try:
+        r1 = subprocess.run(_bash_wrap(sextract_script), cwd=work_dir, env=env,
+                            capture_output=True, text=True,
+                            timeout=FORCED_PHOT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        return (fits_path, None,
+                'sextract timeout: ' + (getattr(exc, 'stderr', '') or ''))
+    except OSError as exc:
+        return (fits_path, None, 'sextract OSError: {}'.format(exc))
+    if r1.returncode != 0:
+        return (fits_path, r1.returncode,
+                'sextract exit %d:\n%s' % (r1.returncode,
+                                           (r1.stderr or '')[-2000:]))
+    # Step 2: plate-solve + UCAC5+APASS query.
+    script = os.path.join(work_dir, 'util', 'solve_plate_with_UCAC5')
     try:
         result = subprocess.run(
-            cmd, cwd=work_dir, env=env, capture_output=True, text=True,
-            timeout=FORCED_PHOT_TIMEOUT_SECONDS)
+            _bash_wrap(script), cwd=work_dir, env=env, capture_output=True,
+            text=True, timeout=FORCED_PHOT_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
-        return (fits_path, None, getattr(exc, 'stderr', '') or '')
+        return (fits_path, None,
+                'solve_plate timeout: ' + (getattr(exc, 'stderr', '') or ''))
     except OSError as exc:
-        return (fits_path, None, 'OSError: {}'.format(exc))
+        return (fits_path, None, 'solve_plate OSError: {}'.format(exc))
     return (fits_path, result.returncode, result.stderr or '')
 
 
@@ -492,6 +532,10 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
                'bash', local_config_path, script, fits_path, ra, dec, band]
     else:
         cmd = [script, fits_path, ra, dec, band]
+    # DEBUG: capture per-image forced_photometry.sh stderr + wall-clock time
+    # to a sibling log file so we can see why SExtractor reruns / what the
+    # script actually did.
+    _debug_t0 = time.time()
     try:
         result = subprocess.run(
             cmd,
@@ -505,6 +549,21 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
     except OSError as exc:
         _log_skip(debug_log, fits_path, 'OSError: %s' % exc, None, None)
         return None
+    # DEBUG: drop the full stdout+stderr + per-image wall-clock time into a
+    # sibling log so we can see why SExtractor reruns / what actually ran.
+    if os.environ.get('DEBUG_KEEP_WORK_DIR'):
+        _debug_elapsed = time.time() - _debug_t0
+        _debug_path = os.path.join(
+            os.path.dirname(debug_log) if debug_log else work_dir,
+            'fp_stderr_' + os.path.basename(fits_path) + '.log')
+        try:
+            with open(_debug_path, 'w') as _fh:
+                _fh.write('elapsed: {:.2f} s\nreturncode: {}\n'
+                          '--- stdout ---\n{}\n--- stderr ---\n{}\n'.format(
+                              _debug_elapsed, result.returncode,
+                              result.stdout, result.stderr))
+        except OSError:
+            pass
     if result.returncode != 0:
         # Non-zero exit includes the target-off-image case -> skip this image.
         _log_skip(debug_log, fits_path,
@@ -1064,7 +1123,11 @@ def main():
         print("</body></html>")
     finally:
         if work_dir is not None:
-            shutil.rmtree(work_dir, ignore_errors=True)
+            if os.environ.get('DEBUG_KEEP_WORK_DIR'):
+                print('<!-- DEBUG: keeping work_dir {} -->'.format(work_dir))
+                sys.stderr.write('DEBUG: keeping work_dir {}\n'.format(work_dir))
+            else:
+                shutil.rmtree(work_dir, ignore_errors=True)
         slot.close()
 
 
