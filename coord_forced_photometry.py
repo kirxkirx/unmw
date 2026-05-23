@@ -841,6 +841,7 @@ def main():
         # this account -- the generic default.sex remains in place.
         work_dir_default_sex = os.path.join(work_dir, 'default.sex')
         results = []
+        sextractor_cache_hits = 0
         for img in images:
             band = derive_band(factory_text, img, band_override)
             sex_config_name = derive_sextractor_config(factory_text, img)
@@ -854,8 +855,10 @@ def main():
             # Reuse the SExtractor catalog autoprocess saved next to the
             # image, if present, so this measurement skips its SExtractor
             # pass entirely. Misses are silent; we fall back to the normal
-            # recompute path.
-            _seed_sextractor_catalog(work_dir, img)
+            # recompute path. The hit/miss counts are surfaced at the bottom
+            # of the page so the operator can see how often the cache helps.
+            if _seed_sextractor_catalog(work_dir, img):
+                sextractor_cache_hits += 1
             fp = run_forced_photometry_c(work_dir, local_config_path, img, ra, dec, band,
                                          debug_log=skip_log)
             if fp is None:
@@ -934,6 +937,13 @@ def main():
                       tot=_fmt_duration(elapsed),
                       avg=_fmt_duration(elapsed / n_processed),
                       n=n_processed))
+            # SExtractor cache effectiveness -- "reused" means a catalog
+            # produced by an earlier autoprocess.sh run was found next to
+            # the image and used in place of running SExtractor again.
+            print("<p class='secondary'>SExtractor catalog: {hit} reused "
+                  "from autoprocess artifacts, {miss} computed fresh.</p>".format(
+                      hit=sextractor_cache_hits,
+                      miss=n_processed - sextractor_cache_hits))
         else:
             print("<p class='secondary'>Total computation time: "
                   "{}.</p>".format(_fmt_duration(elapsed)))
