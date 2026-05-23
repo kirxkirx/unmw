@@ -41,6 +41,7 @@ except ImportError:
     sys.exit("Error: 'cgi' module not found. "
              "For Python 3.13+, install: pip install legacy-cgi")
 
+import concurrent.futures
 import datetime
 import glob
 import os
@@ -75,6 +76,9 @@ WINDOW_DAYS = 7                         # "last one week"
 # disable the cap (production value).
 MAX_IMAGES_FOR_TESTING = 5
 FORCED_PHOT_MAX_CONCURRENT = 5          # each request uses its own VaST working copy, so this only caps server load
+# Phase 1 (parallel UCAC5+APASS plate-solve) worker cap. The effective number
+# of workers per request is min(len(images), os.cpu_count() or 4, this).
+FORCED_PHOT_PARALLEL_SOLVE_WORKERS = 4
 FORCED_PHOT_TIMEOUT_SECONDS = 600       # per-image safety cap on forced_photometry.sh
 VAST_COPY_TIMEOUT_SECONDS = 300         # cap on the per-request rsync of the VaST tree
 # Per-request disposable VaST working copy (mirrors autoprocess.sh): rsync the
@@ -353,6 +357,85 @@ def _seed_sextractor_catalog(work_dir, fits_path):
     except OSError:
         return False
     return True
+
+
+def _phase1_solve_one(work_dir, local_config_path, fits_path):
+    """One Phase-1 task: source local_config.sh and exec
+    util/solve_plate_with_UCAC5 <fits_path> in work_dir, producing
+    wcs_<basename>.cat.ucac5 with the photometric APASS columns populated
+    (no --no_photometric_catalog). The binary reads the SExtractor catalog
+    we already seeded; it does not run SExtractor itself.
+
+    Returns (fits_path, returncode, stderr_tail) so the caller can log
+    failures uniformly via _log_skip; on cache-hit-in-binary (catalog
+    already exists from a prior call) the binary returns 0 immediately,
+    which is fine for us.
+    """
+    script = os.path.join(work_dir, 'util', 'solve_plate_with_UCAC5')
+    env = os.environ.copy()
+    if local_config_path and os.path.isfile(local_config_path):
+        cmd = ['bash', '-c', '. "$1" 1>&2; exec "$2" "$3"',
+               'bash', local_config_path, script, fits_path]
+    else:
+        cmd = [script, fits_path]
+    try:
+        result = subprocess.run(
+            cmd, cwd=work_dir, env=env, capture_output=True, text=True,
+            timeout=FORCED_PHOT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        return (fits_path, None, getattr(exc, 'stderr', '') or '')
+    except OSError as exc:
+        return (fits_path, None, 'OSError: {}'.format(exc))
+    return (fits_path, result.returncode, result.stderr or '')
+
+
+def _phase1_parallel_solve_plate(work_dir, local_config_path, images,
+                                 max_workers, debug_log):
+    """Phase 1: run util/solve_plate_with_UCAC5 in parallel across images so
+    each per-image wcs_<basename>.cat.ucac5 (photometric, APASS columns
+    populated) is on disk in work_dir before the serial forced_photometry.sh
+    loop starts. Phase 2's internal solve_plate call then short-circuits.
+
+    SExtractor catalogs are seeded for every image first because
+    solve_plate_with_UCAC5 reads wcs_<basename>.cat as its star list -- it
+    does not run SExtractor itself. Images without a cached .cat are still
+    submitted; solve_plate will fail for those (no .cat to read) and the
+    failure is logged via _log_skip. forced_photometry.sh later picks them
+    up with the normal path (which does run SExtractor first).
+
+    Returns (n_solved, elapsed_seconds) for the bottom-of-page diagnostic.
+    """
+    if not images:
+        return (0, 0, 0.0)
+    # Single seed sweep before launching any solve_plate task: each task
+    # reads wcs_<basename>.cat as its input star list, so the cached .cat
+    # has to be in place first. Count cache hits here for the bottom-of-
+    # page diagnostic; misses (no cached .cat) still get submitted because
+    # solve_plate will simply error out and we log that via _log_skip.
+    n_cache_hits = 0
+    for img in images:
+        if _seed_sextractor_catalog(work_dir, img):
+            n_cache_hits += 1
+    start = time.time()
+    n_solved = 0
+    workers = max(1, min(len(images), max_workers))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = [ex.submit(_phase1_solve_one, work_dir, local_config_path,
+                             img) for img in images]
+        for fut in concurrent.futures.as_completed(futures):
+            fits_path, rc, stderr = fut.result()
+            if rc == 0:
+                n_solved += 1
+            else:
+                # Same diagnostic channel as run_forced_photometry_c uses.
+                if rc is None:
+                    reason = 'Phase 1: timeout or OSError invoking ' \
+                             'solve_plate_with_UCAC5'
+                else:
+                    reason = ('Phase 1: solve_plate_with_UCAC5 exited {}'
+                              .format(rc))
+                _log_skip(debug_log, fits_path, reason, rc, stderr)
+    return (n_solved, n_cache_hits, time.time() - start)
 
 
 def _log_skip(debug_log, fits_path, reason, returncode, stderr):
@@ -810,6 +893,22 @@ def main():
             print("</body></html>")
             return
 
+        # ---- Phase 1: run util/solve_plate_with_UCAC5 in parallel across
+        # all images so each wcs_<basename>.cat.ucac5 (photometric) is on
+        # disk before the serial Phase 2 starts. This is the network-bound
+        # step (UCAC5 + APASS queries) and the only one that benefits much
+        # from in-request parallelism. Phase 2's internal solve_plate call
+        # then short-circuits via check_if_the_output_catalog_already_exist.
+        # (Failures here just mean Phase 2 falls through to the normal
+        # recompute path for that image.)
+        skip_log = os.path.join(out_dir, 'forced_phot_skipped.log')
+        phase1_workers = min(len(images), os.cpu_count() or 4,
+                             FORCED_PHOT_PARALLEL_SOLVE_WORKERS)
+        n_phase1_solved, sextractor_cache_hits, phase1_elapsed = \
+            _phase1_parallel_solve_plate(
+                work_dir, local_config_path, images, phase1_workers,
+                skip_log)
+
         # ---- Streamed results table. We open the table immediately and emit
         # one <tr> per image as it finishes (success or skip) so the page
         # fills in instead of waiting for all measurements before any output
@@ -817,7 +916,6 @@ def main():
         # column widths depend on the full result set.
         # Why-skipped diagnostics for any image that produced no measurement
         # are appended here (kept with the request output for inspection).
-        skip_log = os.path.join(out_dir, 'forced_phot_skipped.log')
         factory_text = _read_factory_text(vast_dir)
         sub_name = os.path.basename(out_dir)
         # Hi-res click-through PNGs are HIRES_THUMBNAIL_MULTIPLIER times larger
@@ -841,7 +939,10 @@ def main():
         # this account -- the generic default.sex remains in place.
         work_dir_default_sex = os.path.join(work_dir, 'default.sex')
         results = []
-        sextractor_cache_hits = 0
+        # SExtractor catalogs were already seeded by Phase 1 above (which
+        # also counted cache hits into sextractor_cache_hits). Per-image
+        # default.sex is still picked per camera here just before the
+        # measurement runs.
         for img in images:
             band = derive_band(factory_text, img, band_override)
             sex_config_name = derive_sextractor_config(factory_text, img)
@@ -852,13 +953,6 @@ def main():
                         shutil.copy(src_sex, work_dir_default_sex)
                     except OSError:
                         pass  # keep whatever default.sex was already there
-            # Reuse the SExtractor catalog autoprocess saved next to the
-            # image, if present, so this measurement skips its SExtractor
-            # pass entirely. Misses are silent; we fall back to the normal
-            # recompute path. The hit/miss counts are surfaced at the bottom
-            # of the page so the operator can see how often the cache helps.
-            if _seed_sextractor_catalog(work_dir, img):
-                sextractor_cache_hits += 1
             fp = run_forced_photometry_c(work_dir, local_config_path, img, ra, dec, band,
                                          debug_log=skip_log)
             if fp is None:
@@ -944,6 +1038,13 @@ def main():
                   "from autoprocess artifacts, {miss} computed fresh.</p>".format(
                       hit=sextractor_cache_hits,
                       miss=n_processed - sextractor_cache_hits))
+            # Phase 1 (parallel UCAC5 + APASS plate-solve) timing.
+            print("<p class='secondary'>UCAC5 plate-solve (Phase 1): "
+                  "{n} of {tot} image(s) solved in parallel in {t} "
+                  "(workers: {w}).</p>".format(
+                      n=n_phase1_solved, tot=n_processed,
+                      t=_fmt_duration(phase1_elapsed),
+                      w=phase1_workers))
         else:
             print("<p class='secondary'>Total computation time: "
                   "{}.</p>".format(_fmt_duration(elapsed)))
