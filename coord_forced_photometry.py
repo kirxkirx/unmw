@@ -69,7 +69,7 @@ ncl.DEFAULT_FORM_PATH = DEFAULT_FORM_PATH
 # ---------- code-level constants (not deployment-specific) ----------
 TEMP_PARENT = 'uploads'                 # mirrors upload.py's upload_dir
 TEMP_DIR_PREFIX = 'forced_phot_'
-WINDOW_DAYS = 2                         # TESTING: was 7 ("last one week"); shortened to keep tests quick
+WINDOW_DAYS = 7                         # "last one week"
 # TESTING: temporary cap on the number of images measured per request so the
 # end-to-end loop completes in minutes during UI/feature work. Set to None to
 # disable the cap (production value).

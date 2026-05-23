@@ -44,8 +44,8 @@ previews, cutouts, links to the FITS files, and a copy-paste ASCII table.
 - A separate ASCII-only table that can be copied verbatim follows the HTML
   table (rendered once at the end, since its column widths depend on the
   full result set). Mag values are rounded and prefixed identically.
-- Time window: last `WINDOW_DAYS` (default 7; **currently 2 for testing**),
-  fixed, by the `img_YYYY-MM-DD` directory date.
+- Time window: last `WINDOW_DAYS` (default 7), fixed, by the
+  `img_YYYY-MM-DD` directory date.
 - Testing knob `MAX_IMAGES_FOR_TESTING` (set to 5 while iterating) caps how
   many of the matching images are actually measured per request; when active
   a visible "Testing mode: ..." line says so. Set to `None` for production.
@@ -132,7 +132,7 @@ for any camera known to `transient_factory_test31.sh` and `combine_reports.sh`
   top of `transient_factory_test31.sh` and apply them to each field/image name.
 - Date window: consider only directories whose names start with
   `img_<YYYY-MM-DD>`; parse that date and keep the last `WINDOW_DAYS` days
-  (default 7; **currently 2 for testing**). Any other
+  (default 7). Any other
   directories in `uploads/` are unrelated and ignored (their names do not start
   with `img_<YYYY-MM-DD>`).
 - SExtractor configuration: per-image, the CGI selects the same camera-
