@@ -135,17 +135,21 @@ for any camera known to `transient_factory_test31.sh` and `combine_reports.sh`
   (default 7; **currently 2 for testing**). Any other
   directories in `uploads/` are unrelated and ignored (their names do not start
   with `img_<YYYY-MM-DD>`).
-- SExtractor configuration: `forced_photometry.sh` calls
-  `lib/sextract_single_image_noninteractive`, which runs `sex -c default.sex`
-  relative to its cwd (the per-request VaST working copy). It uses the
-  generic `default.sex` shipped with VaST, **not** the camera-specific
-  `default.sex.<CAMERA_SETTINGS>` variants that
-  `transient_factory_test31.sh` selects per-camera. For cameras whose
-  production pipeline relies on a non-default SExtractor configuration
-  (e.g. `TICA_TESS`, the telephoto-lens variants) the forced-photometry
-  result here can therefore differ from what the transient pipeline would
-  measure on the same image. Tracked as a known limitation; matching the
-  factory's camera-specific SExtractor selection is a future improvement.
+- SExtractor configuration: per-image, the CGI selects the same camera-
+  specific `default.sex.<...>` file that `transient_factory_test31.sh` would
+  use for that camera, by parsing the factory script the same way the band
+  is derived (see `sextractor_config_for_camera`). When the per-camera
+  block lists two SEXTRACTOR_CONFIG_FILES, the **second** is picked,
+  matching the script's documented convention that "the first run is
+  optimized to detect bright targets while the second one is optimized
+  for faint targets". When the per-camera block does not set it, the
+  script's global default (top-of-file `if [ -z "$SEXTRACTOR_CONFIG_FILES"
+  ];then ... fi`) is used; nested `if/fi` inside camera blocks are
+  ignored via an indent-aware block matcher. The chosen file (e.g.
+  `default.sex.telephoto_lens_vSTL` for Q1/Q2) is copied over the working
+  copy's `default.sex` right before each forced-photometry call. If the
+  chosen file is missing the generic `default.sex` is left in place --
+  measurement still proceeds, just with the unrefined settings.
 
 ## 7. Band derivation (by parsing the transient factory script)
 

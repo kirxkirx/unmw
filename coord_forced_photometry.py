@@ -141,6 +141,33 @@ def camera_settings_for_path(factory_text, path):
     return ''
 
 
+def _camera_block_body(factory_text, camera):
+    """Return the text inside `if [ "$CAMERA_SETTINGS" = "<camera>" ];then ... fi`.
+
+    Indent-aware: the closing `fi` is matched at the same column as the
+    opening `if`, so nested `if/fi` blocks (e.g. the DARK_FRAMES_DIR_OR_FILE
+    and FLAT_FIELD_DIR_OR_FILE conditionals) do not prematurely end the
+    match. Returns '' if no such block exists.
+    """
+    if not camera:
+        return ''
+    opening_re = re.compile(
+        r'^(\s*)if\s*\[\s*"\$CAMERA_SETTINGS"\s*=\s*"' + re.escape(camera) +
+        r'"\s*\]\s*;?\s*then\s*$',
+        re.MULTILINE)
+    om = opening_re.search(factory_text)
+    if not om:
+        return ''
+    indent = om.group(1)
+    body_start = om.end()
+    # Closing `fi` at the same column as the opening `if`.
+    closing_re = re.compile(r'^' + re.escape(indent) + r'fi\s*$', re.MULTILINE)
+    cm = closing_re.search(factory_text, body_start)
+    if not cm:
+        return ''
+    return factory_text[body_start:cm.start()]
+
+
 def band_for_camera(factory_text, camera):
     """Derive the calibration band letter for a CAMERA_SETTINGS value.
 
@@ -149,20 +176,13 @@ def band_for_camera(factory_text, camera):
     APASS_V/TYCHO2_V -> V, ...). Otherwise the factory's field-of-view default
     applies, which is V for both narrow (APASS_V) and wide (TYCHO2_V) fields.
     """
-    if camera:
-        # Look inside the 'if [ "$CAMERA_SETTINGS" = "CAMERA" ];then ... fi'
-        # block for an explicit PHOTOMETRIC_CALIBRATION assignment.
-        blk_re = re.compile(
-            r'\[\s*"\$CAMERA_SETTINGS"\s*=\s*"' + re.escape(camera) +
-            r'"\s*\]\s*;?\s*then(.*?)\n\s*fi',
-            re.DOTALL)
-        bm = blk_re.search(factory_text)
-        if bm:
-            pm = re.search(r'PHOTOMETRIC_CALIBRATION="([^"]+)"', bm.group(1))
-            if pm:
-                token = pm.group(1).rsplit('_', 1)[-1]
-                if token:
-                    return token
+    body = _camera_block_body(factory_text, camera)
+    if body:
+        pm = re.search(r'PHOTOMETRIC_CALIBRATION="([^"]+)"', body)
+        if pm:
+            token = pm.group(1).rsplit('_', 1)[-1]
+            if token:
+                return token
     return DEFAULT_BAND
 
 
@@ -175,6 +195,71 @@ def derive_band(factory_text, path, override):
     if band not in VALID_BANDS:
         band = DEFAULT_BAND
     return band
+
+
+def sextractor_config_for_camera(factory_text, camera):
+    """Return the SExtractor config filename optimised for the given camera.
+
+    transient_factory_test31.sh assigns SEXTRACTOR_CONFIG_FILES per camera, with
+    a script-wide comment that documents the convention:
+        "Typically, the first run is optimized to detect bright targets while
+         the second one is optimized for faint targets"
+    so when two (or more) files are listed, we pick the second one. With a
+    single file we use that. If the camera's block does not set
+    SEXTRACTOR_CONFIG_FILES, we fall back to the script's global default at
+    the top (`if [ -z "$SEXTRACTOR_CONFIG_FILES" ];then ... fi`). Inside the
+    block, the LAST uncommented assignment wins (later `SEXTRACTOR_CONFIG_FILES=
+    "..."` shadows the earlier ones). The bash variable `${CAMERA_SETTINGS}`
+    is expanded so `default.sex.${CAMERA_SETTINGS}` becomes
+    `default.sex.<camera>`.
+
+    Returns the config filename (e.g. "default.sex.telephoto_lens_vSTL") or
+    None if no config can be resolved -- in which case the caller should
+    leave the working copy's generic default.sex untouched.
+    """
+    files_str = None
+    # Per-camera block, mirroring band_for_camera.
+    body = _camera_block_body(factory_text, camera)
+    if body:
+        for line in body.splitlines():
+            stripped = line.lstrip()
+            if stripped.startswith('#'):
+                continue
+            m = re.search(r'SEXTRACTOR_CONFIG_FILES="([^"]+)"', stripped)
+            if m:
+                files_str = m.group(1)  # last uncommented assignment wins
+    # Global default at the top of the script.
+    if files_str is None:
+        global_re = re.compile(
+            r'\[\s*-z\s+"\$SEXTRACTOR_CONFIG_FILES"\s*\]\s*;?\s*then'
+            r'(.*?)\n\s*fi',
+            re.DOTALL)
+        gm = global_re.search(factory_text)
+        if gm:
+            for line in gm.group(1).splitlines():
+                stripped = line.lstrip()
+                if stripped.startswith('#'):
+                    continue
+                m = re.search(r'SEXTRACTOR_CONFIG_FILES="([^"]+)"', stripped)
+                if m:
+                    files_str = m.group(1)
+                    break
+    if not files_str:
+        return None
+    # Expand ${CAMERA_SETTINGS} / $CAMERA_SETTINGS.
+    files_str = files_str.replace('${CAMERA_SETTINGS}', camera or '')
+    files_str = files_str.replace('$CAMERA_SETTINGS', camera or '')
+    parts = files_str.split()
+    if not parts:
+        return None
+    # Faint-targets convention: second file when two or more are listed.
+    return parts[1] if len(parts) >= 2 else parts[0]
+
+
+def derive_sextractor_config(factory_text, path):
+    """Return the SExtractor config filename for the camera in path, or None."""
+    camera = camera_settings_for_path(factory_text, path)
+    return sextractor_config_for_camera(factory_text, camera)
 
 
 # ---------- forced photometry + date helpers ----------
@@ -686,9 +771,24 @@ def main():
         print("<tr><th>Date (UTC)</th><th>JD (UTC)</th><th>mag</th><th>err</th>"
               "<th>Status</th><th>Band</th><th>Field</th>"
               "<th>Cutout</th><th>Image</th></tr>", flush=True)
+        # SExtractor config selected per image, mirroring how
+        # transient_factory_test31.sh picks per-camera (see
+        # sextractor_config_for_camera). Copied over the working copy's
+        # default.sex right before each measurement; falls through silently
+        # if the chosen file is missing so we never fail the measurement on
+        # this account -- the generic default.sex remains in place.
+        work_dir_default_sex = os.path.join(work_dir, 'default.sex')
         results = []
         for img in images:
             band = derive_band(factory_text, img, band_override)
+            sex_config_name = derive_sextractor_config(factory_text, img)
+            if sex_config_name:
+                src_sex = os.path.join(work_dir, sex_config_name)
+                if os.path.isfile(src_sex):
+                    try:
+                        shutil.copy(src_sex, work_dir_default_sex)
+                    except OSError:
+                        pass  # keep whatever default.sex was already there
             fp = run_forced_photometry_c(work_dir, local_config_path, img, ra, dec, band,
                                          debug_log=skip_log)
             if fp is None:
