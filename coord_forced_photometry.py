@@ -1038,8 +1038,8 @@ def main():
                   "from autoprocess artifacts, {miss} computed fresh.</p>".format(
                       hit=sextractor_cache_hits,
                       miss=n_processed - sextractor_cache_hits))
-            # Phase 1 (parallel UCAC5 + APASS plate-solve) timing.
-            print("<p class='secondary'>UCAC5 plate-solve (Phase 1): "
+            # Parallel UCAC5 + APASS plate-solve timing.
+            print("<p class='secondary'>UCAC5 plate-solve: "
                   "{n} of {tot} image(s) solved in parallel in {t} "
                   "(workers: {w}).</p>".format(
                       n=n_phase1_solved, tot=n_processed,
