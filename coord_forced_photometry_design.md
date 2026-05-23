@@ -24,17 +24,31 @@ previews, cutouts, links to the FITS files, and a copy-paste ASCII table.
 - Input: one sky position (sexagesimal or decimal), parsed exactly like
   `coord_search.py`, plus an optional band override (default: the band derived
   from the camera; see section 7).
-- Output page, newest first, one row per `wcs_fd_` image:
-  - calendar date (ATel-style fractional day) and JD;
-  - magnitude or upper limit, magnitude error, and forced-photometry status
-    comment (verbatim from the forced-photometry C tool);
-  - field name and camera (read from the image name);
-  - a full-frame preview thumbnail (marker at the target);
-  - a zoom-in cutout with a red circle whose radius is the photometric
-    aperture used for that image;
-  - a link to the (world-viewable) `wcs_fd_` FITS file that was measured.
-- A separate ASCII-only table that can be copied verbatim.
-- Time window: last 7 days, fixed, by the `img_YYYY-MM-DD` directory date.
+- Output page, newest first, one row per `wcs_fd_` image. Rows are streamed
+  one at a time as each measurement completes so the user can see progress
+  rather than waiting for the whole batch. Columns:
+  - `Date (UTC)` (ATel-style fractional day) and `JD (UTC)`;
+  - `mag` and `err` (rounded to two decimal places; `mag` is prefixed with
+    `>` for upper-limit detections), and `Status` (verbatim string from the
+    forced-photometry C tool: `detection`, `upperlimit`, or `saturated`);
+  - `Band` and `Field` (the camera/field is read from the image name);
+  - `Cutout` -- a zoom-in centred on the measured pixel with a red circle
+    drawn at the photometric aperture used for that image;
+  - `Image` -- a full-frame thumbnail of the image, with a `FITS` link
+    placed directly under it for the (world-viewable) `wcs_fd_` file.
+  Both thumbnails open a higher-resolution PNG (HIRES_THUMBNAIL_MULTIPLIER
+  times larger, capped at `MAX_THUMBNAIL_PIXELS`) when clicked, the same
+  pattern coord_search.py uses.
+- Faint placeholder rows are emitted for images that yield no measurement
+  (off-frame or calibration failure) so the streamed table keeps advancing.
+- A separate ASCII-only table that can be copied verbatim follows the HTML
+  table (rendered once at the end, since its column widths depend on the
+  full result set). Mag values are rounded and prefixed identically.
+- Time window: last `WINDOW_DAYS` (default 7; **currently 2 for testing**),
+  fixed, by the `img_YYYY-MM-DD` directory date.
+- Testing knob `MAX_IMAGES_FOR_TESTING` (set to 5 while iterating) caps how
+  many of the matching images are actually measured per request; when active
+  a visible "Testing mode: ..." line says so. Set to `None` for production.
 
 ## 3. Architecture and data flow
 
@@ -117,9 +131,21 @@ for any camera known to `transient_factory_test31.sh` and `combine_reports.sh`
 - Camera detection: parse the `*"PATTERN"* -> CAMERA_SETTINGS` rules near the
   top of `transient_factory_test31.sh` and apply them to each field/image name.
 - Date window: consider only directories whose names start with
-  `img_<YYYY-MM-DD>`; parse that date and keep the last 7 days. Any other
+  `img_<YYYY-MM-DD>`; parse that date and keep the last `WINDOW_DAYS` days
+  (default 7; **currently 2 for testing**). Any other
   directories in `uploads/` are unrelated and ignored (their names do not start
   with `img_<YYYY-MM-DD>`).
+- SExtractor configuration: `forced_photometry.sh` calls
+  `lib/sextract_single_image_noninteractive`, which runs `sex -c default.sex`
+  relative to its cwd (the per-request VaST working copy). It uses the
+  generic `default.sex` shipped with VaST, **not** the camera-specific
+  `default.sex.<CAMERA_SETTINGS>` variants that
+  `transient_factory_test31.sh` selects per-camera. For cameras whose
+  production pipeline relies on a non-default SExtractor configuration
+  (e.g. `TICA_TESS`, the telephoto-lens variants) the forced-photometry
+  result here can therefore differ from what the transient pipeline would
+  measure on the same image. Tracked as a known limitation; matching the
+  factory's camera-specific SExtractor selection is a future improvement.
 
 ## 7. Band derivation (by parsing the transient factory script)
 
@@ -173,32 +199,46 @@ The `# C implementation:` line format is unchanged.
 
 ### 9.1 HTML results table (reverse chronological by JD)
 
-One row per `wcs_fd_` image. Each row shows the full photometry result next to
-that image's preview, cutout, and FITS link, with these columns:
-date (calendar + JD) | magnitude +/- error | status | field |
-full-frame preview | zoom-in cutout (red aperture circle) | FITS link.
+One row per `wcs_fd_` image, streamed (one `<tr>` per finished measurement,
+flushed) so the table fills in live. Nine columns, in this order:
 
-- The photometry result (date, JD, magnitude/limit, error, status, field) is
-  shown on every row, alongside that image's preview, cutout, and FITS link.
-  The same numbers also appear in the ASCII table below; this duplication is
-  intentional.
-- Preview: `util/fits2png <img> x y` thumbnail (existing marker).
-- Cutout: `util/make_finding_chart --width N --nolabels
-  --targetaperturecircle <APER> -- <img> x y`.
-- FITS link: the measured `wcs_fd_` image, as `$URL_OF_DATA_PROCESSING_ROOT` +
-  the image path relative to the `uploads/` root (world-viewable).
-- Images where sky2xy reports the target off the frame are skipped.
+| Date (UTC) | JD (UTC) | mag | err | Status | Band | Field | Cutout | Image |
+
+The order is approximate JD-descending: rows are emitted in the order of the
+embedded filename timestamp (a cheap proxy for JD that is known before the
+image is measured), so the streamed and final orderings match.
+
+- `mag` and `err` are formatted to two decimal places; `mag` carries a `>`
+  prefix when `Status` is `upperlimit`. Non-numeric values pass through.
+- `Cutout`: `util/make_finding_chart --width N --nolabels
+  --targetaperturecircle <APER> -- <img> x y`. With `--targetaperturecircle`
+  in effect, `pgfv.c` suppresses the default `+` marker so the aperture
+  circle is the only annotation drawn.
+- `Image`: `util/fits2png <img> x y` thumbnail with a `FITS` link rendered
+  directly below it (the same `wcs_fd_` file is served from
+  `$URL_OF_DATA_PROCESSING_ROOT` + the image's path relative to `uploads/`).
+- Both thumbnails are clickable; the anchor target is a higher-resolution
+  PNG of the same view, rendered alongside the thumbnail
+  (`HIRES_THUMBNAIL_MULTIPLIER` times bigger, capped at
+  `MAX_THUMBNAIL_PIXELS`). Shared with coord_search.py via
+  `nmw_coord_lib.render_thumbnail_link`.
+- Images where sky2xy reports the target off the frame, or where
+  `forced_photometry.sh` exits non-zero, yield a faint `tr.skipped` row that
+  still names the image, the field and a `FITS` link, so each skipped image
+  visibly advances the streamed table.
 
 ### 9.2 ASCII table (in a `<textarea>` for easy copy)
 
 ```
-date             JD            mag/limit  err     status      field          image_basename
-2026-05-20.7822  2461181.2822  13.214     0.021   ok          Aql-02-Q1b1x1  wcs_fd_Aql-02-Q1b1x1_2026-05-20_..._0214.fits
-2026-05-20.7799  2461181.2799  >18.10     99.000  upperlimit  Aql-02-Q2b1x1  wcs_fd_Aql-02-Q2b1x1_2026-05-20_..._0210.fits
+date             JD            mag/limit  err   status      field          image_basename
+2026-05-20.7822  2461181.2822  13.21      0.02  detection   Aql-02-Q1b1x1  wcs_fd_Aql-02-Q1b1x1_2026-05-20_..._0214.fits
+2026-05-20.7799  2461181.2799  >18.10     -     upperlimit  Aql-02-Q2b1x1  wcs_fd_Aql-02-Q2b1x1_2026-05-20_..._0210.fits
 ```
 
-The magnitude/limit, error, and status values are passed through verbatim from
-the forced-photometry C tool (its own upper-limit representation is preserved).
+`mag/limit` and `err` use the same formatting as the HTML table: rounded to
+two decimal places, with a `>` prefix on the magnitude when `status` is
+`upperlimit`. `status` is passed through verbatim from the forced-photometry
+C tool (`detection`, `upperlimit`, `saturated`).
 
 Columns are left-aligned and space-padded to a fixed width so they line up. The
 status column is padded to the longest expected value (`upperlimit`, 10

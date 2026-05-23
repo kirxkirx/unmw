@@ -52,11 +52,9 @@ FOV_TIMEOUT_SECONDS = 30
 LOCK_DIR = '/tmp'
 TEMP_PARENT = 'uploads'              # mirrors upload.py's upload_dir
 TEMP_DIR_PREFIX = 'coord_search_'
-DEFAULT_THUMBNAIL_PIXELS = 256       # fallback for in-page thumbnail size
-HIRES_THUMBNAIL_MULTIPLIER = 4       # click-through PNG is this many times
-                                     # bigger than the in-page thumbnail
-MIN_THUMBNAIL_PIXELS = 32
-MAX_THUMBNAIL_PIXELS = 4096
+# Thumbnail pixel sizing is shared with coord_forced_photometry.py via the
+# nmw_coord_lib import below (DEFAULT_THUMBNAIL_PIXELS, HIRES_THUMBNAIL_MULTIPLIER,
+# MIN/MAX_THUMBNAIL_PIXELS).
 MAX_RESULTS_TO_PROCESS = 200         # safety cap on coord-search matches
 LIST_ALL_MAX_FILES = 2000            # safety cap on the "show all" listing
 LIST_ALL_TIMEOUT_SECONDS = 900       # wall-clock cap for the "show all" flow (15 min)
@@ -80,7 +78,9 @@ from nmw_coord_lib import (
     emit_message_page, parse_coordinates, read_config_vars,
     acquire_concurrency_slot, run_sky2xy_scan, get_image_metadata,
     zoomout_png_dims, make_zoomout_thumbnail, make_zoomin_thumbnail,
-    field_name_from_fits, list_fits_files,
+    render_thumbnail_link, field_name_from_fits, list_fits_files,
+    DEFAULT_THUMBNAIL_PIXELS, HIRES_THUMBNAIL_MULTIPLIER,
+    MIN_THUMBNAIL_PIXELS, MAX_THUMBNAIL_PIXELS,
 )
 
 # The shared page-chrome helpers build their links from
@@ -111,19 +111,6 @@ def render_mean_scale(scale_x, scale_y):
     else:
         m = (scale_x + scale_y) / 2.0
     return '{:.2f}'.format(m), m
-
-
-def render_thumbnail_link(thumb_name, hires_name, label, base, url_prefix, sub):
-    """Anchor+image HTML cell for a thumbnail, opening the hi-res on click."""
-    if not thumb_name:
-        return "<i>unavailable</i>"
-    thumb_url = html_escape('{}/{}/{}'.format(url_prefix, sub, thumb_name))
-    target = hires_name if hires_name else thumb_name
-    target_url = html_escape('{}/{}/{}'.format(url_prefix, sub, target))
-    return ("<a href='{tu}' target='_blank'>"
-            "<img src='{su}' alt='{l} of {b}' border='0'>"
-            "</a>".format(tu=target_url, su=thumb_url, l=label,
-                          b=html_escape(base)))
 
 
 def render_distance_cell(pix, mean_scale):

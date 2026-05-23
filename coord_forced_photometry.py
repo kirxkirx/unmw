@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-CGI: forced-photometry lightcurve at a sky position over the last one week.
+CGI: forced-photometry lightcurve at a sky position over a recent time window.
 
 The user enters one sky position; the page finds every wcs_fd_ image in the
-uploads/ directory (last 7 days, by the img_<YYYY-MM-DD> directory date) whose
+uploads/ directory (the WINDOW_DAYS most recent days by img_<YYYY-MM-DD> dir date) whose
 field covers that position, runs the C forced-photometry implementation on each
 (util/forced_photometry.sh with FORCED_PHOTOMETRY_ONLY_C=yes), and presents the
 results -- newest first -- as an HTML table (with a full-frame preview and a
@@ -57,7 +57,8 @@ from nmw_coord_lib import (
     html_escape, _PAGE_CSS, back_link_url, form_page_url, emit_redirect,
     emit_message_page, parse_coordinates, read_config_vars,
     acquire_concurrency_slot, run_sky2xy_scan, get_image_metadata,
-    make_zoomout_thumbnail, make_zoomin_thumbnail, field_name_from_fits,
+    make_zoomout_thumbnail, make_zoomin_thumbnail, render_thumbnail_link,
+    field_name_from_fits, HIRES_THUMBNAIL_MULTIPLIER,
 )
 
 # The shared page-chrome helpers build their links from ncl.DEFAULT_FORM_PATH;
@@ -68,7 +69,11 @@ ncl.DEFAULT_FORM_PATH = DEFAULT_FORM_PATH
 # ---------- code-level constants (not deployment-specific) ----------
 TEMP_PARENT = 'uploads'                 # mirrors upload.py's upload_dir
 TEMP_DIR_PREFIX = 'forced_phot_'
-WINDOW_DAYS = 7                         # "last one week"
+WINDOW_DAYS = 2                         # TESTING: was 7 ("last one week"); shortened to keep tests quick
+# TESTING: temporary cap on the number of images measured per request so the
+# end-to-end loop completes in minutes during UI/feature work. Set to None to
+# disable the cap (production value).
+MAX_IMAGES_FOR_TESTING = 5
 FORCED_PHOT_MAX_CONCURRENT = 5          # each request uses its own VaST working copy, so this only caps server load
 FORCED_PHOT_TIMEOUT_SECONDS = 600       # per-image safety cap on forced_photometry.sh
 VAST_COPY_TIMEOUT_SECONDS = 300         # cap on the per-request rsync of the VaST tree
@@ -590,12 +595,26 @@ def main():
                 m = _IMG_TS_RE.search(os.path.basename(p))
                 return m.group(1) if m else ''
             images.sort(key=_img_ts, reverse=True)
+            # TESTING: cap how many images we actually measure so UI/feature
+            # iterations finish in minutes. Remembered so we can warn the user.
+            total_matching = len(images)
+            if MAX_IMAGES_FOR_TESTING is not None:
+                images = images[:MAX_IMAGES_FOR_TESTING]
+            capped_for_testing = (len(images) < total_matching)
 
         # ---- Stream the page header. ----
         page_title = "Forced-photometry lightcurve"
         print("Content-Type: text/html\n", flush=True)
         print("<html><head><title>{}</title>".format(html_escape(page_title)))
         print(_PAGE_CSS)
+        # Page-local CSS in <head> so muted status lines streamed before the
+        # table (e.g. "Preparing working copy of VaST...") are styled from
+        # the moment they hit the browser, with no later restyle flash.
+        print("<style type='text/css'>"
+              "tr.skipped td { color: #888; font-size: 90%; "
+              "background: #f8f8f8; }"
+              " p.secondary { color: #666; font-style: italic; }"
+              "</style>")
         print("</head><body>")
         print("<!-- {} -->".format(' ' * 4000))  # past Apache's CGI buffer
         print("<h2>{}</h2>".format(html_escape(page_title)))
@@ -619,13 +638,19 @@ def main():
                 html_escape(back_link_url())))
             print("</body></html>")
             return
-        print("<p>Measuring {} image(s) with C forced photometry; this can "
-              "take a while ...</p>".format(len(images)), flush=True)
+        print("<p>Performing forced photometry on {} images; this will "
+              "take a while...</p>".format(len(images)), flush=True)
+        if capped_for_testing:
+            # Operator-visible reminder that the TESTING cap is in effect, so
+            # nobody mistakes a 5-of-50 lightcurve for the full result.
+            print("<p class='secondary'><i>Testing mode: measuring only the "
+                  "first {} of {} matching images.</i></p>".format(
+                      len(images), total_matching), flush=True)
         # Give the user something to watch during the ~30 s rsync that builds
         # the per-request working copy of VaST; without this line the page
         # sits silent until the first measurement row arrives.
-        print("<p class='secondary'>Preparing working copy of VaST "
-              "(one-off rsync, ~30 s)...</p>", flush=True)
+        print("<p class='secondary'>Preparing working copy of VaST...</p>",
+              flush=True)
 
         # ---- Disposable VaST working copy (autoprocess.sh style) so forced
         # photometry's scratch stays isolated from $VAST_REFERENCE_COPY. ----
@@ -643,20 +668,24 @@ def main():
         # fills in instead of waiting for all measurements before any output
         # appears. The ASCII table is rendered once at the end, because its
         # column widths depend on the full result set.
-        # Page-local CSS for the faint skipped rows.
-        print("<style type='text/css'>"
-              "tr.skipped td { color: #888; font-size: 90%; "
-              "background: #f8f8f8; }"
-              "</style>")
         # Why-skipped diagnostics for any image that produced no measurement
         # are appended here (kept with the request output for inspection).
         skip_log = os.path.join(out_dir, 'forced_phot_skipped.log')
         factory_text = _read_factory_text(vast_dir)
         sub_name = os.path.basename(out_dir)
+        # Hi-res click-through PNGs are HIRES_THUMBNAIL_MULTIPLIER times larger
+        # than the in-page thumbnails (capped at MAX_THUMBNAIL_PIXELS).
+        hires_pixels = min(MAX_THUMBNAIL_PIXELS,
+                           thumb_pixels * HIRES_THUMBNAIL_MULTIPLIER)
+        # Explanatory line; appears just above the table, then becomes context
+        # for the rows that start arriving below it.
+        print("<p class='secondary'>Each finished measurement appears as a "
+              "row in the table below; the page keeps filling in until all "
+              "images are processed.</p>", flush=True)
         print("<table class='main'>")
-        print("<tr><th>Date (UT)</th><th>JD</th><th>mag</th><th>err</th>"
-              "<th>status</th><th>band</th><th>field</th>"
-              "<th>preview</th><th>cutout</th><th>FITS</th></tr>", flush=True)
+        print("<tr><th>Date (UTC)</th><th>JD (UTC)</th><th>mag</th><th>err</th>"
+              "<th>Status</th><th>Band</th><th>Field</th>"
+              "<th>Cutout</th><th>Image</th></tr>", flush=True)
         results = []
         for img in images:
             band = derive_band(factory_text, img, band_override)
@@ -679,20 +708,38 @@ def main():
             nx = meta.get('nx') if meta else None
             ny = meta.get('ny') if meta else None
             png_preview = None
+            png_preview_hires = None
             png_cutout = None
+            png_cutout_hires = None
             if nx and ny:
+                # Two PNGs per image: the small in-page thumbnail and a
+                # higher-resolution version reached by clicking the thumbnail.
                 png_preview = make_zoomout_thumbnail(
                     img, fp['x'], fp['y'], nx, ny, out_dir, vast_dir, thumb_pixels)
+                png_preview_hires = make_zoomout_thumbnail(
+                    img, fp['x'], fp['y'], nx, ny, out_dir, vast_dir, hires_pixels,
+                    suffix='zoomout_hires')
             png_cutout = make_zoomin_thumbnail(
                 img, fp['x'], fp['y'], out_dir, vast_dir, thumb_pixels,
                 zoomin_pixels, aperture_circle_diameter=fp['aperture'])
+            png_cutout_hires = make_zoomin_thumbnail(
+                img, fp['x'], fp['y'], out_dir, vast_dir, hires_pixels,
+                zoomin_pixels, suffix='zoomin_hires',
+                aperture_circle_diameter=fp['aperture'])
+            # Pre-format mag/err once so HTML and ASCII renderers use the
+            # same string (rounded to 2 d.p.; '>' prefix on upper limits).
             r = {
-                'jd': jd, 'atel': atel, 'mag': fp['mag'], 'err': fp['err'],
+                'jd': jd, 'atel': atel,
+                'mag': _fmt_mag(fp['mag'], fp['status']),
+                'err': _fmt_err(fp['err']),
                 'status': fp['status'], 'band': band,
                 'field': field_name_from_fits(img),
                 'basename': fp['basename'],
                 'fits_url': fits_url(url_prefix, img, uploads_abs),
-                'png_preview': png_preview, 'png_cutout': png_cutout,
+                'png_preview': png_preview,
+                'png_preview_hires': png_preview_hires,
+                'png_cutout': png_cutout,
+                'png_cutout_hires': png_cutout_hires,
             }
             results.append(r)
             print(_html_row(r, url_prefix, sub_name) + _ROW_FLUSH_PAD,
@@ -729,55 +776,74 @@ def _is_float(s):
         return False
 
 
-def _thumb_cell(png_name, url_prefix, sub, label, base):
-    if not png_name:
-        return "<i>unavailable</i>"
-    u = html_escape('{}/{}/{}'.format(url_prefix, sub, png_name))
-    return ("<a href='{u}' target='_blank'>"
-            "<img src='{u}' alt='{l} of {b}' border='0'></a>".format(
-                u=u, l=label, b=html_escape(base)))
+def _fmt_mag(mag_str, status):
+    """Format a magnitude string to two decimal places, prepending '>' when
+    the measurement is an upper limit. Falls through unchanged if the value
+    is not numeric so any error/sentinel text passes to the user verbatim.
+    """
+    if not _is_float(mag_str):
+        return mag_str
+    rounded = '{:.2f}'.format(float(mag_str))
+    return '>' + rounded if status == 'upperlimit' else rounded
+
+
+def _fmt_err(err_str):
+    """Format an error string to two decimal places, leaving non-numeric
+    values (e.g. dashes for upper limits) untouched.
+    """
+    if not _is_float(err_str):
+        return err_str
+    return '{:.2f}'.format(float(err_str))
 
 
 def _html_row(r, url_prefix, sub):
-    fits_cell = "<i>n/a</i>"
+    """Render one streamed results <tr>. Layout (9 columns, no separate FITS
+    column): Date | JD | mag | err | Status | Band | Field | Cutout | Image,
+    where 'Image' contains the zoom-out thumbnail with a FITS link directly
+    below it. Both thumbnails open a higher-resolution PNG on click via
+    render_thumbnail_link.
+    """
+    fits_link = ''
     if r['fits_url']:
-        fu = html_escape(r['fits_url'])
-        fits_cell = "<a href='{u}' target='_blank'>FITS</a>".format(u=fu)
+        fits_link = ("<br><a href='{u}' target='_blank'>FITS</a>".format(
+            u=html_escape(r['fits_url'])))
+    image_cell = render_thumbnail_link(
+        r.get('png_preview'), r.get('png_preview_hires'),
+        'image', r['basename'], url_prefix, sub) + fits_link
+    cutout_cell = render_thumbnail_link(
+        r.get('png_cutout'), r.get('png_cutout_hires'),
+        'cutout', r['basename'], url_prefix, sub)
     return ("<tr>"
             "<td>{atel}</td><td>{jd}</td><td>{mag}</td><td>{err}</td>"
             "<td>{st}</td><td>{band}</td><td><b>{field}</b></td>"
-            "<td>{prev}</td><td>{cut}</td><td>{fits}</td>"
+            "<td>{cut}</td><td>{img}</td>"
             "</tr>".format(
                 atel=html_escape(r['atel']), jd=html_escape(r['jd']),
                 mag=html_escape(r['mag']), err=html_escape(r['err']),
                 st=html_escape(r['status']), band=html_escape(r['band']),
                 field=html_escape(r['field']),
-                prev=_thumb_cell(r['png_preview'], url_prefix, sub,
-                                 'preview', r['basename']),
-                cut=_thumb_cell(r['png_cutout'], url_prefix, sub,
-                                'cutout', r['basename']),
-                fits=fits_cell))
+                cut=cutout_cell, img=image_cell))
 
 
 def _html_skipped_row(img_path, field_name, fits_link_url):
-    """Faint placeholder row for an image that produced no measurement.
-
-    The cells before "field" are dashed out so each streamed skip still
-    advances the table by one row -- the user can see processing progressing
-    even when several images in a row fail (off-frame or calibration failure).
+    """Faint placeholder row (9 columns) for an image that produced no
+    measurement. The Cutout + Image columns are merged into one cell that
+    carries the filename, the reason, and the FITS link -- so each streamed
+    skip still advances the table by one row even when the thumbnails are
+    unavailable.
     """
     base = os.path.basename(img_path)
-    fits_cell = "<i>n/a</i>"
+    fits_link = ''
     if fits_link_url:
-        fits_cell = "<a href='{u}' target='_blank'>FITS</a>".format(
-            u=html_escape(fits_link_url))
+        fits_link = (" &mdash; <a href='{u}' target='_blank'>FITS</a>".format(
+            u=html_escape(fits_link_url)))
     return ("<tr class='skipped'>"
             "<td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td>"
             "<td><i>skipped</i></td><td>&mdash;</td><td><b>{field}</b></td>"
             "<td colspan='2'><span class='code'>{base}</span> "
-            "&mdash; off-frame or no measurement</td><td>{fits}</td>"
+            "&mdash; off-frame or no measurement{fits}</td>"
             "</tr>".format(field=html_escape(field_name),
-                           base=html_escape(base), fits=fits_cell))
+                           base=html_escape(base), fits=fits_link))
 
 
 if __name__ == "__main__":

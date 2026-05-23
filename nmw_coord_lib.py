@@ -518,6 +518,24 @@ def make_zoomin_thumbnail(fits_path, x, y, out_dir, vast_dir, thumb_pixels,
                           fits_path, suffix)
 
 
+def render_thumbnail_link(thumb_name, hires_name, label, base, url_prefix, sub):
+    """Anchor+image HTML cell for a thumbnail, opening the hi-res on click.
+
+    If hires_name is None or missing, the thumbnail itself becomes the click
+    target. Shared between coord_search.py and coord_forced_photometry.py so
+    both pages render consistent thumbnail markup.
+    """
+    if not thumb_name:
+        return "<i>unavailable</i>"
+    thumb_url = html_escape('{}/{}/{}'.format(url_prefix, sub, thumb_name))
+    target = hires_name if hires_name else thumb_name
+    target_url = html_escape('{}/{}/{}'.format(url_prefix, sub, target))
+    return ("<a href='{tu}' target='_blank'>"
+            "<img src='{su}' alt='{l} of {b}' border='0'>"
+            "</a>".format(tu=target_url, su=thumb_url, l=label,
+                          b=html_escape(base)))
+
+
 def list_fits_files(ref_dir):
     """Return a sorted list of absolute paths to FITS files in ref_dir.
 
