@@ -535,6 +535,9 @@ def ascii_table(rows):
 
 def main():
     cgitb.enable()
+    # Wall-clock start so the bottom of the page can report total and
+    # per-image times.
+    start_time = time.time()
 
     # cwd = the directory of this script (even if reached via a symlink), so
     # ./local_config.sh and uploads/ resolve correctly.
@@ -858,6 +861,19 @@ def main():
                   "measurement (target off-frame or calibration failed).</div>".format(
                       len(images)))
 
+        # Wall-clock summary, styled like the other diagnostic lines.
+        elapsed = time.time() - start_time
+        n_processed = len(images)
+        if n_processed > 0:
+            print("<p class='secondary'>Total computation time: {tot} "
+                  "(average {avg} per image over {n} processed).</p>".format(
+                      tot=_fmt_duration(elapsed),
+                      avg=_fmt_duration(elapsed / n_processed),
+                      n=n_processed))
+        else:
+            print("<p class='secondary'>Total computation time: "
+                  "{}.</p>".format(_fmt_duration(elapsed)))
+
         print("<br><br><a href='{}'>Search again</a>".format(
             html_escape(back_link_url())))
         print("</body></html>")
@@ -893,6 +909,17 @@ def _fmt_err(err_str):
     if not _is_float(err_str):
         return err_str
     return '{:.2f}'.format(float(err_str))
+
+
+def _fmt_duration(seconds):
+    """Human-friendly duration. Under a minute -> 'X.X s'; otherwise
+    'M min S.S s'. Used for the wall-clock and per-image lines at the
+    bottom of the page.
+    """
+    if seconds < 60.0:
+        return '{:.1f} s'.format(seconds)
+    minutes, secs = divmod(seconds, 60.0)
+    return '{:d} min {:.1f} s'.format(int(minutes), secs)
 
 
 def _html_row(r, url_prefix, sub):
