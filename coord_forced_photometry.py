@@ -93,6 +93,13 @@ DEFAULT_ZOOMIN_PIXELS = 40              # half-width of the zoom-in (source px);
 DEFAULT_BAND = 'V'
 # Filters util/forced_photometry.sh accepts (mirrors its own validation).
 VALID_BANDS = ('B', 'V', 'R', 'Rc', 'I', 'Ic', 'r', 'i', 'g')
+# Safe-shape regex for ra/dec strings handed to subprocesses. Identical
+# character class to nmw_coord_lib.COORDS_REGEX (digits, colon, +/-, period)
+# minus whitespace and tab, since by the time a value reaches a subprocess
+# call site it has already been split into a single token. Used as the
+# defense-in-depth gate just before subprocess.run; parse_coordinates above
+# is the primary validator.
+_SAFE_COORD_RE = re.compile(r'^[0-9:+\-.]{1,32}$')
 # Per-upload directory name: img_<YYYY-MM-DD>_<...>. Only these are considered.
 IMG_DIR_RE = re.compile(r'^img_(\d{4})-(\d{2})-(\d{2})_')
 # Plain and funpack-compressed FITS endings. The compressed-suffix variants
@@ -539,6 +546,20 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
     Returns a dict with keys jd, mag, err, status, basename, aperture, x, y,
     or None if the target is off the frame / the tool failed.
     """
+    # Defense-in-depth re-validation right before exec. Upstream
+    # parse_coordinates (in nmw_coord_lib) and the VALID_BANDS check in main()
+    # already enforce these; restating them here makes the trust boundary
+    # explicit at the call site, survives a future upstream refactor, and
+    # lets static analyzers (e.g. CodeQL py/command-line-injection) see the
+    # validation immediately preceding the subprocess.run call below.
+    if not _SAFE_COORD_RE.match(ra) or not _SAFE_COORD_RE.match(dec):
+        _log_skip(debug_log, fits_path,
+                  'rejected: ra/dec failed safe-shape check', None, None)
+        return None
+    if band not in VALID_BANDS:
+        _log_skip(debug_log, fits_path,
+                  'rejected: band %r not in VALID_BANDS' % band, None, None)
+        return None
     script = os.path.join(work_dir, 'util', 'forced_photometry.sh')
     env = os.environ.copy()
     env['FORCED_PHOTOMETRY_ONLY_C'] = 'yes'
