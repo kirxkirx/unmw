@@ -1307,6 +1307,24 @@ def main():
                           "style='max-width: 100%;'></p>".format(
                               html_escape(_png_url)),
                           flush=True)
+                # Link the ASCII data files immediately under the plot, so
+                # the underlying numbers stay one click away. Emitted even
+                # when the PNG render failed (binary missing, etc.) -- the
+                # data files are still useful on their own.
+                _lc_base = os.path.basename(_lc_path)
+                _lc_url = '{}/{}/{}'.format(url_prefix, sub_name, _lc_base)
+                _links = ["<a href='{}'>{}</a> (detections)".format(
+                              html_escape(_lc_url), html_escape(_lc_base))]
+                if _ul_path is not None:
+                    _ul_base = os.path.basename(_ul_path)
+                    _ul_url = '{}/{}/{}'.format(
+                        url_prefix, sub_name, _ul_base)
+                    _links.append(
+                        "<a href='{}'>{}</a> (upper limits)".format(
+                            html_escape(_ul_url), html_escape(_ul_base)))
+                print("<p class='secondary' style='text-align: center;'>"
+                      "Data files: {}</p>".format(', '.join(_links)),
+                      flush=True)
 
         # ---- Photometry table for copy/paste -- rendered only after the
         # loop so column widths reflect the full result set. A simple <pre>
