@@ -430,7 +430,8 @@ def _phase1_solve_one(work_dir, local_config_path, fits_path):
 
 
 def _phase1_parallel_solve_plate(work_dir, local_config_path, images,
-                                 max_workers, debug_log):
+                                 max_workers, debug_log,
+                                 progress_callback=None):
     """Phase 1: run util/solve_plate_with_UCAC5 in parallel across images so
     each per-image wcs_<basename>.cat.ucac5 (photometric, APASS columns
     populated) is on disk in work_dir before the serial forced_photometry.sh
@@ -444,6 +445,13 @@ def _phase1_parallel_solve_plate(work_dir, local_config_path, images,
     up with the normal path (which does run SExtractor first).
 
     Returns (n_solved, elapsed_seconds) for the bottom-of-page diagnostic.
+
+    If progress_callback is provided, it is invoked once per completed
+    future as (n_done, n_total, fits_path, rc). The caller uses this to
+    stream a flushed line per image so the browser sees regular bytes
+    during the otherwise silent Phase 1 (~30-60 s per image on UCAC5+APASS).
+    Exceptions raised by the callback are swallowed so a progress UI
+    glitch cannot fail the request.
     """
     if not images:
         return (0, 0, 0.0)
@@ -458,12 +466,15 @@ def _phase1_parallel_solve_plate(work_dir, local_config_path, images,
             n_cache_hits += 1
     start = time.time()
     n_solved = 0
+    n_done = 0
+    n_total = len(images)
     workers = max(1, min(len(images), max_workers))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
         futures = [ex.submit(_phase1_solve_one, work_dir, local_config_path,
                              img) for img in images]
         for fut in concurrent.futures.as_completed(futures):
             fits_path, rc, stderr = fut.result()
+            n_done += 1
             if rc == 0:
                 n_solved += 1
             else:
@@ -475,6 +486,11 @@ def _phase1_parallel_solve_plate(work_dir, local_config_path, images,
                     reason = ('Phase 1: solve_plate_with_UCAC5 exited {}'
                               .format(rc))
                 _log_skip(debug_log, fits_path, reason, rc, stderr)
+            if progress_callback is not None:
+                try:
+                    progress_callback(n_done, n_total, fits_path, rc)
+                except Exception:
+                    pass
     return (n_solved, n_cache_hits, time.time() - start)
 
 
@@ -963,10 +979,32 @@ def main():
         skip_log = os.path.join(out_dir, 'forced_phot_skipped.log')
         phase1_workers = min(len(images), os.cpu_count() or 4,
                              FORCED_PHOT_PARALLEL_SOLVE_WORKERS)
+        # Stream a flushed line per finished plate-solve so the browser
+        # sees regular bytes during Phase 1 (~30-60 s per image on
+        # UCAC5+APASS). Without this the page sits silent from the
+        # "Preparing working copy" line above until the table header
+        # below, which on larger image sets risks browser/proxy timeouts.
+        print("<p class='secondary'>Plate-solving (UCAC5+APASS) on {n} "
+              "image(s) using {w} parallel worker(s); each line below "
+              "appears as one image finishes...</p>".format(
+                  n=len(images), w=phase1_workers),
+              flush=True)
+        _phase1_progress_start = time.time()
+
+        def _phase1_progress(done, total, fits_path, rc):
+            elapsed_so_far = time.time() - _phase1_progress_start
+            status = 'solved' if rc == 0 else 'failed (rc={})'.format(rc)
+            print("<p class='secondary'>&nbsp;&nbsp;{d}/{t} {st}: {b} "
+                  "(at {e:.1f} s)</p>".format(
+                      d=done, t=total, st=status,
+                      b=html_escape(os.path.basename(fits_path)),
+                      e=elapsed_so_far),
+                  flush=True)
+
         n_phase1_solved, sextractor_cache_hits, phase1_elapsed = \
             _phase1_parallel_solve_plate(
                 work_dir, local_config_path, images, phase1_workers,
-                skip_log)
+                skip_log, progress_callback=_phase1_progress)
 
         # ---- Streamed results table. We open the table immediately and emit
         # one <tr> per image as it finishes (success or skip) so the page
