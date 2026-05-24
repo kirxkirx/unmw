@@ -1191,7 +1191,14 @@ def main():
         print(_DARK_THEME_CSS)
         print(_DARK_THEME_SCRIPT)
         print("</head><body>")
-        print("<!-- {} -->".format(' ' * 4000))  # past Apache's CGI buffer
+        # Push the response past Apache's mod_deflate / CGI buffer so the
+        # head + body opening reach the browser immediately and the user
+        # leaves the input form right away instead of staring at "Working..."
+        # while plate-solving runs. mod_deflate's default DeflateBufferSize
+        # is 8 KB; the static head emits ~7.5 KB after the dark-theme
+        # additions, so the previous 4000-byte pad no longer crossed the
+        # threshold. 16000 leaves headroom for any future head growth.
+        print("<!-- {} -->".format(' ' * 16000))
         # Floating dark/light toggle button -- position: fixed, so its
         # placement in the DOM doesn't affect where it renders.
         print(_DARK_THEME_BUTTON)
