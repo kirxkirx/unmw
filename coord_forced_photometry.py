@@ -827,7 +827,13 @@ def _render_lightcurve_png(work_dir, out_dir, ra, dec, lc_path, ul_path):
     """
     binary = os.path.join(work_dir, 'lib', 'lightcurve_png')
     if not os.path.isfile(binary):
-        return None  # silently skip -- VaST may have been built without it
+        # Log to stderr (Apache error log) so the absence is diagnosable
+        # rather than silent. The HTML page still renders normally.
+        sys.stderr.write(
+            'lightcurve_png: binary not found at {} -- skipping plot. '
+            'Build VaST so lib/compile_pgplot_related_components.sh '
+            'produces it.\n'.format(binary))
+        return None
     if lc_path is None:
         return None
     out_png = os.path.join(out_dir, 'lightcurve.png')
@@ -840,14 +846,18 @@ def _render_lightcurve_png(work_dir, out_dir, ra, dec, lc_path, ul_path):
                                 capture_output=True, text=True,
                                 timeout=30)
     except (subprocess.TimeoutExpired, OSError) as exc:
-        sys.stderr.write('lightcurve_png failed to launch: {}\n'.format(exc))
+        sys.stderr.write(
+            'lightcurve_png: subprocess launch failed: {}\n'.format(exc))
         return None
     if result.returncode != 0:
         sys.stderr.write(
-            'lightcurve_png exit {}: {}\n'.format(
-                result.returncode, (result.stderr or '')[-500:]))
+            'lightcurve_png: exit {} for cmd {!r}\nstderr:\n{}\n'.format(
+                result.returncode, cmd,
+                (result.stderr or '')[-1000:]))
         return None
     if not os.path.isfile(out_png):
+        sys.stderr.write(
+            'lightcurve_png: exit 0 but {} was not created\n'.format(out_png))
         return None
     return os.path.basename(out_png)
 
