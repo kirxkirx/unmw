@@ -463,6 +463,14 @@ if [ -f NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
 fi
 #
 cp -rv second_epoch_images NMW__NovaVul24_Stas__WebCheck__NotReal
+# Match a real telescope upload: archives must contain only raw FITS images,
+# not pipeline artifacts. The autoprocess.sh run above leaves .cat and
+# .cat.aperture companion files alongside the .fts originals, and upload.py3's
+# ALLOWED_IMAGE_EXTENSIONS (=.fit/.fits/.fts) correctly rejects archives that
+# carry anything else. Strip the artifacts here so the zip looks like what
+# astrocam-go would actually send.
+find NMW__NovaVul24_Stas__WebCheck__NotReal -type f \
+     ! \( -iname '*.fts' -o -iname '*.fits' -o -iname '*.fit' \) -delete
 zip -r NMW__NovaVul24_Stas__WebCheck__NotReal.zip NMW__NovaVul24_Stas__WebCheck__NotReal/
 if [ ! -s NMW__NovaVul24_Stas__WebCheck__NotReal.zip ];then
  echo "$0 test error: failed to create a zip archive with the images"
