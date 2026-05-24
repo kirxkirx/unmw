@@ -753,6 +753,105 @@ def fits_url(url_prefix, fits_abs_path, uploads_abs):
     return '{}/{}'.format(url_prefix, rel)
 
 
+def _write_lightcurve_data_files(out_dir, results):
+    """Write the two ASCII files lib/lightcurve_png reads.
+
+    Splits the in-memory `results` rows by status:
+      - detections (status != 'upperlimit') -> lightcurve.dat (JD mag err)
+      - upper limits                        -> upperlimits.dat (JD limit_mag)
+
+    Both files use the same comment convention as read_lightcurve_point_raw()
+    expects: lines starting with '#' are skipped.
+
+    Returns (lc_path, ul_path):
+      lc_path is the path to lightcurve.dat, always written when any rows
+              are processable (even if it ends up containing only the header
+              line in the upper-limits-only case -- lib/lightcurve_png needs
+              a positional input).
+      ul_path is the path to upperlimits.dat, or None if there were no
+              upper-limit rows.
+    Returns (None, None) if no row had a parseable JD.
+    """
+    lc_lines = []
+    ul_lines = []
+    for r in results:
+        try:
+            jd_val = float(r.get('jd'))
+        except (ValueError, TypeError):
+            continue  # skip rows with unparseable JD
+        if r.get('status') == 'upperlimit':
+            # For upper limits, r['mag'] looks like '>17.50' -- strip the '>'
+            # before parsing.
+            mag_str = (r.get('mag') or '').lstrip('>')
+            try:
+                mag_val = float(mag_str)
+            except ValueError:
+                continue
+            ul_lines.append('{:.5f} {:.3f}\n'.format(jd_val, mag_val))
+        else:
+            try:
+                mag_val = float(r.get('mag'))
+                err_val = float(r.get('err'))
+            except (ValueError, TypeError):
+                continue
+            lc_lines.append('{:.5f} {:.3f} {:.3f}\n'.format(
+                jd_val, mag_val, err_val))
+    if not lc_lines and not ul_lines:
+        return None, None
+    lc_path = os.path.join(out_dir, 'lightcurve.dat')
+    try:
+        with open(lc_path, 'w') as fh:
+            fh.write('# JD mag err\n')
+            fh.writelines(lc_lines)
+    except OSError:
+        return None, None
+    ul_path = None
+    if ul_lines:
+        ul_path = os.path.join(out_dir, 'upperlimits.dat')
+        try:
+            with open(ul_path, 'w') as fh:
+                fh.write('# JD limit_mag\n')
+                fh.writelines(ul_lines)
+        except OSError:
+            ul_path = None
+    return lc_path, ul_path
+
+
+def _render_lightcurve_png(work_dir, out_dir, ra, dec, lc_path, ul_path):
+    """Invoke lib/lightcurve_png to render lightcurve.png in out_dir.
+
+    Returns the PNG basename ('lightcurve.png') on success, None on any
+    failure (binary missing, exit non-zero, timeout, OSError, no output).
+    Failures are best-effort logged to stderr but never raise -- the rest
+    of the results page renders normally without the plot.
+    """
+    binary = os.path.join(work_dir, 'lib', 'lightcurve_png')
+    if not os.path.isfile(binary):
+        return None  # silently skip -- VaST may have been built without it
+    if lc_path is None:
+        return None
+    out_png = os.path.join(out_dir, 'lightcurve.png')
+    cmd = [binary, lc_path, '-o', out_png,
+           '--title', 'Forced photometry at {} {}'.format(ra, dec)]
+    if ul_path is not None:
+        cmd.extend(['--upperlimits', ul_path])
+    try:
+        result = subprocess.run(cmd, cwd=work_dir,
+                                capture_output=True, text=True,
+                                timeout=30)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        sys.stderr.write('lightcurve_png failed to launch: {}\n'.format(exc))
+        return None
+    if result.returncode != 0:
+        sys.stderr.write(
+            'lightcurve_png exit {}: {}\n'.format(
+                result.returncode, (result.stderr or '')[-500:]))
+        return None
+    if not os.path.isfile(out_png):
+        return None
+    return os.path.basename(out_png)
+
+
 def ascii_table(rows):
     """Build the fixed-width, space-padded plain-text photometry table."""
     header = ['date', 'JD', 'mag/limit', 'err', 'status', 'field', 'image']
@@ -1172,6 +1271,26 @@ def main():
             print(_html_row(r, url_prefix, sub_name) + _ROW_FLUSH_PAD,
                   flush=True)
         print("</table>", flush=True)
+
+        # ---- Lightcurve PNG plot.
+        # Write the two data files into the per-request output directory so
+        # they stay alongside the cutout PNGs and remain inspectable. Then
+        # invoke lib/lightcurve_png to render the plot. Any failure (binary
+        # missing, PGPLOT without libpng, etc.) is silent -- the rest of the
+        # page renders normally without the plot.
+        if results:
+            _lc_path, _ul_path = _write_lightcurve_data_files(out_dir, results)
+            if _lc_path is not None:
+                _png_basename = _render_lightcurve_png(
+                    work_dir, out_dir, ra, dec, _lc_path, _ul_path)
+                if _png_basename is not None:
+                    _png_url = '{}/{}/{}'.format(
+                        url_prefix, sub_name, _png_basename)
+                    print("<p style='text-align: center;'>"
+                          "<img src='{}' alt='Lightcurve plot' "
+                          "style='max-width: 100%;'></p>".format(
+                              html_escape(_png_url)),
+                          flush=True)
 
         # ---- Photometry table for copy/paste -- rendered only after the
         # loop so column widths reflect the full result set. A simple <pre>
