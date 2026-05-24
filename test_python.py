@@ -4,6 +4,9 @@ Unit tests for filter_report.py and upload.py3
 Run with: pytest test_python.py -v
 """
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 import os
 import sys
 import tempfile
