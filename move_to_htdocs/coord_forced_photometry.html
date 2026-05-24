@@ -40,16 +40,29 @@ hr.break { max-width: 720px; margin: 18pt auto; }
 
 <div class="section">
 <p>Enter J2000 sky coordinates to get forced aperture photometry at that
-position on every image covering it that was taken in the last week and
-is found in the uploads directory. Results are shown newest first, each with a
-full-frame preview, a zoom-in cutout marked with a red circle of the aperture
-used, and a link to the FITS file, plus a copy-paste ASCII table.</p>
+position on the most recent matching images found in the uploads directory.
+Choose how far back to look (in days) and how many images to process at
+most. Results are shown newest first, each with a full-frame preview, a
+zoom-in cutout marked with a red circle of the aperture used, and a link
+to the FITS file, plus a copy-paste ASCII table.</p>
 
 <table style="margin: 0 auto; border-spacing: 5pt;">
 <tr>
   <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec.):</td>
   <td style="padding: 0;">
     <input type="text" name="coords" size="36" placeholder="19:20:11.64 +01:40:40.6">
+  </td>
+</tr>
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">Look back (days):</td>
+  <td style="padding: 0;">
+    <input type="number" name="window_days" min="1" max="30" value="7" style="width: 5em;">
+  </td>
+</tr>
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">Max images:</td>
+  <td style="padding: 0;">
+    <input type="number" name="max_images" min="1" max="50" value="6" style="width: 5em;">
   </td>
 </tr>
 <tr>

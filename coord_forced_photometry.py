@@ -3,7 +3,7 @@
 CGI: forced-photometry lightcurve at a sky position over a recent time window.
 
 The user enters one sky position; the page finds every wcs_fd_ image in the
-uploads/ directory (the WINDOW_DAYS most recent days by img_<YYYY-MM-DD> dir date) whose
+uploads/ directory (the most recent days by img_<YYYY-MM-DD> dir date; the day window and the maximum image count are both user-selectable on the input form) whose
 field covers that position, runs the C forced-photometry implementation on each
 (util/forced_photometry.sh with FORCED_PHOTOMETRY_ONLY_C=yes), and presents the
 results -- newest first -- as an HTML table (with a full-frame preview and a
@@ -70,11 +70,13 @@ ncl.DEFAULT_FORM_PATH = DEFAULT_FORM_PATH
 # ---------- code-level constants (not deployment-specific) ----------
 TEMP_PARENT = 'uploads'                 # mirrors upload.py's upload_dir
 TEMP_DIR_PREFIX = 'forced_phot_'
-WINDOW_DAYS = 7                         # "last one week"
-# TESTING: temporary cap on the number of images measured per request so the
-# end-to-end loop completes in minutes during UI/feature work. Set to None to
-# disable the cap (production value).
-MAX_IMAGES_FOR_TESTING = 5
+# Form-field defaults and safety caps for the "Look back (days)" and
+# "Max images" inputs on the input form. The per-request values come from
+# main() parsing the form; out-of-range values are clamped to [1, MAX_*].
+DEFAULT_WINDOW_DAYS = 7
+MAX_WINDOW_DAYS = 30
+DEFAULT_MAX_IMAGES = 6
+MAX_MAX_IMAGES = 50
 FORCED_PHOT_MAX_CONCURRENT = 3          # each request uses its own VaST working copy, so this only caps server load
 # Phase 1 (parallel UCAC5+APASS plate-solve) worker cap. The effective number
 # of workers per request is min(len(images), os.cpu_count() or 4, this).
@@ -797,6 +799,8 @@ def main():
     form = cgi.FieldStorage()
     raw_coords = (form.getfirst('coords', '') or '').strip()
     band_override = (form.getfirst('band', '') or '').strip()
+    raw_window_days = (form.getfirst('window_days', '') or '').strip()
+    raw_max_images = (form.getfirst('max_images', '') or '').strip()
 
     if not raw_coords:
         emit_redirect(form_page_url())
@@ -811,6 +815,36 @@ def main():
             "<p>You typed: <span class='code'>{}</span></p>".format(
                 html_escape(err), html_escape(raw_coords)))
         return
+
+    # Per-request "look back days" and "max images" values from the form.
+    # Empty -> default; non-integer -> error page; out-of-range -> silent clamp.
+    if raw_window_days:
+        try:
+            window_days = int(raw_window_days)
+        except ValueError:
+            emit_message_page(
+                "Invalid days",
+                "<p>The 'Look back (days)' field must be a whole number. "
+                "You sent: <span class='code'>{}</span></p>".format(
+                    html_escape(raw_window_days)))
+            return
+        window_days = max(1, min(window_days, MAX_WINDOW_DAYS))
+    else:
+        window_days = DEFAULT_WINDOW_DAYS
+
+    if raw_max_images:
+        try:
+            max_images = int(raw_max_images)
+        except ValueError:
+            emit_message_page(
+                "Invalid max images",
+                "<p>The 'Max images' field must be a whole number. "
+                "You sent: <span class='code'>{}</span></p>".format(
+                    html_escape(raw_max_images)))
+            return
+        max_images = max(1, min(max_images, MAX_MAX_IMAGES))
+    else:
+        max_images = DEFAULT_MAX_IMAGES
 
     if band_override and band_override not in VALID_BANDS:
         emit_message_page(
@@ -913,7 +947,7 @@ def main():
         images = []
         if covering_fields:
             images = list_recent_field_images(TEMP_PARENT, covering_fields,
-                                              WINDOW_DAYS)
+                                              window_days)
             # Stream rows in (approximate) newest-first order without waiting
             # for all images to be measured. The timestamp embedded in the
             # wcs_fd_ filename closely tracks JD and is known without opening
@@ -922,12 +956,12 @@ def main():
                 m = _IMG_TS_RE.search(os.path.basename(p))
                 return m.group(1) if m else ''
             images.sort(key=_img_ts, reverse=True)
-            # TESTING: cap how many images we actually measure so UI/feature
-            # iterations finish in minutes. Remembered so we can warn the user.
+            # Honor the user-selected "Max images" cap from the form.
+            # Remembered so we can tell the user when the cap actually clipped
+            # the result set.
             total_matching = len(images)
-            if MAX_IMAGES_FOR_TESTING is not None:
-                images = images[:MAX_IMAGES_FOR_TESTING]
-            capped_for_testing = (len(images) < total_matching)
+            images = images[:max_images]
+            capped_by_user = (len(images) < total_matching)
 
         # ---- Stream the page header. ----
         page_title = "Forced-photometry lightcurve"
@@ -947,7 +981,7 @@ def main():
         print("<h2>{}</h2>".format(html_escape(page_title)))
         print("<p>Position: <span class='code'>{} {}</span>; "
               "last {} days.</p>".format(html_escape(ra), html_escape(dec),
-                                         WINDOW_DAYS), flush=True)
+                                         window_days), flush=True)
 
         if not covering_fields:
             print("<div class='notice'>No reference field covers this "
@@ -960,18 +994,18 @@ def main():
             html_escape(', '.join(sorted(covering_fields)))), flush=True)
         if not images:
             print("<div class='notice'>No images of these fields in the last "
-                  "{} days.</div>".format(WINDOW_DAYS))
+                  "{} days.</div>".format(window_days))
             print("<br><a href='{}'>Search again</a>".format(
                 html_escape(back_link_url())))
             print("</body></html>")
             return
         print("<p>Performing forced photometry on {} images; this will "
               "take a while...</p>".format(len(images)), flush=True)
-        if capped_for_testing:
-            # Operator-visible reminder that the TESTING cap is in effect, so
-            # nobody mistakes a 5-of-50 lightcurve for the full result.
-            print("<p class='secondary'><i>Testing mode: measuring only the "
-                  "first {} of {} matching images.</i></p>".format(
+        if capped_by_user:
+            # Tell the user when the "Max images" cap clipped the result set,
+            # so nobody mistakes a 6-of-50 lightcurve for the full result.
+            print("<p class='secondary'><i>Limited to the first {} of {} "
+                  "matching images by the Max images setting.</i></p>".format(
                       len(images), total_matching), flush=True)
         # Give the user something to watch during the ~30 s rsync that builds
         # the per-request working copy of VaST; without this line the page
