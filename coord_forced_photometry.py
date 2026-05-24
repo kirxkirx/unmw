@@ -836,11 +836,17 @@ def _render_lightcurve_png(work_dir, out_dir, ra, dec, lc_path, ul_path):
         return None
     if lc_path is None:
         return None
-    out_png = os.path.join(out_dir, 'lightcurve.png')
-    cmd = [binary, lc_path, '-o', out_png,
+    # The CGI's cwd is the cgi-bin dir, but the subprocess runs with
+    # cwd=work_dir (the per-request VaST working copy). Convert every path
+    # we hand to the subprocess to absolute so it resolves regardless of
+    # whose cwd it is interpreted against.
+    lc_abs = os.path.abspath(lc_path)
+    ul_abs = os.path.abspath(ul_path) if ul_path is not None else None
+    out_png = os.path.abspath(os.path.join(out_dir, 'lightcurve.png'))
+    cmd = [binary, lc_abs, '-o', out_png,
            '--title', 'Forced photometry at {} {}'.format(ra, dec)]
-    if ul_path is not None:
-        cmd.extend(['--upperlimits', ul_path])
+    if ul_abs is not None:
+        cmd.extend(['--upperlimits', ul_abs])
     try:
         result = subprocess.run(cmd, cwd=work_dir,
                                 capture_output=True, text=True,
