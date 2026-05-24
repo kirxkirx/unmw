@@ -75,10 +75,11 @@ WINDOW_DAYS = 7                         # "last one week"
 # end-to-end loop completes in minutes during UI/feature work. Set to None to
 # disable the cap (production value).
 MAX_IMAGES_FOR_TESTING = 5
-FORCED_PHOT_MAX_CONCURRENT = 5          # each request uses its own VaST working copy, so this only caps server load
+FORCED_PHOT_MAX_CONCURRENT = 3          # each request uses its own VaST working copy, so this only caps server load
 # Phase 1 (parallel UCAC5+APASS plate-solve) worker cap. The effective number
 # of workers per request is min(len(images), os.cpu_count() or 4, this).
-FORCED_PHOT_PARALLEL_SOLVE_WORKERS = 4
+# Server-wide peak parallel solve_plate processes = this * FORCED_PHOT_MAX_CONCURRENT.
+FORCED_PHOT_PARALLEL_SOLVE_WORKERS = 6
 FORCED_PHOT_TIMEOUT_SECONDS = 600       # per-image safety cap on forced_photometry.sh
 VAST_COPY_TIMEOUT_SECONDS = 300         # cap on the per-request rsync of the VaST tree
 # Per-request disposable VaST working copy (mirrors autoprocess.sh): rsync the
@@ -984,9 +985,9 @@ def main():
         # UCAC5+APASS). Without this the page sits silent from the
         # "Preparing working copy" line above until the table header
         # below, which on larger image sets risks browser/proxy timeouts.
-        print("<p class='secondary'>Plate-solving (UCAC5+APASS) on {n} "
-              "image(s) using {w} parallel worker(s); each line below "
-              "appears as one image finishes...</p>".format(
+        print("<p class='secondary'>Plate-solving and photometric "
+              "catalog-matching {n} images using {w} parallel workers; "
+              "each line below appears as one image finishes...</p>".format(
                   n=len(images), w=phase1_workers),
               flush=True)
         _phase1_progress_start = time.time()
