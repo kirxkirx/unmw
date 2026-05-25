@@ -52,6 +52,7 @@ import string
 import subprocess
 import sys
 import time
+import urllib.parse
 
 import nmw_coord_lib as ncl
 from nmw_coord_lib import (
@@ -994,6 +995,21 @@ def main():
             status_line="Status: 503 Service Unavailable")
         return
 
+    # URL of the input form pre-filled with this request's values. Used for
+    # every "Search again" link so the user can re-run with the same
+    # coordinates and tweak only window_days / max_images / band. Empty
+    # band_override is omitted so the form's default ("auto") remains
+    # selected on the return visit.
+    search_again_params = {
+        'coords': raw_coords,
+        'window_days': str(window_days),
+        'max_images': str(max_images),
+    }
+    if band_override:
+        search_again_params['band'] = band_override
+    search_again_url = '{}?{}'.format(
+        DEFAULT_FORM_PATH, urllib.parse.urlencode(search_again_params))
+
     try:
         work_dir = None  # per-request VaST working copy; cleaned up in finally
         cfg = read_config_vars(
@@ -1115,7 +1131,7 @@ def main():
             print("<div class='notice'>No reference field covers this "
                   "position.</div>")
             print("<br><a href='{}'>Search again</a>".format(
-                html_escape(DEFAULT_FORM_PATH)))
+                html_escape(search_again_url)))
             print("</body></html>")
             return
         print("<p>Covering field(s): <b>{}</b></p>".format(
@@ -1124,7 +1140,7 @@ def main():
             print("<div class='notice'>No images of these fields in the last "
                   "{} days.</div>".format(window_days))
             print("<br><a href='{}'>Search again</a>".format(
-                html_escape(DEFAULT_FORM_PATH)))
+                html_escape(search_again_url)))
             print("</body></html>")
             return
         print("<p>Performing forced photometry on {} images; this will "
@@ -1148,7 +1164,7 @@ def main():
             print("<div class='notice'>Could not set up the calibration "
                   "working copy of VaST; cannot measure.</div>")
             print("<br><a href='{}'>Search again</a>".format(
-                html_escape(DEFAULT_FORM_PATH)))
+                html_escape(search_again_url)))
             print("</body></html>")
             return
 
@@ -1379,7 +1395,7 @@ def main():
                   "{}.</p>".format(_fmt_duration(elapsed)))
 
         print("<br><br><a href='{}'>Search again</a>".format(
-            html_escape(DEFAULT_FORM_PATH)))
+            html_escape(search_again_url)))
         print("</body></html>")
     finally:
         if work_dir is not None:

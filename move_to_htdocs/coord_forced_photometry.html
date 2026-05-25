@@ -109,6 +109,17 @@ measured in turn. Please be patient after pressing Measure.
   var button = document.getElementById('forced-phot-button');
   var working = document.getElementById('forced-phot-working');
 
+  // Pre-fill form fields from URL query parameters. The "Search again" link
+  // on the forced-photometry result page appends the request's coords,
+  // window_days, max_images, and (if set) band so the user lands here with
+  // the same values pre-filled and can tweak only what they want to change.
+  var params = new URLSearchParams(window.location.search);
+  ['coords', 'window_days', 'max_images', 'band'].forEach(function (name) {
+    if (!params.has(name)) return;
+    var el = form.elements[name];
+    if (el) el.value = params.get(name);
+  });
+
   function reset() {
     button.disabled = false;
     working.style.visibility = 'hidden';
