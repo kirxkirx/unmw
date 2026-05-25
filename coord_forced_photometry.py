@@ -103,98 +103,6 @@ VALID_BANDS = ('B', 'V', 'R', 'Rc', 'I', 'Ic', 'r', 'i', 'g')
 # is the primary validator.
 _SAFE_COORD_RE = re.compile(r'^[0-9:+\-.]{1,32}$')
 
-# ---- Dark theme machinery, kept identical to the convention used by
-# combine_reports.sh and util/transients/transient_factory_test31.sh:
-# the same localStorage key ('pageTheme'), the same dark/light palette,
-# and the same toggle-button id. A user who toggles dark mode on the
-# transient-report or combined-summary page sees the same setting on
-# this page too (same origin -> shared localStorage).
-
-# Inline preflash script: set a className on <html> before any CSS is parsed
-# so the saved theme's colours win the first paint with no white flash on
-# dark-mode reloads. The earlier version of this used document.write to
-# inject a <style> tag, which disabled the browser's speculative parser
-# and held back the first paint until the entire (streamed) document had
-# arrived -- defeating the per-row progress streaming on this page.
-# Setting documentElement.className does not invalidate the parser, so
-# incremental rendering keeps working.
-_DARK_THEME_PREFLASH = (
-    "<script type='text/javascript'>"
-    "document.documentElement.className = "
-    "(localStorage.getItem('pageTheme') === 'dark-theme') "
-    "? 'dark-theme' : 'light-theme';"
-    "</script>"
-)
-
-# CSS rules that map a class (light-theme / dark-theme) on the <html>
-# element to colours. The class lives on <html> rather than <body> so the
-# preflash script above can set it before <body> exists in the DOM, with
-# no flash. Selectors are html.<theme> ... so they style the <body>'s
-# descendants the same way the previous body.<theme> ... selectors did.
-_DARK_THEME_CSS = """<style type='text/css'>
-html.light-theme { background-color: #ffffff; color: #000000; }
-html.light-theme a { color: #0000ee; }
-html.light-theme a:visited { color: #551a8b; }
-html.dark-theme { background-color: #121212; color: #d0d0d0; }
-html.dark-theme a { color: #7aa2f7; }
-html.dark-theme a:visited { color: #5c7fa3; }
-html.dark-theme h1, html.dark-theme h2, html.dark-theme h3,
-html.dark-theme b, html.dark-theme strong { color: #ffffff; }
-html.dark-theme .code { background: #2a2a2a; color: #d0d0d0; }
-html.dark-theme .notice { background: #3a3a1a; color: #d0d0d0; }
-html.dark-theme table.main th, html.dark-theme table.main td {
-    border: 1px solid #555;
-}
-html.dark-theme tr.skipped td { background: #1c1c1c; color: #888; }
-html.dark-theme p.secondary { color: #888; }
-.floating-btn {
-    position: fixed; top: 5vh; right: 20px;
-    background-color: #007bff; color: #ffffff; border: none;
-    border-radius: 5px; padding: 10px 20px; font-size: 16px;
-    cursor: pointer; z-index: 1000;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-}
-.floating-btn:hover { background-color: #0056b3; }
-html.dark-theme .floating-btn { background-color: #2d6cdf; color: #ffffff; }
-html.dark-theme .floating-btn:hover { background-color: #1f56b5; }
-</style>"""
-
-# Toggle handler + apply-saved-theme on DOMContentLoaded. Same localStorage
-# key/values ('pageTheme' -> 'dark-theme' | 'light-theme') as
-# combine_reports.sh and transient_factory_test31.sh -- only the DOM
-# element the class is set on differs (html, not body), to match the
-# preflash above. The button label is updated on DOMContentLoaded once
-# the button exists.
-_DARK_THEME_SCRIPT = """<script type='text/javascript'>
-function toggleTheme() {
-    var root = document.documentElement;
-    var themeButton = document.getElementById('theme-btn');
-    if (root.classList.contains('dark-theme')) {
-        root.classList.remove('dark-theme');
-        root.classList.add('light-theme');
-        themeButton.textContent = 'Dark theme';
-        localStorage.setItem('pageTheme', 'light-theme');
-    } else {
-        root.classList.remove('light-theme');
-        root.classList.add('dark-theme');
-        themeButton.textContent = 'Light theme';
-        localStorage.setItem('pageTheme', 'dark-theme');
-    }
-}
-document.addEventListener('DOMContentLoaded', function() {
-    var themeButton = document.getElementById('theme-btn');
-    if (document.documentElement.classList.contains('dark-theme')) {
-        themeButton.textContent = 'Light theme';
-    } else {
-        themeButton.textContent = 'Dark theme';
-    }
-});
-</script>"""
-
-_DARK_THEME_BUTTON = (
-    "<button id='theme-btn' class='floating-btn' "
-    "onclick='toggleTheme()'>Dark theme</button>"
-)
 # Per-upload directory name: img_<YYYY-MM-DD>_<...>. Only these are considered.
 IMG_DIR_RE = re.compile(r'^img_(\d{4})-(\d{2})-(\d{2})_')
 # Plain and funpack-compressed FITS endings. The compressed-suffix variants
@@ -1175,9 +1083,6 @@ def main():
         page_title = "Forced-photometry lightcurve"
         print("Content-Type: text/html\n", flush=True)
         print("<html><head><title>{}</title>".format(html_escape(page_title)))
-        # Dark-theme preflash before any other CSS, so the page does not
-        # briefly flash white on each load when the saved theme is dark.
-        print(_DARK_THEME_PREFLASH)
         print(_PAGE_CSS)
         # Page-local CSS in <head> so muted status lines streamed before the
         # table (e.g. "Preparing working copy of VaST...") are styled from
@@ -1187,23 +1092,8 @@ def main():
               "background: #f8f8f8; }"
               " p.secondary { color: #666; font-style: italic; }"
               "</style>")
-        # Dark-theme CSS (html.light-theme / html.dark-theme overrides) and
-        # the toggle script. Listed AFTER _PAGE_CSS and the page-local CSS
-        # so its html.dark-theme rules win over the light defaults set above.
-        print(_DARK_THEME_CSS)
-        print(_DARK_THEME_SCRIPT)
         print("</head><body>")
-        # 4000-byte HTML comment after <body>. Two purposes: (1) push past
-        # Apache's mod_cgi/mod_cgid output buffer so the head + initial
-        # body flush reaches the client immediately instead of waiting for
-        # more bytes; (2) cross the browser's navigation-commit / paint-
-        # holding threshold so the browser actually navigates away from the
-        # input form on submit instead of holding the old page visible
-        # until the per-row table updates start arriving.
-        print("<!-- {} -->".format(' ' * 4000))
-        # Floating dark/light toggle button -- position: fixed, so its
-        # placement in the DOM doesn't affect where it renders.
-        print(_DARK_THEME_BUTTON)
+        print("<!-- {} -->".format(' ' * 4000))  # past Apache's CGI buffer
         print("<h2>{}</h2>".format(html_escape(page_title)))
         print("<p>Position: <span class='code'>{} {}</span>; "
               "last {} days.</p>".format(html_escape(ra), html_escape(dec),
