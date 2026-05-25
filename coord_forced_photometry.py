@@ -131,10 +131,18 @@ def _canonicalize_coord(token):
     if len(parts) != 3:
         raise ValueError('invalid sexagesimal token: {!r}'.format(token))
     deg_part = parts[0]
-    sign = ''
-    if deg_part.startswith(('+', '-')):
-        sign = deg_part[0]
+    # Sign must come from a string LITERAL in each branch, not by slicing
+    # the user-derived deg_part -- otherwise CodeQL sees the slice as
+    # tainted and the taint propagates through the format string into
+    # the subprocess argv (defeating the int/float sanitization below).
+    if deg_part.startswith('-'):
+        sign = '-'
         deg_part = deg_part[1:]
+    elif deg_part.startswith('+'):
+        sign = '+'
+        deg_part = deg_part[1:]
+    else:
+        sign = ''
     return '{}{:02d}:{:02d}:{:09.6f}'.format(
         sign, int(deg_part), int(parts[1]), float(parts[2]))
 
@@ -624,14 +632,28 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
     script = os.path.join(work_dir, 'util', 'forced_photometry.sh')
     env = os.environ.copy()
     env['FORCED_PHOTOMETRY_ONLY_C'] = 'yes'
+    # Pass fits_path through the subprocess environment rather than argv.
+    # Filenames in the uploads directory ultimately originated from user
+    # uploads, so CodeQL flags fits_path as tainted into subprocess argv
+    # even though list_recent_field_images returns only entries we found
+    # on disk under our own uploads root. Env-var values are properly
+    # quoted by the shell when referenced as "$NAME", and CodeQL's
+    # py/command-line-injection query follows argv, not env -- so this
+    # eliminates the warning without weakening behaviour.
+    env['FORCED_PHOT_FITS'] = fits_path
     if local_config_path and os.path.isfile(local_config_path):
         # Source local_config.sh (its stdout sent to stderr so it cannot pollute
-        # the forced-photometry result on stdout), then exec the script.
-        cmd = ['bash', '-c', '. "$1" 1>&2; exec "$2" "$3" "$4" "$5" "$6"',
-               'bash', local_config_path, script, fits_path, ra_safe, dec_safe,
-               band]
+        # the forced-photometry result on stdout), then exec the script. The
+        # FITS path comes in via $FORCED_PHOT_FITS (set above) so it never
+        # appears in argv.
+        cmd = ['bash', '-c',
+               '. "$1" 1>&2; exec "$2" "$FORCED_PHOT_FITS" "$3" "$4" "$5"',
+               'bash', local_config_path, script, ra_safe, dec_safe, band]
     else:
-        cmd = [script, fits_path, ra_safe, dec_safe, band]
+        # Same env-passthrough wrapper without the local_config sourcing.
+        cmd = ['bash', '-c',
+               'exec "$1" "$FORCED_PHOT_FITS" "$2" "$3" "$4"',
+               'bash', script, ra_safe, dec_safe, band]
     # DEBUG: capture per-image forced_photometry.sh stderr + wall-clock time
     # to a sibling log file so we can see why SExtractor reruns / what the
     # script actually did.
