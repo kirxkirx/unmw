@@ -1083,31 +1083,15 @@ def main():
                 status_line="Status: 500 Internal Server Error")
             return
 
-        # ---- Find which fields cover the position (both/all cameras). ----
-        matches, _truncated = run_sky2xy_scan(ref_dir, ra, dec, vast_dir)
-        covering_fields = set(field_name_from_fits(p) for p, _x, _y in matches)
-
-        # ---- Find the recent images of those fields. ----
-        images = []
-        if covering_fields:
-            images = list_recent_field_images(TEMP_PARENT, covering_fields,
-                                              window_days)
-            # Stream rows in (approximate) newest-first order without waiting
-            # for all images to be measured. The timestamp embedded in the
-            # wcs_fd_ filename closely tracks JD and is known without opening
-            # the file, so it makes a cheap proxy sort key.
-            def _img_ts(p):
-                m = _IMG_TS_RE.search(os.path.basename(p))
-                return m.group(1) if m else ''
-            images.sort(key=_img_ts, reverse=True)
-            # Honor the user-selected "Max images" cap from the form.
-            # Remembered so we can tell the user when the cap actually clipped
-            # the result set.
-            total_matching = len(images)
-            images = images[:max_images]
-            capped_by_user = (len(images) < total_matching)
-
-        # ---- Stream the page header. ----
+        # ---- Stream the page header EARLY, before the slow reference-field
+        # scan and the uploads-directory walk, so the user is not staring at
+        # a blank "loading" page for the ~10-30 s that those steps take.
+        # Everything above this point (form validation, concurrency slot,
+        # config check, mkdir) is instant, so a failure there can still
+        # return a clean HTTP status via emit_message_page. Failures
+        # AFTER this point are surfaced as inline notice divs in the
+        # already-open page (with no HTTP status), because we have already
+        # committed to a 200 OK response.
         page_title = "Forced-photometry lightcurve"
         print("Content-Type: text/html\n", flush=True)
         print("<html><head><title>{}</title>".format(html_escape(page_title)))
@@ -1127,18 +1111,74 @@ def main():
               "last {} days.</p>".format(html_escape(ra), html_escape(dec),
                                          window_days), flush=True)
 
+        # ---- Find which fields cover the position (both/all cameras). ----
+        print("<p class='secondary'>Looking up which reference fields cover "
+              "this position...</p>", flush=True)
+        try:
+            matches, sky2xy_truncated = run_sky2xy_scan(
+                ref_dir, ra, dec, vast_dir)
+        except (OSError, subprocess.SubprocessError) as err:
+            print("<div class='notice'>ERROR: reference-field scan failed: "
+                  "{} ({}).</div>".format(
+                      html_escape(type(err).__name__), html_escape(err)))
+            print("<br><a href='{}'>Search again</a>".format(
+                html_escape(search_again_url)))
+            print("</body></html>")
+            return
+        covering_fields = set(field_name_from_fits(p) for p, _x, _y in matches)
+        if sky2xy_truncated:
+            # run_sky2xy_scan returned partial results because the per-FITS
+            # sky2xy loop exceeded SCAN_TIMEOUT_SECONDS. Warn but continue
+            # with whatever covering fields we did find.
+            print("<div class='notice'>WARNING: reference-field scan timed "
+                  "out after {} s; the list of covering fields below may be "
+                  "incomplete.</div>".format(ncl.SCAN_TIMEOUT_SECONDS),
+                  flush=True)
+
         if not covering_fields:
-            print("<div class='notice'>No reference field covers this "
-                  "position.</div>")
+            print("<div class='notice'>ERROR: no reference field covers the "
+                  "specified sky position.</div>")
             print("<br><a href='{}'>Search again</a>".format(
                 html_escape(search_again_url)))
             print("</body></html>")
             return
         print("<p>Covering field(s): <b>{}</b></p>".format(
             html_escape(', '.join(sorted(covering_fields)))), flush=True)
+
+        # ---- Find the recent images of those fields. ----
+        print("<p class='secondary'>Listing recent images of these "
+              "fields...</p>", flush=True)
+        try:
+            images = list_recent_field_images(TEMP_PARENT, covering_fields,
+                                              window_days)
+        except OSError as err:
+            print("<div class='notice'>ERROR: could not list uploads "
+                  "directory <span class='code'>{}</span>: {} ({}).</div>"
+                  .format(html_escape(TEMP_PARENT),
+                          html_escape(type(err).__name__),
+                          html_escape(err)))
+            print("<br><a href='{}'>Search again</a>".format(
+                html_escape(search_again_url)))
+            print("</body></html>")
+            return
+        # Stream rows in (approximate) newest-first order without waiting
+        # for all images to be measured. The timestamp embedded in the
+        # wcs_fd_ filename closely tracks JD and is known without opening
+        # the file, so it makes a cheap proxy sort key.
+        def _img_ts(p):
+            m = _IMG_TS_RE.search(os.path.basename(p))
+            return m.group(1) if m else ''
+        images.sort(key=_img_ts, reverse=True)
+        # Honor the user-selected "Max images" cap from the form.
+        # Remembered so we can tell the user when the cap actually clipped
+        # the result set.
+        total_matching = len(images)
+        images = images[:max_images]
+        capped_by_user = (len(images) < total_matching)
+
         if not images:
-            print("<div class='notice'>No images of these fields in the last "
-                  "{} days.</div>".format(window_days))
+            print("<div class='notice'>ERROR: no images of these fields "
+                  "found in the last {} days.</div>".format(window_days))
             print("<br><a href='{}'>Search again</a>".format(
                 html_escape(search_again_url)))
             print("</body></html>")
