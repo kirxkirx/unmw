@@ -110,42 +110,43 @@ _SAFE_COORD_RE = re.compile(r'^[0-9:+\-.]{1,32}$')
 # transient-report or combined-summary page sees the same setting on
 # this page too (same origin -> shared localStorage).
 
-# Inline pre-CSS script: read the saved theme and write a tiny <style>
-# block that sets body bg + color BEFORE the main stylesheet arrives.
-# Without this the page briefly flashes white on each load in dark mode.
+# Inline preflash script: set a className on <html> before any CSS is parsed
+# so the saved theme's colours win the first paint with no white flash on
+# dark-mode reloads. The earlier version of this used document.write to
+# inject a <style> tag, which disabled the browser's speculative parser
+# and held back the first paint until the entire (streamed) document had
+# arrived -- defeating the per-row progress streaming on this page.
+# Setting documentElement.className does not invalidate the parser, so
+# incremental rendering keeps working.
 _DARK_THEME_PREFLASH = (
     "<script type='text/javascript'>"
-    "(function() {"
-    "  var savedTheme = localStorage.getItem('pageTheme');"
-    "  if (savedTheme === 'dark-theme') {"
-    "    document.write(\"<style>body{background-color:#121212;color:#d0d0d0;}</style>\");"
-    "  } else {"
-    "    document.write(\"<style>body{background-color:#ffffff;color:#000000;}</style>\");"
-    "  }"
-    "})();"
+    "document.documentElement.className = "
+    "(localStorage.getItem('pageTheme') === 'dark-theme') "
+    "? 'dark-theme' : 'light-theme';"
     "</script>"
 )
 
-# CSS rules that map a body class (light-theme / dark-theme) to colours.
-# Targets every styled element the forced-photometry results page emits:
-# body, links, h2/h3 headings, .code, .notice, table.main borders,
-# tr.skipped, p.secondary, plus the floating-button itself.
+# CSS rules that map a class (light-theme / dark-theme) on the <html>
+# element to colours. The class lives on <html> rather than <body> so the
+# preflash script above can set it before <body> exists in the DOM, with
+# no flash. Selectors are html.<theme> ... so they style the <body>'s
+# descendants the same way the previous body.<theme> ... selectors did.
 _DARK_THEME_CSS = """<style type='text/css'>
-body.light-theme { background-color: #ffffff; color: #000000; }
-body.light-theme a { color: #0000ee; }
-body.light-theme a:visited { color: #551a8b; }
-body.dark-theme { background-color: #121212; color: #d0d0d0; }
-body.dark-theme a { color: #7aa2f7; }
-body.dark-theme a:visited { color: #5c7fa3; }
-body.dark-theme h1, body.dark-theme h2, body.dark-theme h3,
-body.dark-theme b, body.dark-theme strong { color: #ffffff; }
-body.dark-theme .code { background: #2a2a2a; color: #d0d0d0; }
-body.dark-theme .notice { background: #3a3a1a; color: #d0d0d0; }
-body.dark-theme table.main th, body.dark-theme table.main td {
+html.light-theme { background-color: #ffffff; color: #000000; }
+html.light-theme a { color: #0000ee; }
+html.light-theme a:visited { color: #551a8b; }
+html.dark-theme { background-color: #121212; color: #d0d0d0; }
+html.dark-theme a { color: #7aa2f7; }
+html.dark-theme a:visited { color: #5c7fa3; }
+html.dark-theme h1, html.dark-theme h2, html.dark-theme h3,
+html.dark-theme b, html.dark-theme strong { color: #ffffff; }
+html.dark-theme .code { background: #2a2a2a; color: #d0d0d0; }
+html.dark-theme .notice { background: #3a3a1a; color: #d0d0d0; }
+html.dark-theme table.main th, html.dark-theme table.main td {
     border: 1px solid #555;
 }
-body.dark-theme tr.skipped td { background: #1c1c1c; color: #888; }
-body.dark-theme p.secondary { color: #888; }
+html.dark-theme tr.skipped td { background: #1c1c1c; color: #888; }
+html.dark-theme p.secondary { color: #888; }
 .floating-btn {
     position: fixed; top: 5vh; right: 20px;
     background-color: #007bff; color: #ffffff; border: none;
@@ -154,36 +155,37 @@ body.dark-theme p.secondary { color: #888; }
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
 }
 .floating-btn:hover { background-color: #0056b3; }
-body.dark-theme .floating-btn { background-color: #2d6cdf; color: #ffffff; }
-body.dark-theme .floating-btn:hover { background-color: #1f56b5; }
+html.dark-theme .floating-btn { background-color: #2d6cdf; color: #ffffff; }
+html.dark-theme .floating-btn:hover { background-color: #1f56b5; }
 </style>"""
 
-# Toggle handler + apply-saved-theme on DOMContentLoaded. Same key/values
-# as combine_reports.sh and transient_factory_test31.sh.
+# Toggle handler + apply-saved-theme on DOMContentLoaded. Same localStorage
+# key/values ('pageTheme' -> 'dark-theme' | 'light-theme') as
+# combine_reports.sh and transient_factory_test31.sh -- only the DOM
+# element the class is set on differs (html, not body), to match the
+# preflash above. The button label is updated on DOMContentLoaded once
+# the button exists.
 _DARK_THEME_SCRIPT = """<script type='text/javascript'>
 function toggleTheme() {
-    var body = document.body;
+    var root = document.documentElement;
     var themeButton = document.getElementById('theme-btn');
-    if (body.classList.contains('dark-theme')) {
-        body.classList.remove('dark-theme');
-        body.classList.add('light-theme');
+    if (root.classList.contains('dark-theme')) {
+        root.classList.remove('dark-theme');
+        root.classList.add('light-theme');
         themeButton.textContent = 'Dark theme';
         localStorage.setItem('pageTheme', 'light-theme');
     } else {
-        body.classList.remove('light-theme');
-        body.classList.add('dark-theme');
+        root.classList.remove('light-theme');
+        root.classList.add('dark-theme');
         themeButton.textContent = 'Light theme';
         localStorage.setItem('pageTheme', 'dark-theme');
     }
 }
 document.addEventListener('DOMContentLoaded', function() {
-    var savedTheme = localStorage.getItem('pageTheme');
     var themeButton = document.getElementById('theme-btn');
-    if (savedTheme === 'dark-theme') {
-        document.body.classList.add('dark-theme');
+    if (document.documentElement.classList.contains('dark-theme')) {
         themeButton.textContent = 'Light theme';
     } else {
-        document.body.classList.add('light-theme');
         themeButton.textContent = 'Dark theme';
     }
 });
@@ -1171,19 +1173,7 @@ def main():
 
         # ---- Stream the page header. ----
         page_title = "Forced-photometry lightcurve"
-        # Opt out of mod_deflate for this response. The page is streamed
-        # incrementally (head + status lines + per-row table updates), and
-        # gzip's output buffer holds back the early flushes until enough
-        # compressed bytes accumulate -- which, with our mostly-text payload,
-        # never happens until the script exits. mod_deflate skips any
-        # response that already has Content-Encoding set, so declaring
-        # identity here disables compression for this CGI only.
-        # Cache-Control: no-transform is belt-and-braces against any
-        # intermediate transforming proxy.
-        print("Content-Type: text/html")
-        print("Cache-Control: no-transform")
-        print("Content-Encoding: identity")
-        print("", flush=True)
+        print("Content-Type: text/html\n", flush=True)
         print("<html><head><title>{}</title>".format(html_escape(page_title)))
         # Dark-theme preflash before any other CSS, so the page does not
         # briefly flash white on each load when the saved theme is dark.
@@ -1197,19 +1187,12 @@ def main():
               "background: #f8f8f8; }"
               " p.secondary { color: #666; font-style: italic; }"
               "</style>")
-        # Dark-theme CSS (body.light-theme / body.dark-theme overrides) and
+        # Dark-theme CSS (html.light-theme / html.dark-theme overrides) and
         # the toggle script. Listed AFTER _PAGE_CSS and the page-local CSS
-        # so its body.dark-theme rules win over the light defaults set above.
+        # so its html.dark-theme rules win over the light defaults set above.
         print(_DARK_THEME_CSS)
         print(_DARK_THEME_SCRIPT)
         print("</head><body>")
-        # Push the response past Apache's CGI output buffer (~4 KB) so the
-        # head + body opening reach the browser immediately and the user
-        # leaves the input form right away instead of staring at "Working..."
-        # while plate-solving runs. Compression is disabled for this
-        # response (see Content-Encoding: identity above), so these bytes
-        # reach the wire as-is and 4000 is enough to cross the threshold.
-        print("<!-- {} -->".format(' ' * 4000))
         # Floating dark/light toggle button -- position: fixed, so its
         # placement in the DOM doesn't affect where it renders.
         print(_DARK_THEME_BUTTON)
