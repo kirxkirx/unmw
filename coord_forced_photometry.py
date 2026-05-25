@@ -1193,6 +1193,14 @@ def main():
         print(_DARK_THEME_CSS)
         print(_DARK_THEME_SCRIPT)
         print("</head><body>")
+        # 4000-byte HTML comment after <body>. Two purposes: (1) push past
+        # Apache's mod_cgi/mod_cgid output buffer so the head + initial
+        # body flush reaches the client immediately instead of waiting for
+        # more bytes; (2) cross the browser's navigation-commit / paint-
+        # holding threshold so the browser actually navigates away from the
+        # input form on submit instead of holding the old page visible
+        # until the per-row table updates start arriving.
+        print("<!-- {} -->".format(' ' * 4000))
         # Floating dark/light toggle button -- position: fixed, so its
         # placement in the DOM doesn't affect where it renders.
         print(_DARK_THEME_BUTTON)
