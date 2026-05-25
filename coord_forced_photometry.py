@@ -76,13 +76,13 @@ TEMP_DIR_PREFIX = 'forced_phot_'
 # main() parsing the form; out-of-range values are clamped to [1, MAX_*].
 DEFAULT_WINDOW_DAYS = 7
 MAX_WINDOW_DAYS = 30
-DEFAULT_MAX_IMAGES = 6
+DEFAULT_MAX_IMAGES = 8
 MAX_MAX_IMAGES = 50
 FORCED_PHOT_MAX_CONCURRENT = 3          # each request uses its own VaST working copy, so this only caps server load
 # Phase 1 (parallel UCAC5+APASS plate-solve) worker cap. The effective number
 # of workers per request is min(len(images), os.cpu_count() or 4, this).
 # Server-wide peak parallel solve_plate processes = this * FORCED_PHOT_MAX_CONCURRENT.
-FORCED_PHOT_PARALLEL_SOLVE_WORKERS = 6
+FORCED_PHOT_PARALLEL_SOLVE_WORKERS = 8
 FORCED_PHOT_TIMEOUT_SECONDS = 600       # per-image safety cap on forced_photometry.sh
 VAST_COPY_TIMEOUT_SECONDS = 300         # cap on the per-request rsync of the VaST tree
 # Per-request disposable VaST working copy (mirrors autoprocess.sh): rsync the
