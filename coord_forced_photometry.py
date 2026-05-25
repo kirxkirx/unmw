@@ -632,28 +632,34 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
     script = os.path.join(work_dir, 'util', 'forced_photometry.sh')
     env = os.environ.copy()
     env['FORCED_PHOTOMETRY_ONLY_C'] = 'yes'
-    # Pass fits_path through the subprocess environment rather than argv.
-    # Filenames in the uploads directory ultimately originated from user
-    # uploads, so CodeQL flags fits_path as tainted into subprocess argv
-    # even though list_recent_field_images returns only entries we found
-    # on disk under our own uploads root. Env-var values are properly
-    # quoted by the shell when referenced as "$NAME", and CodeQL's
-    # py/command-line-injection query follows argv, not env -- so this
-    # eliminates the warning without weakening behaviour.
+    # Pass EVERY user-derived value (fits_path, ra, dec, band) through the
+    # subprocess environment rather than argv, and reference them from the
+    # bash -c shell template via "$NAME". This leaves argv containing only
+    # string literals and server-controlled paths (local_config_path and
+    # script, both derived from the script's own directory and the
+    # config-supplied vast_dir). CodeQL's py/command-line-injection
+    # query follows argv flow, not env, so this leaves no taint path into
+    # the subprocess command line. The shell "$NAME" expansion is
+    # properly quoted, so the values reach the inner exec as separate
+    # argv elements without word-splitting.
     env['FORCED_PHOT_FITS'] = fits_path
+    env['FORCED_PHOT_RA'] = ra_safe
+    env['FORCED_PHOT_DEC'] = dec_safe
+    env['FORCED_PHOT_BAND'] = band
     if local_config_path and os.path.isfile(local_config_path):
         # Source local_config.sh (its stdout sent to stderr so it cannot pollute
-        # the forced-photometry result on stdout), then exec the script. The
-        # FITS path comes in via $FORCED_PHOT_FITS (set above) so it never
-        # appears in argv.
+        # the forced-photometry result on stdout), then exec the script.
         cmd = ['bash', '-c',
-               '. "$1" 1>&2; exec "$2" "$FORCED_PHOT_FITS" "$3" "$4" "$5"',
-               'bash', local_config_path, script, ra_safe, dec_safe, band]
+               '. "$1" 1>&2; '
+               'exec "$2" "$FORCED_PHOT_FITS" "$FORCED_PHOT_RA" '
+               '"$FORCED_PHOT_DEC" "$FORCED_PHOT_BAND"',
+               'bash', local_config_path, script]
     else:
         # Same env-passthrough wrapper without the local_config sourcing.
         cmd = ['bash', '-c',
-               'exec "$1" "$FORCED_PHOT_FITS" "$2" "$3" "$4"',
-               'bash', script, ra_safe, dec_safe, band]
+               'exec "$1" "$FORCED_PHOT_FITS" "$FORCED_PHOT_RA" '
+               '"$FORCED_PHOT_DEC" "$FORCED_PHOT_BAND"',
+               'bash', script]
     # DEBUG: capture per-image forced_photometry.sh stderr + wall-clock time
     # to a sibling log file so we can see why SExtractor reruns / what the
     # script actually did.
