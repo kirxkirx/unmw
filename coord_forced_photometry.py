@@ -104,6 +104,40 @@ VALID_BANDS = ('B', 'V', 'R', 'Rc', 'I', 'Ic', 'r', 'i', 'g')
 # is the primary validator.
 _SAFE_COORD_RE = re.compile(r'^[0-9:+\-.]{1,32}$')
 
+
+def _canonicalize_coord(token):
+    """Re-parse a single ra-or-dec token through int()/float() and return
+    a string assembled from those numeric values. Used right before any
+    subprocess.run that takes coordinates in argv.
+
+    Upstream parse_coordinates() and _SAFE_COORD_RE already constrain the
+    token to digits, ':', '+', '-', and '.'. But CodeQL's
+    py/command-line-injection query does not recognize re.match() as a
+    sanitizer in its taint flow, so user-derived ra/dec strings appear
+    "tainted" all the way into subprocess argv and the warning sticks.
+    int()/float() outputs ARE recognized as sanitized; rebuilding the
+    string from those numeric values terminates the taint at this
+    function and silences the false positive without weakening the
+    actual guarantee (which is already provided upstream).
+
+    Accepts sexagesimal "HH:MM:SS.s" / "[+-]DD:MM:SS.s" or a decimal
+    degree string. Raises ValueError on any unexpected shape, mirroring
+    parse_coordinates() behaviour.
+    """
+    parts = token.split(':')
+    if len(parts) == 1:
+        # Decimal degrees.
+        return '{:.8f}'.format(float(parts[0]))
+    if len(parts) != 3:
+        raise ValueError('invalid sexagesimal token: {!r}'.format(token))
+    deg_part = parts[0]
+    sign = ''
+    if deg_part.startswith(('+', '-')):
+        sign = deg_part[0]
+        deg_part = deg_part[1:]
+    return '{}{:02d}:{:02d}:{:09.6f}'.format(
+        sign, int(deg_part), int(parts[1]), float(parts[2]))
+
 # Per-upload directory name: img_<YYYY-MM-DD>_<...>. Only these are considered.
 IMG_DIR_RE = re.compile(r'^img_(\d{4})-(\d{2})-(\d{2})_')
 # Plain and funpack-compressed FITS endings. The compressed-suffix variants
@@ -576,6 +610,17 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
         _log_skip(debug_log, fits_path,
                   'rejected: band %r not in VALID_BANDS' % band, None, None)
         return None
+    # Numeric round-trip on ra/dec right before they go into argv:
+    # explicitly terminates CodeQL's taint flow (the regex above is
+    # functionally sufficient but not recognised as a sanitizer).
+    try:
+        ra_safe = _canonicalize_coord(ra)
+        dec_safe = _canonicalize_coord(dec)
+    except ValueError as err:
+        _log_skip(debug_log, fits_path,
+                  'rejected: ra/dec failed numeric canonicalization (%s)' % err,
+                  None, None)
+        return None
     script = os.path.join(work_dir, 'util', 'forced_photometry.sh')
     env = os.environ.copy()
     env['FORCED_PHOTOMETRY_ONLY_C'] = 'yes'
@@ -583,9 +628,10 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
         # Source local_config.sh (its stdout sent to stderr so it cannot pollute
         # the forced-photometry result on stdout), then exec the script.
         cmd = ['bash', '-c', '. "$1" 1>&2; exec "$2" "$3" "$4" "$5" "$6"',
-               'bash', local_config_path, script, fits_path, ra, dec, band]
+               'bash', local_config_path, script, fits_path, ra_safe, dec_safe,
+               band]
     else:
-        cmd = [script, fits_path, ra, dec, band]
+        cmd = [script, fits_path, ra_safe, dec_safe, band]
     # DEBUG: capture per-image forced_photometry.sh stderr + wall-clock time
     # to a sibling log file so we can see why SExtractor reruns / what the
     # script actually did.
@@ -857,8 +903,21 @@ def _render_lightcurve_png(work_dir, out_dir, ra, dec, lc_path, ul_path):
     lc_abs = os.path.abspath(lc_path)
     ul_abs = os.path.abspath(ul_path) if ul_path is not None else None
     out_png = os.path.abspath(os.path.join(out_dir, 'lightcurve.png'))
-    cmd = [binary, lc_abs, '-o', out_png,
-           '--title', 'Forced photometry at {} {}'.format(ra, dec)]
+    # Numeric round-trip on ra/dec right before they go into argv. The
+    # title is a single argv element (no shell), so injection is already
+    # impossible, but CodeQL's taint analysis does not see that and
+    # flags user-derived ra/dec flowing into subprocess argv. The
+    # int()/float() coercion inside _canonicalize_coord is a recognised
+    # taint barrier. On bad input we render the plot without the title
+    # rather than skip it -- the lightcurve is more valuable than the
+    # title.
+    try:
+        ra_safe = _canonicalize_coord(ra)
+        dec_safe = _canonicalize_coord(dec)
+        title = 'Forced photometry at {} {}'.format(ra_safe, dec_safe)
+    except ValueError:
+        title = 'Forced photometry lightcurve'
+    cmd = [binary, lc_abs, '-o', out_png, '--title', title]
     if ul_abs is not None:
         cmd.extend(['--upperlimits', ul_abs])
     try:
