@@ -1171,7 +1171,19 @@ def main():
 
         # ---- Stream the page header. ----
         page_title = "Forced-photometry lightcurve"
-        print("Content-Type: text/html\n", flush=True)
+        # Opt out of mod_deflate for this response. The page is streamed
+        # incrementally (head + status lines + per-row table updates), and
+        # gzip's output buffer holds back the early flushes until enough
+        # compressed bytes accumulate -- which, with our mostly-text payload,
+        # never happens until the script exits. mod_deflate skips any
+        # response that already has Content-Encoding set, so declaring
+        # identity here disables compression for this CGI only.
+        # Cache-Control: no-transform is belt-and-braces against any
+        # intermediate transforming proxy.
+        print("Content-Type: text/html")
+        print("Cache-Control: no-transform")
+        print("Content-Encoding: identity")
+        print("", flush=True)
         print("<html><head><title>{}</title>".format(html_escape(page_title)))
         # Dark-theme preflash before any other CSS, so the page does not
         # briefly flash white on each load when the saved theme is dark.
@@ -1191,14 +1203,13 @@ def main():
         print(_DARK_THEME_CSS)
         print(_DARK_THEME_SCRIPT)
         print("</head><body>")
-        # Push the response past Apache's mod_deflate / CGI buffer so the
+        # Push the response past Apache's CGI output buffer (~4 KB) so the
         # head + body opening reach the browser immediately and the user
         # leaves the input form right away instead of staring at "Working..."
-        # while plate-solving runs. mod_deflate's default DeflateBufferSize
-        # is 8 KB; the static head emits ~7.5 KB after the dark-theme
-        # additions, so the previous 4000-byte pad no longer crossed the
-        # threshold. 16000 leaves headroom for any future head growth.
-        print("<!-- {} -->".format(' ' * 16000))
+        # while plate-solving runs. Compression is disabled for this
+        # response (see Content-Encoding: identity above), so these bytes
+        # reach the wire as-is and 4000 is enough to cross the threshold.
+        print("<!-- {} -->".format(' ' * 4000))
         # Floating dark/light toggle button -- position: fixed, so its
         # placement in the DOM doesn't affect where it renders.
         print(_DARK_THEME_BUTTON)
