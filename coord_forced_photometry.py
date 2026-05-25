@@ -55,7 +55,7 @@ import time
 
 import nmw_coord_lib as ncl
 from nmw_coord_lib import (
-    html_escape, _PAGE_CSS, back_link_url, form_page_url, emit_redirect,
+    html_escape, _PAGE_CSS, form_page_url, emit_redirect,
     emit_message_page, parse_coordinates, read_config_vars,
     acquire_concurrency_slot, run_sky2xy_scan, get_image_metadata,
     make_zoomout_thumbnail, make_zoomin_thumbnail, render_thumbnail_link,
@@ -1115,7 +1115,7 @@ def main():
             print("<div class='notice'>No reference field covers this "
                   "position.</div>")
             print("<br><a href='{}'>Search again</a>".format(
-                html_escape(back_link_url())))
+                html_escape(DEFAULT_FORM_PATH)))
             print("</body></html>")
             return
         print("<p>Covering field(s): <b>{}</b></p>".format(
@@ -1124,7 +1124,7 @@ def main():
             print("<div class='notice'>No images of these fields in the last "
                   "{} days.</div>".format(window_days))
             print("<br><a href='{}'>Search again</a>".format(
-                html_escape(back_link_url())))
+                html_escape(DEFAULT_FORM_PATH)))
             print("</body></html>")
             return
         print("<p>Performing forced photometry on {} images; this will "
@@ -1148,7 +1148,7 @@ def main():
             print("<div class='notice'>Could not set up the calibration "
                   "working copy of VaST; cannot measure.</div>")
             print("<br><a href='{}'>Search again</a>".format(
-                html_escape(back_link_url())))
+                html_escape(DEFAULT_FORM_PATH)))
             print("</body></html>")
             return
 
@@ -1379,7 +1379,7 @@ def main():
                   "{}.</p>".format(_fmt_duration(elapsed)))
 
         print("<br><br><a href='{}'>Search again</a>".format(
-            html_escape(back_link_url())))
+            html_escape(DEFAULT_FORM_PATH)))
         print("</body></html>")
     finally:
         if work_dir is not None:
