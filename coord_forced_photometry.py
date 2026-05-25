@@ -328,10 +328,15 @@ def _seed_sextractor_catalog(work_dir, fits_path):
     SExtractor.
 
     Pipeline-side convention (transient_factory_test31.sh, after the
-    reference-cache save block): writes
-        <dirname(image)>/<basename(image)>.cat
-        <dirname(image)>/<basename(image)>.cat.aperture
-    where basename keeps the trailing .fz when the upload is compressed.
+    reference-cache save block): SExtractor runs on the dark-/flat-
+    corrected `fd_<...>.fits` image, so the saved catalog is
+        <dirname(image)>/fd_<...>.fits.cat
+        <dirname(image)>/fd_<...>.fits.cat.aperture
+    while this CGI processes the WCS-solved `wcs_fd_<...>.fits` image in
+    the same directory. The pixel data is identical between fd_ and
+    wcs_fd_ (only the FITS header gains a WCS solution), so the fd_
+    catalog is valid for the wcs_fd_ image and we strip the leading
+    `wcs_` from the basename when looking up the cache file.
     Last SExtractor pass wins by overwrite.
 
     The catalog and aperture files are touched after copying so their mtime
@@ -347,7 +352,14 @@ def _seed_sextractor_catalog(work_dir, fits_path):
     normally).
     """
     base = os.path.basename(fits_path)
-    cat_src = os.path.join(os.path.dirname(fits_path), base + '.cat')
+    # Saved catalog uses the fd_ basename (transient_factory_test31.sh ran
+    # SExtractor on fd_<...>.fits, not on wcs_fd_<...>.fits). Strip the
+    # leading wcs_ to locate it.
+    if base.startswith('wcs_'):
+        src_base = base[len('wcs_'):]
+    else:
+        src_base = base
+    cat_src = os.path.join(os.path.dirname(fits_path), src_base + '.cat')
     ap_src = cat_src + '.aperture'
     if not (os.path.isfile(cat_src) and os.path.isfile(ap_src)):
         return False
