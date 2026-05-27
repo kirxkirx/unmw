@@ -363,50 +363,94 @@ def get_jd_and_atel_date(vast_dir, fits_path):
     return jd, atel
 
 
-def _seed_sextractor_catalog(work_dir, fits_path):
+def _funpack_to_workdir(work_dir, fits_path):
+    """Decompress a `.fz` upload into work_dir; return the funpacked path.
+
+    For non-`.fz` inputs returns fits_path unchanged. Per-image tools that
+    don't read fpack-compressed FITS reliably -- the lib/bin SExtractor
+    binary (Unknown TFORM), and sky2xy (in some builds correct pixel
+    coords but misreads dimensions so on-image targets get tagged as off
+    image) -- consume the funpacked sibling instead. VaST tools that DO
+    handle .fz natively (get_image_date, fov_of_wcs_calibrated_image.sh,
+    fits2png, make_finding_chart, forced_photometry C engine) keep using
+    the original path, so the served FITS link still points at the
+    upload as the user submitted it.
+
+    Returns the funpacked path on success, or None on funpack failure
+    (caller treats the image as unprocessable). The funpacked sibling
+    lives inside the disposable per-request work_dir and is removed when
+    the request's work_dir is rm -rf'd.
+    """
+    if not fits_path.endswith('.fz'):
+        return fits_path
+    target = os.path.join(work_dir,
+                          os.path.basename(fits_path)[:-len('.fz')])
+    funpack = os.path.join(work_dir, 'util', 'funpack')
+    try:
+        result = subprocess.run([funpack, '-O', target, fits_path],
+                                capture_output=True, text=True)
+    except OSError:
+        return None
+    if result.returncode != 0 or not os.path.isfile(target):
+        return None
+    return target
+
+
+def _seed_sextractor_catalog(work_dir, fits_path, compute_path):
     """If transient_factory_test31.sh has already saved a SExtractor catalog
     next to fits_path, materialise it inside the per-request VaST working
-    copy and register it in vast_images_catalogs.log so
-    sextract_single_image_noninteractive will use it instead of re-running
+    copy and register it in vast_images_catalogs.log so that
+    sextract_single_image_noninteractive uses it instead of re-running
     SExtractor.
 
-    Pipeline-side convention (transient_factory_test31.sh, after the
-    reference-cache save block): SExtractor runs on the dark-/flat-
-    corrected `fd_<...>.fits` image, so the saved catalog is
-        <dirname(image)>/fd_<...>.fits.cat
-        <dirname(image)>/fd_<...>.fits.cat.aperture
-    while this CGI processes the WCS-solved `wcs_fd_<...>.fits` image in
-    the same directory. The pixel data is identical between fd_ and
-    wcs_fd_ (only the FITS header gains a WCS solution), so the fd_
-    catalog is valid for the wcs_fd_ image and we strip the leading
-    `wcs_` from the basename when looking up the cache file.
-    Last SExtractor pass wins by overwrite.
+    Two candidate persisted catalog basenames are tried, in order, against
+    the directory holding the original upload:
+      <orig_dir>/fd_<rest>.cat       (original with leading `wcs_` stripped)
+      <orig_dir>/<orig_basename>.cat (original basename verbatim)
+    Both `<...>.cat` and `<...>.cat.aperture` must be present for the hit
+    to count. The first candidate covers transient_factory_test31.sh runs
+    where CALIBRATION_STATUS_PREFIX was `fd_` (catalog saved as
+    `fd_<...>.cat`); the second covers `wcs_fd_` runs. For .fz uploads the
+    `.fz` suffix appears in the saved basename naturally
+    (`fd_<...>.fits.fz.cat`), so no special-casing is needed here.
 
-    The catalog and aperture files are touched after copying so their mtime
-    is fresh -- defeats the `default.sex` newer-than-catalog check in
-    src/autodetect_aperture.c (find_catalog_in_vast_images_catalogs_log)
-    that would otherwise force a recompute. The log entry's second field
-    must be byte-identical to the FITS path that forced_photometry.sh later
-    hands the binary; since this CGI controls both, we just use fits_path
-    as-is on both sides.
+    The materialised catalog inside work_dir is keyed to compute_path's
+    basename, not the original's. compute_path is what
+    sextract_single_image_noninteractive is invoked with later (the
+    funpacked sibling for `.fz` uploads, the original path otherwise),
+    and find_catalog_in_vast_images_catalogs_log in
+    src/autodetect_aperture.c does an exact strcmp on the FITS-filename
+    argv against the second column of vast_images_catalogs.log, so the
+    log line we write here must use compute_path verbatim.
 
-    Returns True on cache hit (catalog materialised, log line written),
-    False otherwise (caller should let forced_photometry.sh run SExtractor
-    normally).
+    The catalog and aperture files are touched after copying so their
+    mtime is fresh -- defeats the `default.sex` newer-than-catalog check
+    in src/autodetect_aperture.c that would otherwise force a recompute.
+
+    Returns 'cache_hit' on success (catalog materialised, log line
+    written), None otherwise. On None the caller lets
+    sextract_single_image_noninteractive run for real on compute_path,
+    which always succeeds because compute_path is always uncompressed.
     """
-    base = os.path.basename(fits_path)
-    # Saved catalog uses the fd_ basename (transient_factory_test31.sh ran
-    # SExtractor on fd_<...>.fits, not on wcs_fd_<...>.fits). Strip the
-    # leading wcs_ to locate it.
-    if base.startswith('wcs_'):
-        src_base = base[len('wcs_'):]
-    else:
-        src_base = base
-    cat_src = os.path.join(os.path.dirname(fits_path), src_base + '.cat')
-    ap_src = cat_src + '.aperture'
-    if not (os.path.isfile(cat_src) and os.path.isfile(ap_src)):
-        return False
-    cat_dst = os.path.join(work_dir, base + '.cat')
+    orig_dir = os.path.dirname(fits_path)
+    orig_base = os.path.basename(fits_path)
+    candidates = []
+    if orig_base.startswith('wcs_'):
+        candidates.append(os.path.join(orig_dir, orig_base[len('wcs_'):]))
+    candidates.append(os.path.join(orig_dir, orig_base))
+    cat_src = None
+    ap_src = None
+    for cand in candidates:
+        c = cand + '.cat'
+        a = c + '.aperture'
+        if os.path.isfile(c) and os.path.isfile(a):
+            cat_src = c
+            ap_src = a
+            break
+    if cat_src is None:
+        return None
+    compute_base = os.path.basename(compute_path)
+    cat_dst = os.path.join(work_dir, compute_base + '.cat')
     ap_dst = cat_dst + '.aperture'
     try:
         shutil.copy(cat_src, cat_dst)
@@ -415,56 +459,66 @@ def _seed_sextractor_catalog(work_dir, fits_path):
         os.utime(cat_dst, None)
         os.utime(ap_dst, None)
     except OSError:
-        return False
+        return None
     log_path = os.path.join(work_dir, 'vast_images_catalogs.log')
     try:
         with open(log_path, 'a') as fh:
-            fh.write('{}.cat {}\n'.format(base, fits_path))
+            fh.write('{}.cat {}\n'.format(compute_base, compute_path))
     except OSError:
-        return False
-    return True
+        return None
+    return 'cache_hit'
 
 
 def _phase1_solve_one(work_dir, local_config_path, fits_path):
-    """One Phase-1 task: source local_config.sh and exec
-    util/solve_plate_with_UCAC5 <fits_path> in work_dir, producing
-    wcs_<basename>.cat.ucac5 with the photometric APASS columns populated
-    (no --no_photometric_catalog). The binary reads the SExtractor catalog
-    we already seeded; it does not run SExtractor itself.
+    """One Phase-1 task: funpack (if needed) -> seed catalog -> sextract
+    -> solve_plate, all on compute_path (= funpacked sibling for `.fz`
+    uploads, fits_path otherwise).
 
-    Returns (fits_path, returncode, stderr_tail) so the caller can log
-    failures uniformly via _log_skip; on cache-hit-in-binary (catalog
-    already exists from a prior call) the binary returns 0 immediately,
-    which is fine for us.
+    Returns (fits_path, compute_path, returncode, stderr_tail,
+    cache_status) so the parent can build the compute_path map for
+    Phase 2, log failures uniformly via _log_skip, and count cache hits.
+    compute_path is None when funpack failed; the parent then logs a
+    skip and Phase 2 won't try to measure the image.
+
+    Two binaries run sequentially per image, both inside the same
+    Phase-1 worker task. Across images, tasks run in parallel.
+
+    1. lib/sextract_single_image_noninteractive <compute_path>
+       - produces image_pid<PID>.cat in cwd (default.param, 24-column,
+         multi-aperture format)
+       - APPENDS the catalog<->fits mapping to vast_images_catalogs.log
+       This is the catalog Phase 2's forced_photometry.sh Step 1 looks
+       for via the log; without it, Phase 2 re-runs SExtractor on every
+       image. When _seed_sextractor_catalog returns 'cache_hit' the log
+       already contains a line keyed by compute_path pointing at the
+       seeded catalog, so the binary short-circuits without running
+       SExtractor for real.
+
+    2. util/solve_plate_with_UCAC5 <compute_path>
+       - via blind_plate_solve_with_astrometry_net() ->
+         wcs_image_calibration.sh -> identify.sh's catalog block, which
+         first calls
+         lib/reformat_existing_sextractor_catalog_according_to_wcsparam.sh.
+         Because step 1 already populated vast_images_catalogs.log with
+         an entry for compute_path, reformat succeeds and produces
+         wcs_<basename>.fits.cat (wcs.param, 10-column) WITHOUT running
+         SExtractor again.
+       - solve_plate then reads that wcs_<basename>.fits.cat and runs
+         the UCAC5 + APASS network queries, writing the photometric
+         wcs_<basename>.fits.cat.ucac5 that Phase 2's
+         calibrate_single_image.sh short-circuits on.
     """
+    compute_path = _funpack_to_workdir(work_dir, fits_path)
+    if compute_path is None:
+        return (fits_path, None, None,
+                'funpack failed for {}'.format(fits_path), None)
+    cache_status = _seed_sextractor_catalog(work_dir, fits_path, compute_path)
     env = os.environ.copy()
-    # Two binaries run sequentially per image, both inside the same Phase-1
-    # worker task. Across images, tasks run in parallel.
-    #
-    # 1. lib/sextract_single_image_noninteractive <fits>
-    #    - produces image_pid<PID>.cat in cwd (default.param, 24-column,
-    #      multi-aperture format)
-    #    - APPENDS the catalog<->fits mapping to vast_images_catalogs.log
-    #    This is the catalog Phase 2's forced_photometry.sh Step 1 looks for
-    #    via the log; without it, Phase 2 re-runs SExtractor on every image.
-    #
-    # 2. util/solve_plate_with_UCAC5 <fits>
-    #    - via blind_plate_solve_with_astrometry_net() -> wcs_image_calibration.sh
-    #      -> identify.sh's catalog block, which first calls
-    #      lib/reformat_existing_sextractor_catalog_according_to_wcsparam.sh.
-    #      Because step 1 already populated vast_images_catalogs.log with an
-    #      entry for this fits, reformat succeeds and produces
-    #      wcs_<basename>.fits.cat (wcs.param, 10-column) WITHOUT running
-    #      SExtractor again.
-    #    - solve_plate then reads that wcs_<basename>.fits.cat and runs the
-    #      UCAC5 + APASS network queries, writing the photometric
-    #      wcs_<basename>.fits.cat.ucac5 that Phase 2's
-    #      calibrate_single_image.sh short-circuits on.
     def _bash_wrap(script_path):
         if local_config_path and os.path.isfile(local_config_path):
             return ['bash', '-c', '. "$1" 1>&2; exec "$2" "$3"',
-                    'bash', local_config_path, script_path, fits_path]
-        return [script_path, fits_path]
+                    'bash', local_config_path, script_path, compute_path]
+        return [script_path, compute_path]
     # Step 1: SExtract -- catalog + log entry needed for everything downstream.
     sextract_script = os.path.join(work_dir, 'lib',
                                    'sextract_single_image_noninteractive')
@@ -473,14 +527,17 @@ def _phase1_solve_one(work_dir, local_config_path, fits_path):
                             capture_output=True, text=True,
                             timeout=FORCED_PHOT_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
-        return (fits_path, None,
-                'sextract timeout: ' + (getattr(exc, 'stderr', '') or ''))
+        return (fits_path, compute_path, None,
+                'sextract timeout: ' + (getattr(exc, 'stderr', '') or ''),
+                cache_status)
     except OSError as exc:
-        return (fits_path, None, 'sextract OSError: {}'.format(exc))
+        return (fits_path, compute_path, None,
+                'sextract OSError: {}'.format(exc), cache_status)
     if r1.returncode != 0:
-        return (fits_path, r1.returncode,
+        return (fits_path, compute_path, r1.returncode,
                 'sextract exit %d:\n%s' % (r1.returncode,
-                                           (r1.stderr or '')[-2000:]))
+                                           (r1.stderr or '')[-2000:]),
+                cache_status)
     # Step 2: plate-solve + UCAC5+APASS query.
     script = os.path.join(work_dir, 'util', 'solve_plate_with_UCAC5')
     try:
@@ -488,50 +545,55 @@ def _phase1_solve_one(work_dir, local_config_path, fits_path):
             _bash_wrap(script), cwd=work_dir, env=env, capture_output=True,
             text=True, timeout=FORCED_PHOT_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
-        return (fits_path, None,
-                'solve_plate timeout: ' + (getattr(exc, 'stderr', '') or ''))
+        return (fits_path, compute_path, None,
+                'solve_plate timeout: ' + (getattr(exc, 'stderr', '') or ''),
+                cache_status)
     except OSError as exc:
-        return (fits_path, None, 'solve_plate OSError: {}'.format(exc))
-    return (fits_path, result.returncode, result.stderr or '')
+        return (fits_path, compute_path, None,
+                'solve_plate OSError: {}'.format(exc), cache_status)
+    return (fits_path, compute_path, result.returncode,
+            result.stderr or '', cache_status)
 
 
 def _phase1_parallel_solve_plate(work_dir, local_config_path, images,
                                  max_workers, debug_log,
                                  progress_callback=None):
-    """Phase 1: run util/solve_plate_with_UCAC5 in parallel across images so
+    """Phase 1: per-image funpack (for `.fz` uploads), SExtractor-catalog
+    seeding, lib/sextract_single_image_noninteractive, and
+    util/solve_plate_with_UCAC5, all in parallel across images, so that
     each per-image wcs_<basename>.cat.ucac5 (photometric, APASS columns
-    populated) is on disk in work_dir before the serial forced_photometry.sh
-    loop starts. Phase 2's internal solve_plate call then short-circuits.
+    populated) is on disk in work_dir before the serial
+    forced_photometry.sh loop starts. Phase 2's internal solve_plate call
+    then short-circuits.
 
-    SExtractor catalogs are seeded for every image first because
-    solve_plate_with_UCAC5 reads wcs_<basename>.cat as its star list -- it
-    does not run SExtractor itself. Images without a cached .cat are still
-    submitted; solve_plate will fail for those (no .cat to read) and the
-    failure is logged via _log_skip. forced_photometry.sh later picks them
-    up with the normal path (which does run SExtractor first).
+    All four steps run inside _phase1_solve_one (one task per image),
+    not as a pre-sweep here, so each parallel worker is self-contained
+    and aggregating the cache-hit / funpack / solve outcomes back into
+    counters happens via the worker return value rather than shared
+    state. Images for which funpack fails are skipped here AND in
+    Phase 2 (compute_path_map.get(img) is None).
 
-    Returns (n_solved, elapsed_seconds) for the bottom-of-page diagnostic.
+    Returns
+        (n_solved, n_cache_hits, n_funpacked, compute_path_map, elapsed)
+    where compute_path_map[fits_path] is the path Phase 2 must hand to
+    forced_photometry.sh -- the funpacked sibling for `.fz` uploads, or
+    fits_path itself for plain FITS. Images missing from the map are
+    those whose funpack failed.
 
     If progress_callback is provided, it is invoked once per completed
     future as (n_done, n_total, fits_path, rc). The caller uses this to
     stream a flushed line per image so the browser sees regular bytes
-    during the otherwise silent Phase 1 (~30-60 s per image on UCAC5+APASS).
-    Exceptions raised by the callback are swallowed so a progress UI
-    glitch cannot fail the request.
+    during the otherwise silent Phase 1 (~30-60 s per image on
+    UCAC5+APASS). Exceptions raised by the callback are swallowed so a
+    progress UI glitch cannot fail the request.
     """
     if not images:
-        return (0, 0, 0.0)
-    # Single seed sweep before launching any solve_plate task: each task
-    # reads wcs_<basename>.cat as its input star list, so the cached .cat
-    # has to be in place first. Count cache hits here for the bottom-of-
-    # page diagnostic; misses (no cached .cat) still get submitted because
-    # solve_plate will simply error out and we log that via _log_skip.
-    n_cache_hits = 0
-    for img in images:
-        if _seed_sextractor_catalog(work_dir, img):
-            n_cache_hits += 1
+        return (0, 0, 0, {}, 0.0)
     start = time.time()
     n_solved = 0
+    n_cache_hits = 0
+    n_funpacked = 0
+    compute_path_map = {}
     n_done = 0
     n_total = len(images)
     workers = max(1, min(len(images), max_workers))
@@ -539,13 +601,21 @@ def _phase1_parallel_solve_plate(work_dir, local_config_path, images,
         futures = [ex.submit(_phase1_solve_one, work_dir, local_config_path,
                              img) for img in images]
         for fut in concurrent.futures.as_completed(futures):
-            fits_path, rc, stderr = fut.result()
+            fits_path, compute_path, rc, stderr, cache_status = fut.result()
             n_done += 1
+            if compute_path is not None:
+                compute_path_map[fits_path] = compute_path
+                if compute_path != fits_path:
+                    n_funpacked += 1
+            if cache_status == 'cache_hit':
+                n_cache_hits += 1
             if rc == 0:
                 n_solved += 1
             else:
                 # Same diagnostic channel as run_forced_photometry_c uses.
-                if rc is None:
+                if compute_path is None:
+                    reason = 'Phase 1: funpack failed'
+                elif rc is None:
                     reason = 'Phase 1: timeout or OSError invoking ' \
                              'solve_plate_with_UCAC5'
                 else:
@@ -557,7 +627,8 @@ def _phase1_parallel_solve_plate(work_dir, local_config_path, images,
                     progress_callback(n_done, n_total, fits_path, rc)
                 except Exception:
                     pass
-    return (n_solved, n_cache_hits, time.time() - start)
+    return (n_solved, n_cache_hits, n_funpacked, compute_path_map,
+            time.time() - start)
 
 
 def _log_skip(debug_log, fits_path, reason, returncode, stderr):
@@ -583,8 +654,8 @@ def _log_skip(debug_log, fits_path, reason, returncode, stderr):
         pass
 
 
-def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, band,
-                            debug_log=None):
+def run_forced_photometry_c(work_dir, local_config_path, fits_path, compute_path,
+                            ra, dec, band, debug_log=None):
     """Run the C-only forced photometry on one image inside the working copy.
 
     work_dir is a per-request rsync copy of the VaST tree (see
@@ -600,6 +671,13 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
     environment the production pipeline uses (Python venv, VAST_SEXTRACTOR_CACHE_DIR,
     data-root exports). The bare Apache CGI environment lacks this, which is why
     forced photometry failed for every image until we matched autoprocess.sh.
+
+    compute_path is the FITS path actually handed to forced_photometry.sh
+    (and through it to sextract_single_image_noninteractive and sky2xy).
+    It is the funpacked sibling in work_dir for `.fz` uploads, or
+    fits_path itself for plain FITS. fits_path is retained for use in
+    diagnostic messages and the debug_log entries so the operator still
+    sees the original upload path on skip lines.
 
     Returns a dict with keys jd, mag, err, status, basename, aperture, x, y,
     or None if the target is off the frame / the tool failed.
@@ -632,17 +710,21 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, ra, dec, ban
     script = os.path.join(work_dir, 'util', 'forced_photometry.sh')
     env = os.environ.copy()
     env['FORCED_PHOTOMETRY_ONLY_C'] = 'yes'
-    # Pass EVERY user-derived value (fits_path, ra, dec, band) through the
-    # subprocess environment rather than argv, and reference them from the
-    # bash -c shell template via "$NAME". This leaves argv containing only
-    # string literals and server-controlled paths (local_config_path and
-    # script, both derived from the script's own directory and the
-    # config-supplied vast_dir). CodeQL's py/command-line-injection
-    # query follows argv flow, not env, so this leaves no taint path into
-    # the subprocess command line. The shell "$NAME" expansion is
-    # properly quoted, so the values reach the inner exec as separate
-    # argv elements without word-splitting.
-    env['FORCED_PHOT_FITS'] = fits_path
+    # Pass EVERY user-derived value (compute_path, ra, dec, band) through
+    # the subprocess environment rather than argv, and reference them
+    # from the bash -c shell template via "$NAME". This leaves argv
+    # containing only string literals and server-controlled paths
+    # (local_config_path and script, both derived from the script's own
+    # directory and the config-supplied vast_dir). CodeQL's
+    # py/command-line-injection query follows argv flow, not env, so
+    # this leaves no taint path into the subprocess command line. The
+    # shell "$NAME" expansion is properly quoted, so the values reach
+    # the inner exec as separate argv elements without word-splitting.
+    # compute_path is what forced_photometry.sh and its sky2xy /
+    # SExtractor sub-calls actually need to read; fits_path is the
+    # original (possibly .fz) upload path retained for diagnostic
+    # messages (debug_log, skip rows).
+    env['FORCED_PHOT_FITS'] = compute_path
     env['FORCED_PHOT_RA'] = ra_safe
     env['FORCED_PHOT_DEC'] = dec_safe
     env['FORCED_PHOT_BAND'] = band
@@ -1328,7 +1410,8 @@ def main():
                       e=elapsed_so_far),
                   flush=True)
 
-        n_phase1_solved, sextractor_cache_hits, phase1_elapsed = \
+        n_phase1_solved, sextractor_cache_hits, n_funpacked, \
+            compute_path_map, phase1_elapsed = \
             _phase1_parallel_solve_plate(
                 work_dir, local_config_path, images, phase1_workers,
                 skip_log, progress_callback=_phase1_progress)
@@ -1387,7 +1470,19 @@ def main():
                         shutil.copy2(src_sex, work_dir_default_sex)
                     except OSError:
                         pass  # keep whatever default.sex was already there
-            fp = run_forced_photometry_c(work_dir, local_config_path, img, ra, dec, band,
+            # compute_path is the funpacked sibling for `.fz` uploads, or
+            # img itself for plain FITS. If the image is missing from the
+            # map, Phase 1's funpack failed for it and there is nothing to
+            # measure -- emit a skip row and move on.
+            compute_path = compute_path_map.get(img)
+            if compute_path is None:
+                print(_html_skipped_row(
+                    img, field_name_from_fits(img),
+                    fits_url(url_prefix, img, uploads_abs)) + _ROW_FLUSH_PAD,
+                    flush=True)
+                continue
+            fp = run_forced_photometry_c(work_dir, local_config_path, img,
+                                         compute_path, ra, dec, band,
                                          debug_log=skip_log)
             if fp is None:
                 # Faint placeholder so processing progress stays visible even
@@ -1397,6 +1492,11 @@ def main():
                     fits_url(url_prefix, img, uploads_abs)) + _ROW_FLUSH_PAD,
                     flush=True)
                 continue
+            # The C engine prints the basename of whatever path it was
+            # handed, which for `.fz` uploads is the funpacked sibling.
+            # Override with the original upload basename so the row labels
+            # match the FITS link the user clicks through to.
+            fp['basename'] = os.path.basename(img)
             jd, atel = get_jd_and_atel_date(vast_dir, img)
             if jd is None:
                 jd = '{:.4f}'.format(float(fp['jd'])) if _is_float(fp['jd']) else fp['jd']
@@ -1510,6 +1610,16 @@ def main():
                   "from autoprocess artifacts, {miss} computed fresh.</p>".format(
                       hit=sextractor_cache_hits,
                       miss=n_processed - sextractor_cache_hits))
+            # Funpack diagnostic -- only shown when at least one `.fz`
+            # upload was processed. The funpacked siblings live inside
+            # the per-request VaST working copy and are cleaned up with
+            # it; sextract / sky2xy / forced_photometry.sh consume the
+            # uncompressed file while thumbnails / metadata / the served
+            # FITS link still reference the original .fz.
+            if n_funpacked > 0:
+                print("<p class='secondary'>Funpack: {n} .fz upload(s) "
+                      "decompressed for SExtractor / sky2xy compatibility."
+                      "</p>".format(n=n_funpacked))
             # Parallel UCAC5 + APASS plate-solve timing.
             print("<p class='secondary'>UCAC5 plate-solve: "
                   "{n} of {tot} image(s) solved in parallel in {t} "
