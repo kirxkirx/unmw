@@ -83,7 +83,7 @@ FORCED_PHOT_MAX_CONCURRENT = 3          # each request uses its own VaST working
 # of workers per request is min(len(images), os.cpu_count() or 4, this).
 # Server-wide peak parallel solve_plate processes = this * FORCED_PHOT_MAX_CONCURRENT.
 FORCED_PHOT_PARALLEL_SOLVE_WORKERS = 8
-FORCED_PHOT_TIMEOUT_SECONDS = 600       # per-image safety cap on forced_photometry.sh
+FORCED_PHOT_TIMEOUT_SECONDS = 900       # per-image safety cap on forced_photometry.sh
 VAST_COPY_TIMEOUT_SECONDS = 300         # cap on the per-request rsync of the VaST tree
 # Per-request disposable VaST working copy (mirrors autoprocess.sh): rsync the
 # reference tree excluding large/static data, then symlink that data back.
@@ -528,7 +528,7 @@ def _phase1_solve_one(work_dir, local_config_path, fits_path):
                             timeout=FORCED_PHOT_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
         return (fits_path, compute_path, None,
-                'sextract timeout: ' + (getattr(exc, 'stderr', '') or ''),
+                'sextract timeout: ' + _exc_stderr_text(exc),
                 cache_status)
     except OSError as exc:
         return (fits_path, compute_path, None,
@@ -546,7 +546,7 @@ def _phase1_solve_one(work_dir, local_config_path, fits_path):
             text=True, timeout=FORCED_PHOT_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
         return (fits_path, compute_path, None,
-                'solve_plate timeout: ' + (getattr(exc, 'stderr', '') or ''),
+                'solve_plate timeout: ' + _exc_stderr_text(exc),
                 cache_status)
     except OSError as exc:
         return (fits_path, compute_path, None,
@@ -629,6 +629,21 @@ def _phase1_parallel_solve_plate(work_dir, local_config_path, images,
                     pass
     return (n_solved, n_cache_hits, n_funpacked, compute_path_map,
             time.time() - start)
+
+
+def _exc_stderr_text(exc):
+    """Return an exception's captured stderr as text.
+
+    subprocess.TimeoutExpired carries stdout/stderr as raw bytes even when
+    subprocess.run() was called with text=True (decoding only happens on the
+    normal CompletedProcess return path, not on the timeout exception). Coerce
+    bytes to str here so the timeout handlers do not raise
+    'can only concatenate str (not "bytes") to str' while reporting the skip.
+    """
+    se = getattr(exc, 'stderr', None)
+    if isinstance(se, bytes):
+        return se.decode('utf-8', 'replace')
+    return se or ''
 
 
 def _log_skip(debug_log, fits_path, reason, returncode, stderr):
@@ -754,7 +769,7 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, compute_path
     except subprocess.TimeoutExpired as exc:
         _log_skip(debug_log, fits_path,
                   'timeout after %ds' % FORCED_PHOT_TIMEOUT_SECONDS,
-                  None, getattr(exc, 'stderr', None))
+                  None, _exc_stderr_text(exc))
         return None
     except OSError as exc:
         _log_skip(debug_log, fits_path, 'OSError: %s' % exc, None, None)
