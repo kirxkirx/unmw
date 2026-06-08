@@ -48,6 +48,7 @@ import os
 import random
 import re
 import shutil
+import signal
 import string
 import subprocess
 import sys
@@ -469,6 +470,64 @@ def _seed_sextractor_catalog(work_dir, fits_path, compute_path):
     return 'cache_hit'
 
 
+def _kill_process_group(proc):
+    """SIGKILL the whole process group led by proc (started with
+    start_new_session=True). Sends SIGTERM first for a brief grace period so
+    children can clean up temp files, then SIGKILL whatever is left.
+    Best-effort; never raises."""
+    try:
+        pgid = os.getpgid(proc.pid)
+    except OSError:
+        pgid = proc.pid
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except OSError:
+        pass
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            break
+        time.sleep(0.2)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def _run_capture_session(cmd, cwd=None, env=None, timeout=None):
+    """subprocess.run(capture_output=True, text=True) workalike that runs the
+    child in its OWN session/process group and, on timeout, SIGKILLs the whole
+    group instead of just the immediate child.
+
+    Plain subprocess.run(timeout=...) only kills the direct child on
+    TimeoutExpired. Here the direct child is a `bash -c` wrapper that execs
+    forced_photometry.sh / solve_plate_with_UCAC5, which spawn grandchildren
+    (calibrate_single_image.sh, solve-field, ...). Killing only the wrapper
+    orphans those grandchildren; solve_plate_with_UCAC5 has no internal time
+    limit and would then keep burning a CPU core indefinitely, reparented to
+    apache/init. start_new_session=True puts the whole subtree in one process
+    group so os.killpg() takes it all down at once.
+
+    Returns subprocess.CompletedProcess. Re-raises subprocess.TimeoutExpired
+    (carrying whatever output was captured) so existing handlers keep working.
+    """
+    proc = subprocess.Popen(
+        cmd, cwd=cwd, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_process_group(proc)
+        # Reap the (now dead) group leader and drain any buffered output.
+        try:
+            out, err = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            out, err = ('', '')
+        raise subprocess.TimeoutExpired(cmd, timeout, output=out, stderr=err)
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
 def _phase1_solve_one(work_dir, local_config_path, fits_path):
     """One Phase-1 task: funpack (if needed) -> seed catalog -> sextract
     -> solve_plate, all on compute_path (= funpacked sibling for `.fz`
@@ -523,9 +582,8 @@ def _phase1_solve_one(work_dir, local_config_path, fits_path):
     sextract_script = os.path.join(work_dir, 'lib',
                                    'sextract_single_image_noninteractive')
     try:
-        r1 = subprocess.run(_bash_wrap(sextract_script), cwd=work_dir, env=env,
-                            capture_output=True, text=True,
-                            timeout=FORCED_PHOT_TIMEOUT_SECONDS)
+        r1 = _run_capture_session(_bash_wrap(sextract_script), cwd=work_dir,
+                                  env=env, timeout=FORCED_PHOT_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
         return (fits_path, compute_path, None,
                 'sextract timeout: ' + _exc_stderr_text(exc),
@@ -541,9 +599,9 @@ def _phase1_solve_one(work_dir, local_config_path, fits_path):
     # Step 2: plate-solve + UCAC5+APASS query.
     script = os.path.join(work_dir, 'util', 'solve_plate_with_UCAC5')
     try:
-        result = subprocess.run(
-            _bash_wrap(script), cwd=work_dir, env=env, capture_output=True,
-            text=True, timeout=FORCED_PHOT_TIMEOUT_SECONDS)
+        result = _run_capture_session(
+            _bash_wrap(script), cwd=work_dir, env=env,
+            timeout=FORCED_PHOT_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
         return (fits_path, compute_path, None,
                 'solve_plate timeout: ' + _exc_stderr_text(exc),
@@ -762,9 +820,9 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, compute_path
     # script actually did.
     _debug_t0 = time.time()
     try:
-        result = subprocess.run(
+        result = _run_capture_session(
             cmd,
-            cwd=work_dir, env=env, capture_output=True, text=True,
+            cwd=work_dir, env=env,
             timeout=FORCED_PHOT_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
         _log_skip(debug_log, fits_path,
