@@ -86,6 +86,12 @@ FORCED_PHOT_MAX_CONCURRENT = 3          # each request uses its own VaST working
 FORCED_PHOT_PARALLEL_SOLVE_WORKERS = 8
 FORCED_PHOT_TIMEOUT_SECONDS = 900       # per-image safety cap on forced_photometry.sh
 VAST_COPY_TIMEOUT_SECONDS = 300         # cap on the per-request rsync of the VaST tree
+# Floor for the magnitude error written to lightcurve.dat. The forced-photometry tools report the
+# true formal error, which is ~0 for a bright high-SNR star; lib/lightcurve_png silently drops
+# points whose error is 0.0 (its raw reader's isnormal() check rejects 0.0), so such points vanish
+# from the plot. 0.001 is the smallest value that survives the '%.3f' lightcurve.dat formatting, so
+# it keeps the point on the plot while barely perturbing the (already negligible) error.
+MIN_PLOT_MAG_ERROR = 0.001
 # Per-request disposable VaST working copy (mirrors autoprocess.sh): rsync the
 # reference tree excluding large/static data, then symlink that data back.
 VAST_WORK_DIR_PREFIX = 'vast_forced_phot_'
@@ -1037,6 +1043,11 @@ def _write_lightcurve_data_files(out_dir, results):
                 err_val = float(r.get('err'))
             except (ValueError, TypeError):
                 continue
+            # Floor the error at MIN_PLOT_MAG_ERROR so a near-zero (rounded-to-0.000) error does
+            # not make lib/lightcurve_png drop the point (its raw reader's isnormal() rejects 0.0).
+            # The 2-d.p. table above still shows 0.00 for these points, which is the honest value.
+            if err_val < MIN_PLOT_MAG_ERROR:
+                err_val = MIN_PLOT_MAG_ERROR
             lc_lines.append('{:.5f} {:.3f} {:.3f}\n'.format(
                 jd_val, mag_val, err_val))
     if not lc_lines and not ul_lines:
