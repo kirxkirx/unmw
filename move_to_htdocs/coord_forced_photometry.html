@@ -65,19 +65,13 @@ to the FITS file, plus a copy-paste ASCII table.</p>
     <input type="number" name="max_images" min="1" max="50" value="8" style="width: 5em;">
   </td>
 </tr>
+<!-- The calibration band is always auto-derived from the camera settings,
+     so no band selector is shown. Omitting the 'band' field makes the
+     server default to auto. -->
 <tr>
-  <td style="text-align: right; padding: 0 10pt;">Band:</td>
+  <td style="padding: 0;"></td>
   <td style="padding: 0;">
-    <select name="band">
-      <option value="">auto (from camera settings)</option>
-      <option value="B">B</option>
-      <option value="V">V</option>
-      <option value="R">R</option>
-      <option value="I">I</option>
-      <option value="g">g</option>
-      <option value="r">r</option>
-      <option value="i">i</option>
-    </select>
+    <button type="button" id="max-lookback-button">Max lookback</button>
     <input type="submit" id="forced-phot-button" value="Measure">
     <span id="forced-phot-working" class="working">Working...</span>
   </td>
@@ -92,7 +86,9 @@ Accepted coordinate formats:
 <li>Decimal degrees: <span class="code">290.0485 +1.6779</span></li>
 </ul>
 The Dec. sign may be <span class="code">-</span>, <span class="code">+</span>, or omitted for positive Dec.
-Leave the band on <span class="code">auto</span> to use the band derived from the camera settings.
+The calibration band is always derived automatically from the camera settings.
+<br>Press <span class="code">Max lookback</span> to set the day window and the maximum
+image count to the largest values allowed.
 </p>
 
 <p class="secondary" style="text-align: center;">
@@ -108,17 +104,32 @@ measured in turn. Please be patient after pressing Measure.
   var form = document.getElementById('forced-phot-form');
   var button = document.getElementById('forced-phot-button');
   var working = document.getElementById('forced-phot-working');
+  var maxButton = document.getElementById('max-lookback-button');
 
   // Pre-fill form fields from URL query parameters. The "Search again" link
   // on the forced-photometry result page appends the request's coords,
-  // window_days, max_images, and (if set) band so the user lands here with
-  // the same values pre-filled and can tweak only what they want to change.
+  // window_days, and max_images so the user lands here with the same values
+  // pre-filled and can tweak only what they want to change. The band is
+  // always auto-derived, so it is not part of the form.
   var params = new URLSearchParams(window.location.search);
-  ['coords', 'window_days', 'max_images', 'band'].forEach(function (name) {
+  ['coords', 'window_days', 'max_images'].forEach(function (name) {
     if (!params.has(name)) return;
     var el = form.elements[name];
     if (el) el.value = params.get(name);
   });
+
+  // "Max lookback" sets the day window and image count to the largest values
+  // allowed. The caps live in the inputs' max attributes (which mirror
+  // MAX_WINDOW_DAYS / MAX_MAX_IMAGES in coord_forced_photometry.py), so read
+  // them from there to stay in sync with the server-side limits.
+  if (maxButton) {
+    maxButton.addEventListener('click', function () {
+      var wd = form.elements['window_days'];
+      var mi = form.elements['max_images'];
+      if (wd && wd.max) wd.value = wd.max;
+      if (mi && mi.max) mi.value = mi.max;
+    });
+  }
 
   function reset() {
     button.disabled = false;
