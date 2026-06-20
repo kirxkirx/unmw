@@ -382,31 +382,35 @@ def main():
         with open('/proc/loadavg', 'r') as f:
             load = float(f.readline().split()[1])
             if load > 50.0:
+                print("Status: 503 Service Unavailable")
                 print("Content-Type: text/html\n")
-                print("<html><body>System load too high</body></html>")
+                print(f"<html><body>UNMW_STATUS:ERROR system load too high: {load}</body></html>")
                 sys.exit(1)
     except Exception as e:
+        print("Status: 500 Internal Server Error")
         print("Content-Type: text/html\n")
-        print(f"<html><body>Error checking system load: {e}</body></html>")
+        print(f"<html><body>UNMW_STATUS:ERROR failed to check system load: {e}</body></html>")
         sys.exit(1)
 
     # Check upload directory and disk space
     try:
         if not os.path.exists(upload_dir):
+            print("Status: 500 Internal Server Error")
             print("Content-Type: text/html\n")
-            print("<html><body>Upload directory missing</body></html>")
+            print("<html><body>UNMW_STATUS:ERROR upload directory missing</body></html>")
             sys.exit(1)
 
         status, message = check_disk_space_status(upload_dir)
         if status == "ERROR":
             print("Status: 507 Insufficient Storage")
             print("Content-Type: text/html\n")
-            print(f"<html><body>Insufficient disk space: {message}</body></html>")
+            print(f"<html><body>UNMW_STATUS:ERROR Insufficient disk space: {message}</body></html>")
             sys.exit(1)
     except Exception as e:
+        print("Status: 500 Internal Server Error")
         print("Content-Type: text/html\n")
         print(
-            f"<html><body>Error checking upload directory: {e}</body></html>")
+            f"<html><body>UNMW_STATUS:ERROR failed to check upload directory: {e}</body></html>")
         sys.exit(1)
 
     print("Content-Type: text/html\n")
@@ -416,7 +420,10 @@ def main():
     success, message, dirname = secure_upload_handler(form, upload_dir)
 
     if not success:
-        print(f"<html><body>{message}</body></html>")
+        # Headers (HTTP 200) were already sent above, so the failure is signaled
+        # in-body with UNMW_STATUS:ERROR; the client treats any such body as a
+        # failed upload and keeps the local archive for retry.
+        print(f"<html><body>UNMW_STATUS:ERROR {message}</body></html>")
         sys.exit(1)
 
     # Run processing
@@ -445,9 +452,9 @@ def main():
             try:
                 exit_status = os.system(wrapper_command)
             except Exception as e:
-                print(f"<html><body>Error running wrapper.sh command: {e}<br>Current working directory: {cwd}</body></html>")
+                print(f"<html><body>UNMW_STATUS:ERROR Error running wrapper.sh command: {e}<br>Current working directory: {cwd}</body></html>")
         else:
-            print(f"<html><body>./wrapper.sh does not exist!<br>Current working directory: {cwd}</body></html>")
+            print(f"<html><body>UNMW_STATUS:ERROR ./wrapper.sh does not exist!<br>Current working directory: {cwd}</body></html>")
             exit_status = 1
 
         # Check exit status of wrapper.sh
@@ -456,7 +463,7 @@ def main():
         # This means the actual exit code might have been 0, but a mistake in interpreting the value or truncation occurred.
         if exit_status != 0 and exit_status != 256:
             # Cleanup on failure
-            print(f"<html><body>Error during processing.<br>./wrapper.sh {dirname}{os.path.basename(form['file'].filename)}<br>Exit status {exit_status}<br>Current working directory: {cwd}<br>Cleaning up...</body></html>")
+            print(f"<html><body>UNMW_STATUS:ERROR Error during processing.<br>./wrapper.sh {dirname}{os.path.basename(form['file'].filename)}<br>Exit status {exit_status}<br>Current working directory: {cwd}<br>Cleaning up...</body></html>")
             try:
                 for root, dirs, files in os.walk(dirname, topdown=False):
                     for file in files:
@@ -465,7 +472,7 @@ def main():
                         os.rmdir(os.path.join(root, directory))
                 os.rmdir(dirname)
             except Exception as e:
-                print(f"<html><body>Error during cleanup: {e}</body></html>")
+                print(f"<html><body>UNMW_STATUS:ERROR Error during cleanup: {e}</body></html>")
                 sys.exit(1)
             sys.exit(1)
         # otherwise autoprocess.sh should delete the input after it completes
@@ -500,6 +507,7 @@ def main():
         <meta http-equiv="Refresh" content="0; url={results_url}">
         </head>
         <body>
+        <!-- UNMW_STATUS:OK -->
         <p>Upload successful. Redirecting to results...</p>
         </body>
         </html>
