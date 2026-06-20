@@ -60,6 +60,7 @@ LIST_ALL_MAX_FILES = 2000            # safety cap on the "show all" listing
 LIST_ALL_TIMEOUT_SECONDS = 900       # wall-clock cap for the "show all" flow (15 min)
 DEFAULT_FORM_PATH = '/unmw/coord_search.html'
 DEFAULT_ZOOMIN_PIXELS = 200          # half-width of zoom-in thumbnail in source pix
+ZOOMIN_MARKER_APERTURE_DIAMETER_PIX = 10.0  # fixed red circle (pix) marking the target on the zoom-in cutout
 DEFAULT_PARALLEL_WORKERS = 16        # threads rendering PNGs concurrently
 MIN_PARALLEL_WORKERS = 1
 MAX_PARALLEL_WORKERS = 32
@@ -559,10 +560,12 @@ def main():
                 """
                 r['png_zoomin'] = make_zoomin_thumbnail(
                     r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
-                    thumb_pixels, zoomin_pixels, suffix='zoomin')
+                    thumb_pixels, zoomin_pixels, suffix='zoomin',
+                    aperture_circle_diameter=ZOOMIN_MARKER_APERTURE_DIAMETER_PIX)
                 r['png_zoomin_hires'] = make_zoomin_thumbnail(
                     r['path'], r['x'], r['y'], out_dir_abs, vast_dir,
-                    hires_pixels, zoomin_pixels, suffix='zoomin_hires')
+                    hires_pixels, zoomin_pixels, suffix='zoomin_hires',
+                    aperture_circle_diameter=ZOOMIN_MARKER_APERTURE_DIAMETER_PIX)
                 r['png_zoomout'] = make_zoomout_thumbnail(
                     r['path'], r['x'], r['y'], r['nx'], r['ny'],
                     out_dir_abs, vast_dir, thumb_pixels, suffix='zoomout')
