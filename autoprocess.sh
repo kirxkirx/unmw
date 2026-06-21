@@ -959,6 +959,14 @@ The detailed log output is at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FIL
   if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ] && [ $TEST_RUN -eq 0 ];then
    curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=[NMW ERROR] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
   fi
+  # Slack notification to the team channel (subject folded into the text).
+  if [ -n "$SLACK_WEBHOOK_URL_TEAM" ] && [ $TEST_RUN -eq 0 ];then
+   SLACK_TEXT="[NMW ERROR] $NAME running $SCRIPTNAME
+$MSG"
+   curl --silent -X POST -H 'Content-type: application/json' \
+        --data "$(printf '%s' "$SLACK_TEXT" | python3 -c 'import json,sys; print(json.dumps({"text": sys.stdin.read()}))')" \
+        "$SLACK_WEBHOOK_URL_TEAM"
+  fi
  else
   ### Check for all other errors
   grep --quiet 'ERROR' "transient_report/index.html"

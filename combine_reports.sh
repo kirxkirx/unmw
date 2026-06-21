@@ -395,6 +395,16 @@ $SCRIPTNAME $HOST
  if [ -n "$CURL_USERNAME_URL_TO_EMAIL_TEAM" ];then
   curl --silent $CURL_USERNAME_URL_TO_EMAIL_TEAM --data-urlencode "name=[NMW combined list] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
  fi
+ # Slack notification to the team channel. Slack has no separate subject field,
+ # so the e-mail subject is folded into the message text as a prefix line.
+ # python3 builds the JSON payload so the multi-line body is escaped correctly.
+ if [ -n "$SLACK_WEBHOOK_URL_TEAM" ];then
+  SLACK_TEXT="[NMW combined list] $NAME running $SCRIPTNAME
+$MSG"
+  curl --silent -X POST -H 'Content-type: application/json' \
+       --data "$(printf '%s' "$SLACK_TEXT" | python3 -c 'import json,sys; print(json.dumps({"text": sys.stdin.read()}))')" \
+       "$SLACK_WEBHOOK_URL_TEAM"
+ fi
 fi
 
 # Summary file
