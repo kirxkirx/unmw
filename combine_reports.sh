@@ -399,8 +399,10 @@ $SCRIPTNAME $HOST
  # so the e-mail subject is folded into the message text as a prefix line.
  # python3 builds the JSON payload so the multi-line body is escaped correctly.
  if [ -n "$SLACK_WEBHOOK_URL_TEAM" ];then
-  SLACK_TEXT="[NMW combined list] $NAME running $SCRIPTNAME
-$MSG"
+#  SLACK_TEXT="[NMW combined list] $NAME running $SCRIPTNAME
+#$MSG"
+  SLACK_TEXT="New *candidates* list from *$CAMERA*: $URL_OF_DATA_PROCESSING_ROOT/$OUTPUT_FILTERED_HTML_NAME
+Processing log: $URL_OF_DATA_PROCESSING_ROOT/$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
   curl --silent -X POST -H 'Content-type: application/json' \
        --data "$(printf '%s' "$SLACK_TEXT" | python3 -c 'import json,sys; print(json.dumps({"text": sys.stdin.read()}))')" \
        "$SLACK_WEBHOOK_URL_TEAM"
