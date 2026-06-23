@@ -216,6 +216,46 @@ touch /data/cgi-bin/unmw/uploads/exclusion_list_STL.txt
 chown apache:apache /data/cgi-bin/unmw/uploads/exclusion_list_STL.txt
 
 ````
+
+# (recommended) Cache result images for faster candidate-list reloads
+
+The combined candidate list embeds many PNG images (finding charts, cutouts,
+full-frame previews). These images never change once written, but the list page
+is reloaded frequently, so by default every reload re-fetches them. Telling the
+browser to cache the images aggressively makes reloads dramatically faster -- on
+reload the images come straight from the browser cache with no network request.
+
+Add the following to the Apache configuration. On RHEL/CentOS/AlmaLinux the
+cleanest place is a new file `/etc/httpd/conf.d/unmw-cache.conf`; on Gentoo (or
+any setup using a site `<VirtualHost>`) put it inside that VirtualHost:
+
+```apache
+# Long-cache the immutable NMW result images (they never change once written).
+# URL-scoped to /unmw/uploads/ images only; HTML is intentionally left alone so
+# the candidate pages keep revalidating and pick up newly added candidates.
+<LocationMatch "^/unmw/uploads/.*\.(png|jpe?g|gif|webp)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+</LocationMatch>
+```
+
+Then check the configuration and reload Apache:
+
+```sh
+apachectl configtest          # expect "Syntax OK"
+systemctl reload httpd        # RHEL/CentOS/AlmaLinux
+# rc-service apache2 reload   # Gentoo (OpenRC)
+```
+
+Notes:
+- Requires the `mod_headers` Apache module, which is loaded by default on
+  RHEL/CentOS/AlmaLinux and Gentoo (check with `httpd -M | grep headers`).
+- The match is scoped to the `/unmw/uploads/` URL path and to image extensions
+  only. Adjust the path in the pattern if your `URL_OF_DATA_PROCESSING_ROOT`
+  serves the results under a different path. Do NOT extend it to `.html`, or the
+  candidate pages would stop showing new candidates on reload.
+- Verify it took effect with:
+  `curl -sI http://<host>/unmw/uploads/<dir>/<image>.png | grep -i cache-control`
+
 # Alternatively
 Have a look at the [testing script](unmw_selftest.sh) that spins-up a python built-in [HTTP server](custom_http_server.py) at port 8080 (or the next one available) and puts a copy of [VaST](https://github.com/kirxkirx/vast) and all the uploaded images and processing results in the `uploads` subdirectory of the current directory.
 The testing script relies on external services for plate solving and accessing
