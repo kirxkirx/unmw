@@ -794,8 +794,9 @@ if [ $? -ne 0 ];then
  exit 1
 fi
 
-# Check that the png image previews were actually created
-for PNG_FILE_TO_TEST in $(grep 'img src=' "$LATEST_COMBINED_HTML_REPORT" | awk -F"img src=" '{print $2}' | awk -F'"'  '{print $2}' | grep '.png') ;do
+# Check that the png/webp image previews were actually created
+# (thumbnails may be lossless WebP; full-frame previews stay PNG)
+for PNG_FILE_TO_TEST in $(grep 'img src=' "$LATEST_COMBINED_HTML_REPORT" | awk -F"img src=" '{print $2}' | awk -F'"'  '{print $2}' | grep -E '\.(png|webp)') ;do
  if [ ! -f "$PNG_FILE_TO_TEST" ];then
   echo "$0 test error: cannot find the PNG file $PNG_FILE_TO_TEST"
   exit 1
@@ -804,8 +805,8 @@ for PNG_FILE_TO_TEST in $(grep 'img src=' "$LATEST_COMBINED_HTML_REPORT" | awk -
   echo "$0 test error: empty PNG file $PNG_FILE_TO_TEST"
   exit 1
  fi
- if ! file "$PNG_FILE_TO_TEST" | grep --quiet 'PNG image' ;then
-  echo "$0 test error: not a PNG file $PNG_FILE_TO_TEST"
+ if ! file "$PNG_FILE_TO_TEST" | grep --quiet -E 'PNG image|Web/?P' ;then
+  echo "$0 test error: not a PNG or WebP image file $PNG_FILE_TO_TEST"
   file "$PNG_FILE_TO_TEST"
   exit 1
  fi
