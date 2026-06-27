@@ -38,7 +38,7 @@ from typing import Tuple
 
 # Constants for file validation
 MIN_FILE_SIZE = 2 * 1024 * 1024  # 2MB
-MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB
+MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
 ALLOWED_EXTENSIONS = {'.zip', '.rar'}
 ALLOWED_IMAGE_EXTENSIONS = {'.fit', '.fits', '.fts'}
 MIN_IMAGE_FILES = 2

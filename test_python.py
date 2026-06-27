@@ -23,7 +23,7 @@ from filter_report import is_asteroid, is_variable_star, is_ast_or_vs, filter_re
 
 # Constants from upload.py3
 MIN_FILE_SIZE = 2 * 1024 * 1024  # 2MB
-MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB
+MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
 ALLOWED_EXTENSIONS = {'.zip', '.rar'}
 ALLOWED_IMAGE_EXTENSIONS = {'.fit', '.fits', '.fts'}
 MIN_IMAGE_FILES = 2
