@@ -284,7 +284,7 @@ class TestValidateArchiveSize:
     def test_too_large(self):
         """Should return False for files larger than maximum"""
         assert validate_archive_size(MAX_FILE_SIZE + 1) is False
-        assert validate_archive_size(500 * 1024 * 1024) is False  # 500MB
+        assert validate_archive_size(3 * 1024 * 1024 * 1024) is False  # 3GB
 
 
 class TestCheckArchiveContents:
