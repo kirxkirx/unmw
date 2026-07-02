@@ -256,6 +256,30 @@ Notes:
 - Verify it took effect with:
   `curl -sI http://<host>/unmw/uploads/<dir>/<image>.png | grep -i cache-control`
 
+# Optional: TNS (Transient Name Server) transient matching
+The pipeline can cross-match each transient candidate against transients registered on the
+[Transient Name Server](https://www.wis-tns.org/) within the last 30 days. Matched candidates are
+flagged as `known_transient` in the combined reports (see
+[`filter_report_json_format.md`](filter_report_json_format.md)).
+
+This requires TNS API credentials, which must be exported from `local_config.sh` so that VaST sees
+them in the environment. Add the following to `local_config.sh`:
+````
+# TNS (https://www.wis-tns.org/) credentials for known-transient matching.
+# Obtain your numeric bot/user ID and name from https://www.wis-tns.org/user
+export TNS_ID="123456"           # required: numeric TNS bot/user ID
+export TNS_NAME="your_tns_bot"   # required: TNS bot/user name
+#export TNS_TYPE="user"          # optional: "user" (default) or "bot"
+````
+Both `TNS_ID` and `TNS_NAME` are required; `TNS_TYPE` defaults to `user`. They are passed to TNS as a
+`tns_marker` User-Agent header, so the ID and name must belong to a real TNS account.
+
+If either `TNS_ID` or `TNS_NAME` is unset, TNS matching is silently skipped (no error) -- VaST simply
+does not download or cross-match the TNS list, and no candidate is classified as `known_transient` via
+TNS. When both are set, VaST's `transient_factory_test31.sh` fetches the list via
+`lib/update_tns_transients_list.sh` and caches it for 30 minutes (shared across all fields of a run) to
+respect the TNS rate limit.
+
 # Alternatively
 Have a look at the [testing script](unmw_selftest.sh) that spins-up a python built-in [HTTP server](custom_http_server.py) at port 8080 (or the next one available) and puts a copy of [VaST](https://github.com/kirxkirx/vast) and all the uploaded images and processing results in the `uploads` subdirectory of the current directory.
 The testing script relies on external services for plate solving and accessing
