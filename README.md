@@ -256,6 +256,30 @@ Notes:
 - Verify it took effect with:
   `curl -sI http://<host>/unmw/uploads/<dir>/<image>.png | grep -i cache-control`
 
+# Housekeeping: pruning old per-request result directories
+
+The coordinate-search, forced-photometry and archival-photometry pages leave
+their per-request output directories (`uploads/coord_search_*`,
+`uploads/forced_phot_*`, `uploads/archive_phot_*`) in place so that result
+URLs keep working. Nothing deletes them automatically; when disk space
+becomes a concern, run [`archive_phot_prune.sh`](archive_phot_prune.sh):
+````
+./archive_phot_prune.sh 90            # delete result dirs older than 90 days
+./archive_phot_prune.sh 90 --dry-run  # only show what would be deleted
+````
+Archival-photometry jobs that are still queued or running are never touched,
+whatever their age. The script also removes disposable VaST working copies
+(`uploads/vast_forced_phot_*`, `uploads/vast_archive_phot_*`) orphaned by a
+crash: those are only deleted when they are older than one day AND the
+process that created them (the pid embedded in the directory name) is no
+longer alive.
+
+To run it automatically, add a line like this to `/etc/crontab` (it must run
+as the web server user that owns the uploads directory):
+````
+41 4 * * * apache cd /data/cgi-bin/unmw && ./archive_phot_prune.sh 90 >> uploads/archive_phot_prune.log 2>&1
+````
+
 # Optional: TNS (Transient Name Server) transient matching
 The pipeline can cross-match each transient candidate against transients registered on the
 [Transient Name Server](https://www.wis-tns.org/) within the last 30 days. Matched candidates are

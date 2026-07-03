@@ -240,16 +240,24 @@ def read_config_vars(*var_names):
 
 # ---------- concurrency limit ----------
 
-def acquire_concurrency_slot(prefix='coord_search', max_concurrent=MAX_CONCURRENT):
+def acquire_concurrency_slot(prefix='coord_search', max_concurrent=MAX_CONCURRENT,
+                             lock_dir=LOCK_DIR):
     """Try to acquire one of max_concurrent exclusive flock slots.
 
     Lock files are named '<prefix>_slot_<i>.lock' so different pages can use
     independent slot pools. Returns the open file object on success (caller
     must keep it alive until the end of the request), or None when no slot
     is free.
+
+    lock_dir defaults to the shared LOCK_DIR (/tmp). Callers whose lock
+    files must all be owned by a single system user pass their own
+    directory instead: in world-writable /tmp a lock file created by the
+    wrong user is unopenable for everyone else (open() fails, the slot
+    looks permanently busy), which the archival photometry queue avoids by
+    keeping its locks under its own data directory.
     """
     for i in range(1, max_concurrent + 1):
-        path = os.path.join(LOCK_DIR, '{}_slot_{}.lock'.format(prefix, i))
+        path = os.path.join(lock_dir, '{}_slot_{}.lock'.format(prefix, i))
         try:
             fd = open(path, 'w')
         except OSError:

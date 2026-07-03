@@ -1,0 +1,153 @@
+<html>
+<head>
+<style type="text/css">
+body { color: #000;
+ background: #fff;
+ font-family: arial, helvetica, sans-serif;
+ font-size: 12pt;
+ line-height: 16pt;
+ margin-top: 3mm;
+ margin-bottom: 3mm;
+ margin-left: 10mm;
+ margin-right: 10mm;
+}
+
+p {text-align: justify; text-indent: 6mm; line-height: 16pt}
+.code {text-align: left; font-family: courier; background: #ccc; color:
+#000}
+table.main {border-spacing: 5pt}
+td { padding-left: 20pt; padding-right: 20pt; padding-bottom: 3pt }
+
+a:link {color: #55f; text-decoration: none}
+a:visited {color: #33f; text-decoration: none}
+a:active {color: #55f; text-decoration: none}
+a:hover {color: #55f; text-decoration: underline}
+
+.section { max-width: 720px; margin: 0 auto; padding-top: 6pt; }
+.section p { text-indent: 0; }
+.formats { margin-left: 8pt; }
+.working { margin-left: 1em; color: #888; visibility: hidden; }
+.secondary { color: #444; }
+hr.break { max-width: 720px; margin: 18pt auto; }
+</style>
+</head>
+
+<center>
+<h2>Archival forced photometry at a sky position</h2>
+</center>
+
+<form id="archive-phot-form" action="../cgi-bin/unmw/archive_forced_photometry.py" method="post">
+
+<div class="section">
+<p>Enter J2000 sky coordinates to get forced aperture photometry at that
+position on <b>every</b> matching image in the long-term image archive
+(optionally restricted to a UT date range). Because an archive job may
+measure hundreds of large images, it does not run while you wait: it is
+placed in a processing queue, and you follow it on a status page that
+turns into a permanent results page (lightcurve plot, per-image preview
+and aperture cutout, copy-paste ASCII table) when the job finishes.</p>
+
+<table style="margin: 0 auto; border-spacing: 5pt;">
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec.):</td>
+  <td style="padding: 0;">
+    <input type="text" name="coords" size="36" placeholder="19:20:11.64 +01:40:40.6">
+  </td>
+</tr>
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">From date (UT, optional):</td>
+  <td style="padding: 0;">
+    <input type="date" name="date_from">
+  </td>
+</tr>
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">To date (UT, optional):</td>
+  <td style="padding: 0;">
+    <input type="date" name="date_to">
+  </td>
+</tr>
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">Band (optional):</td>
+  <td style="padding: 0;">
+    <select name="band">
+      <option value="" selected>auto (from camera settings)</option>
+      <option value="B">B</option>
+      <option value="V">V</option>
+      <option value="R">R</option>
+      <option value="Rc">Rc</option>
+      <option value="I">I</option>
+      <option value="Ic">Ic</option>
+      <option value="r">r</option>
+      <option value="i">i</option>
+      <option value="g">g</option>
+    </select>
+  </td>
+</tr>
+<tr>
+  <td style="padding: 0;"></td>
+  <td style="padding: 0;">
+    <input type="submit" id="archive-phot-button" value="Queue the job">
+    <span id="archive-phot-working" class="working">Submitting...</span>
+  </td>
+</tr>
+</table>
+
+<p class="formats">
+Accepted coordinate formats:
+<ul>
+<li>Sexagesimal with colons: <span class="code">19:20:11.64 +01:40:40.6</span></li>
+<li>Sexagesimal with spaces: <span class="code">19 20 11.64 +01 40 40.6</span></li>
+<li>Decimal degrees: <span class="code">290.0485 +1.6779</span></li>
+</ul>
+The Dec. sign may be <span class="code">-</span>, <span class="code">+</span>, or omitted for positive Dec.
+Dates are compared against the observation time from the FITS headers (in UT);
+leave both date fields empty to measure the whole archive.
+</p>
+
+<p class="secondary" style="text-align: center;">
+Submission itself takes up to a minute (the server checks which fields cover
+the position and reads the archive image dates); please be patient after
+pressing the button. You will then be taken to the job status page &mdash;
+bookmark it. <a href="../cgi-bin/unmw/archive_phot_status.py">Queue overview</a>
+</p>
+</div>
+
+</form>
+
+<script type="text/javascript">
+(function () {
+  var form = document.getElementById('archive-phot-form');
+  var button = document.getElementById('archive-phot-button');
+  var working = document.getElementById('archive-phot-working');
+
+  // Pre-fill form fields from URL query parameters. The "Re-run this
+  // request" links on results pages point here with the original coords,
+  // band, and date range in the query string, so the user lands on a
+  // prefilled form and only has to press the button.
+  var params = new URLSearchParams(window.location.search);
+  ['coords', 'band', 'date_from', 'date_to'].forEach(function (name) {
+    if (!params.has(name)) return;
+    var el = form.elements[name];
+    if (el) el.value = params.get(name);
+  });
+
+  function reset() {
+    button.disabled = false;
+    working.style.visibility = 'hidden';
+  }
+
+  form.addEventListener('submit', function () {
+    // Disable the button on submit so impatient double-clicks do not
+    // enqueue two identical jobs back to back (the server would dedup
+    // them anyway, but no reason to make it).
+    button.disabled = true;
+    working.style.visibility = 'visible';
+  });
+
+  // pageshow fires on initial load AND on back/forward-cache restore, so the
+  // button is re-enabled if the user returns via the back button.
+  window.addEventListener('pageshow', reset);
+})();
+</script>
+
+</html>

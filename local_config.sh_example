@@ -7,6 +7,33 @@ export URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
 
 export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 
+# Long-term image archive for the archival forced photometry queue
+# (archive_forced_photometry.py). The archive images carry the wcs_fd_
+# prefix before the field name (wcs_fd_<FIELD>_...fits) and cover the same
+# fields as the reference images. Today all images sit directly in this
+# directory; subdirectories (for example one per month) are also searched.
+# A subdirectory named "bad" (rejected frames) is always ignored.
+# Archival forced photometry is disabled unless this is set.
+#export IMAGE_ARCHIVE_DIR="/mnt/nmwttu1/NMW-TexasTech_archive"
+
+# Optional URL prefix at which IMAGE_ARCHIVE_DIR is served by the web
+# server. When set, archival photometry results pages link the original
+# FITS files; when unset, the result rows simply have no FITS link (the
+# large archive images are never copied into the results directory).
+#export IMAGE_ARCHIVE_URL="http://example.com/NMW-TexasTech_archive"
+
+# Archival photometry queue protection (defaults shown):
+# maximum queued+running jobs, maximum queued+running jobs per client IP,
+# and how many jobs may run at the same time (worker slots).
+#export ARCHIVE_PHOT_MAX_QUEUE=10
+#export ARCHIVE_PHOT_MAX_QUEUE_PER_IP=5
+#export ARCHIVE_PHOT_MAX_RUNNING=2
+
+# 1-min load average above which the archival photometry worker delays
+# starting the next job (bounded wait, then it proceeds anyway). Falls back
+# to MAX_SYSTEM_LOAD; no load gating when neither variable is set.
+#export ARCHIVE_PHOT_MAX_SYSTEM_LOAD=14.0
+
 # Thumbnail (in-page) width/height in pixels for the coord_search.py CGI tool.
 # The click-through hi-res image is fixed at 4x this value.
 #export COORD_SEARCH_THUMBNAIL_PIXELS=256

@@ -13,6 +13,12 @@ Options +ExecCGI
     Require all denied
 </Files>
 
+# The archival-photometry queue worker and the importable helper modules
+# are not CGI entry points - forbid direct web access to them
+<FilesMatch "^(archive_phot_worker\.py|nmw_coord_lib\.py|nmw_forced_phot_lib\.py|nmw_archive_phot_lib\.py)$">
+    Require all denied
+</FilesMatch>
+
 # Block CGI execution in all subdirectories
 <DirectoryMatch "^.*/.+/">
     Options -ExecCGI
