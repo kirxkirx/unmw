@@ -70,6 +70,7 @@ Required: `id`, `classification`. Everything else may be `null` or omitted.
 | `id` | string | Same string as the `<a name>` anchor in the HTML, e.g., `20369_Cyg5_2026-5-9_23-4-47_003`. Stable across re-runs. |
 | `field` | string \| null | Field name, e.g., `Cyg5`, `Oph-05-Q1b1x1`. Parsed from the "FIELD field processing log" link if present; otherwise from the `id` via regex. |
 | `classification` | enum: `new`, `known_asteroid`, `known_variable`, `known_transient` | See "Classification precedence" below. Consumers should treat unknown classification values as `new`-equivalent so future additions stay forward-compatible. |
+| `large_mag_difference` | boolean | `true` when the candidate block carries the VaST `ATTENTION: ... mag brighter than the ...` line, i.e. the measured brightness is more than ~3 mag brighter than the matched VSX / ASASSN-V record or the astcheck-predicted asteroid brightness. Such candidates stay visible in the filtered HTML even when classified `known_asteroid` / `known_variable`, and the toggle-button counters exclude them. Additive field, no schema version bump. |
 | `mean` | object \| null | Mean magnitude and position on the discovery images. |
 | `second_epoch_separation` | object \| null | Separation between detections on the two second-epoch images. |
 | `cutouts` | object \| null | Absolute URLs of small cutout PNGs. |

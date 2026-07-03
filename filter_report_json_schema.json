@@ -45,6 +45,7 @@
           "id":             { "type": "string" },
           "field":          { "type": ["string", "null"] },
           "classification": { "enum": ["new", "known_asteroid", "known_variable", "known_transient"] },
+          "large_mag_difference": { "type": "boolean" },
           "mean": {
             "type": ["object", "null"],
             "additionalProperties": true,

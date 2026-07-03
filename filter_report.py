@@ -108,6 +108,25 @@ def is_ast_or_vs(pre_el_text):
     )
 
 
+# VaST (check_catalogs_offline called by report_transient.sh, and MPCheck_v2.sh)
+# appends an 'ATTENTION: measured mag ... is N.N mag brighter than the ...' line
+# to a VSX / ASASSN-V / astcheck match block when the measured brightness of the
+# transient is much brighter than what the catalog record predicts. Such
+# candidates must stay visible in the filtered view even though they match a
+# known object: the positional match may be a chance coincidence with a real
+# transient (this is how a bright nova was missed on 2026-07-01), or the known
+# object is doing something unusual.
+LARGE_MAG_DIFF_MARKER = 'mag brighter than the'
+
+
+def has_large_mag_difference(pre_el_text):
+    try:
+        return LARGE_MAG_DIFF_MARKER in pre_el_text
+    except TypeError as e:
+        print("Error in has_large_mag_difference: {}".format(e))
+        return False
+
+
 # CSS to inject before </HEAD>
 FILTER_CSS_TEMPLATE = """
 <style>
@@ -781,6 +800,9 @@ def filter_report(path_to_report):
         varstar_count = 0
         known_transient_count = 0
         unknown_count = 0
+        hidden_asteroid_count = 0
+        hidden_varstar_count = 0
+        visible_large_mag_diff_count = 0
         wrapped = []
         candidates_json = []
 
@@ -792,17 +814,32 @@ def filter_report(path_to_report):
             is_asassn = is_variable_star(pre_text, "ASASSN-V")
             is_known_varstar = is_vsx or is_asassn
             keep_visible = is_in_neverexclude_list(pre_text)
+            large_mag_diff = has_large_mag_difference(pre_text)
             exclusion_list_file, _ = _extract_exclusion_list_match(pre_text)
             is_known_transient = exclusion_list_file in KNOWN_TRANSIENT_LIST_FILES
 
             if is_asteroid(pre_text):
-                css_class = "transient-asteroid"
                 classification = "known_asteroid"
                 asteroid_count += 1
+                if large_mag_diff:
+                    # The transient is much brighter than the astcheck
+                    # prediction: keep it visible in the filtered view
+                    css_class = "transient-unknown"
+                    visible_large_mag_diff_count += 1
+                else:
+                    css_class = "transient-asteroid"
+                    hidden_asteroid_count += 1
             elif is_known_varstar and not keep_visible:
-                css_class = "transient-varstar"
                 classification = "known_variable"
                 varstar_count += 1
+                if large_mag_diff:
+                    # The transient is much brighter than the VSX / ASASSN-V
+                    # record: keep it visible in the filtered view
+                    css_class = "transient-unknown"
+                    visible_large_mag_diff_count += 1
+                else:
+                    css_class = "transient-varstar"
+                    hidden_varstar_count += 1
             elif is_known_transient:
                 # Known-transient candidates stay visible in the filtered HTML;
                 # the JSON consumer can distinguish them via classification.
@@ -819,11 +856,12 @@ def filter_report(path_to_report):
 
             candidate_id = _extract_candidate_id(transient)
             if candidate_id is not None:
-                candidates_json.append(
-                    _build_candidate(transient, candidate_id, classification, base_url))
+                candidate_json = _build_candidate(transient, candidate_id, classification, base_url)
+                candidate_json["large_mag_difference"] = large_mag_diff
+                candidates_json.append(candidate_json)
 
         total = asteroid_count + varstar_count + known_transient_count + unknown_count
-        if unknown_count == 0:
+        if unknown_count == 0 and visible_large_mag_diff_count == 0:
             message = ('<p>All {} candidates are known objects'
                        ' ({} asteroids, {} variable stars).'
                        ' Use the buttons to show them.</p>').format(
@@ -831,13 +869,16 @@ def filter_report(path_to_report):
         else:
             message = ''
 
+        # The toggle buttons act on (and therefore count) only the hidden
+        # candidates: the ones with a large magnitude difference are already
+        # visible despite being classified as known asteroids / variables.
         filter_css = FILTER_CSS_TEMPLATE.format(
-            asteroid_count=asteroid_count,
-            varstar_count=varstar_count,
+            asteroid_count=hidden_asteroid_count,
+            varstar_count=hidden_varstar_count,
         )
         filter_body = FILTER_BODY_TEMPLATE.format(
-            asteroid_count=asteroid_count,
-            varstar_count=varstar_count,
+            asteroid_count=hidden_asteroid_count,
+            varstar_count=hidden_varstar_count,
             message=message,
         )
 
