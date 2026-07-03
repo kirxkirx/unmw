@@ -13,8 +13,9 @@ long-running jobs are the reason the queue exists.
 
 The job is processed in the background by archive_phot_worker.py (kicked
 from here, fork-and-forget); progress is watched on
-archive_phot_status.py?job=<id> and the finished results live permanently
-at uploads/archive_phot_<id>/index.html.
+archive_phot_status.py?job=<id> and the finished results stay at
+uploads/archive_phot_<id>/index.html until the operator prunes old
+results (archive_phot_prune.sh; nothing expires automatically).
 
 Queue protection (no accounts, no CAPTCHA): total queued+running jobs are
 capped (ARCHIVE_PHOT_MAX_QUEUE, default 10), queued+running jobs per client
@@ -533,8 +534,12 @@ def main():
                   "order).</p>".format(position))
         print("<p>Follow the progress at <a href='{0}'>the job status "
               "page</a> &mdash; bookmark it; it will redirect to the "
-              "permanent results page when the job finishes. You can close "
+              "persistent results page when the job finishes. You can close "
               "this window at any time.</p>".format(html_escape(status_url)))
+        print("<p class='secondary'>Results stay at a stable URL; very old "
+              "results may eventually be removed during server "
+              "housekeeping, so download the data files you want to "
+              "keep.</p>")
         print("<p class='secondary'>This page will jump to the status page "
               "in a few seconds.</p>")
         print("<script type='text/javascript'>setTimeout(function() {{ "

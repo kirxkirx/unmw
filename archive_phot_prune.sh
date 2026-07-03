@@ -11,7 +11,7 @@
 #   ./archive_phot_prune.sh 90 --dry-run  # only show what would be deleted
 #
 # What it removes (only directly under uploads/):
-#   archive_phot_*          archival photometry job dirs (permanent results);
+#   archive_phot_*          archival photometry job dirs (persistent results);
 #                           jobs still queued or running are NEVER touched
 #   .archive_phot_tmp_*     half-created job dirs left by crashed submissions
 #   forced_phot_*           coord_forced_photometry.py per-request output

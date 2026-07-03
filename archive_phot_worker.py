@@ -10,7 +10,7 @@ when none is free, so duplicate kicks cost one short-lived process.
 A worker that holds a slot loops: claim the oldest queued job (under a
 short flock so two workers never claim the same job), measure every image
 in the job's frozen list with the exact engine coord_forced_photometry.py
-uses (nmw_forced_phot_lib), write the permanent results page
+uses (nmw_forced_phot_lib), write the persistent results page
 uploads/archive_phot_<id>/index.html, and repeat until the queue is empty.
 
 Failure policy: FAILED IS TERMINAL. A job that raises, or whose worker
@@ -171,7 +171,7 @@ def _zoomin_pixels_from_cfg(cfg):
 
 def process_job(job_id, job_dir, request, cfg, local_config_path,
                 load_threshold):
-    """Measure every image of one claimed job and write its permanent
+    """Measure every image of one claimed job and write its persistent
     results page. Raises on unrecoverable trouble (caller marks the job
     failed); per-image problems only produce skipped rows."""
     start_time = time.time()
@@ -321,7 +321,8 @@ def process_job(job_id, job_dir, request, cfg, local_config_path,
                 r['status']))
             apl.update_state(job_dir, n_done=idx)
 
-        # ---- Lightcurve files and plot (into the permanent job dir). ----
+        # ---- Lightcurve files and plot (into the job dir, which
+        # outlives the disposable VaST working copy). ----
         apl.update_state(job_dir, stage='rendering results page')
         lightcurve_html = []
         if results:
@@ -351,7 +352,7 @@ def process_job(job_id, job_dir, request, cfg, local_config_path,
                     "<p class='secondary' style='text-align: center;'>"
                     "Data files: {}</p>".format(', '.join(links)))
 
-        # ---- The permanent results page. ----
+        # ---- The persistent results page. ----
         elapsed = time.time() - start_time
         parts = [apl.results_page_head('Archival forced photometry results')]
         parts.append(apl.job_summary_html(job_id, request))
@@ -397,6 +398,11 @@ def process_job(job_id, job_dir, request, cfg, local_config_path,
                              sextractor_cache_hits, n_funpacked))
         parts.append("<p class='secondary'>Measured on {}.</p>".format(
             html_escape(_utc_now_str())))
+        parts.append("<p class='secondary'>Please download the data you "
+                     "want to keep (the photometry table and the "
+                     "lightcurve data files): this results page stays at "
+                     "this URL, but may eventually be deleted to free up "
+                     "server disk space.</p>")
         parts.append(apl.job_links_html(job_id, request))
         parts.append("</body></html>\n")
         apl.write_index_html_atomic(job_dir, '\n'.join(parts))

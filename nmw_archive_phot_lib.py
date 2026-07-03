@@ -28,12 +28,12 @@ keeps result URLs practically unguessable. Inside:
                  (the submit CGI creates it, then only the worker that
                  claimed the job updates it)
   progress.log   one line per processed image, appended by the worker
-  index.html     the permanent results page, written by the worker on
+  index.html     the persistent results page, written by the worker on
                  completion (success or failure report)
 
-Job directories are permanent; archive_phot_prune.sh deletes old ones on
-the operator's request. A failed job is terminal: nothing in the queue ever
-re-runs it -- re-measuring the same target requires a new request (which is
+Job directories are kept until archive_phot_prune.sh deletes them on the
+operator's request; nothing expires automatically. A failed job is
+terminal: nothing in the queue ever re-runs it -- re-measuring the same target requires a new request (which is
 deliberately allowed, e.g. after the archive has been updated).
 
 This module must stay import-safe: no CGI work at import time.
@@ -68,7 +68,7 @@ STATE_DONE = 'done'
 STATE_FAILED = 'failed'
 
 # Path of the input form as served under htdocs (see move_to_htdocs/).
-# Stored links on permanent results pages are built from this constant --
+# Stored links on persistent results pages are built from this constant --
 # never from the client-supplied Host header, which must not end up in
 # pages shown to OTHER users.
 FORM_PAGE_PATH = '/unmw/archive_forced_photometry.html'
@@ -126,9 +126,10 @@ ARCHIVE_IMAGE_PREFIX = 'wcs_fd_'
 DATE_INPUT_RE = re.compile(r'^(\d{4})-(\d{2})-(\d{2})$')
 
 # Cap on how many newest job directories the dedup / prior-job scans read.
-# Job dirs are permanent, so an unbounded scan would slow down as history
-# accumulates; anything older than the newest 200 jobs is irrelevant to
-# "is this a duplicate?" and "when was this position last measured?".
+# Job dirs accumulate until the operator prunes them, so an unbounded
+# scan would slow down as history accumulates; anything older than the
+# newest 200 jobs is irrelevant to "is this a duplicate?" and "when was
+# this position last measured?".
 RECENT_JOBS_SCAN_LIMIT = 200
 
 
@@ -679,7 +680,7 @@ def progress_tail_text(job_dir, max_lines=30):
 
 
 def write_failure_page(job_dir, job_id, request, error_text):
-    """Permanent results page for a failed job: the failure report. Never
+    """Persistent results page for a failed job: the failure report. Never
     raises (called from exception handlers and the sweep)."""
     try:
         parts = [results_page_head('Archival forced photometry: job failed')]

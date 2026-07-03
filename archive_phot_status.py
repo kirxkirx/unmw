@@ -5,7 +5,7 @@ Three views:
   archive_phot_status.py                    queue overview (recent jobs)
   archive_phot_status.py?job=<id>           one job: queue position while
                                             queued, progress while running,
-                                            redirect to the permanent
+                                            redirect to the persistent
                                             results page when finished
   archive_phot_status.py?job=<id>&check_updates=1
                                             for a finished job: compare the
@@ -324,7 +324,7 @@ def _show_job(job_id, job_dir, script_dir, cfg, max_running):
                         "restarted for this job.</p>")
         body.append("<p class='secondary'>This page reloads every {} s; "
                     "bookmark it to check back later. It will redirect to "
-                    "the permanent results page when the job finishes.</p>"
+                    "the persistent results page when the job finishes.</p>"
                     .format(JOB_REFRESH_SECONDS))
         _render_page("Job {}".format(job_id), '\n'.join(body),
                      refresh_seconds=JOB_REFRESH_SECONDS)
@@ -350,7 +350,7 @@ def _show_job(job_id, job_dir, script_dir, cfg, max_running):
             body.append("<p class='secondary'>Recent progress:</p>"
                         "<pre>{}</pre>".format(html_escape(tail)))
         body.append("<p class='secondary'>This page reloads every {} s and "
-                    "will redirect to the permanent results page when the "
+                    "will redirect to the persistent results page when the "
                     "job finishes.</p>".format(JOB_REFRESH_SECONDS))
         _render_page("Job {}".format(job_id), '\n'.join(body),
                      refresh_seconds=JOB_REFRESH_SECONDS)
