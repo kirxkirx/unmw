@@ -16,6 +16,7 @@ import the cgi module -- the queue worker runs headless.
 """
 
 import concurrent.futures
+import math
 import os
 import random
 import re
@@ -1010,7 +1011,19 @@ def _render_lightcurve_png(work_dir, out_dir, ra, dec, lc_path, ul_path):
         title = 'Forced photometry at {} {}'.format(ra_safe, dec_safe)
     except ValueError:
         title = 'Forced photometry lightcurve'
-    cmd = [binary, lc_abs, '-o', out_png, '--title', title]
+    # PGPLOT truncates long device filenames (somewhere around 90
+    # characters its PNG driver ends up opening a chopped path, prints
+    # "plotting disabled" and writes nothing; older binaries even exit 0).
+    # Never hand the binary the possibly-long destination path: render to
+    # a SHORT name relative to the subprocess cwd (the VaST working copy,
+    # cleaned up after the request, so a stray temp file cannot linger),
+    # then move the file to its destination here. shutil.move survives a
+    # cross-filesystem work_dir/out_dir split. Newer lightcurve_png
+    # handles long paths itself, but going through the short name keeps
+    # this safe with older deployed binaries too.
+    tmp_name = 'lightcurve_png_tmp_{}.png'.format(os.getpid())
+    tmp_abs = os.path.join(work_dir, tmp_name)
+    cmd = [binary, lc_abs, '-o', tmp_name, '--title', title]
     if ul_abs is not None:
         cmd.extend(['--upperlimits', ul_abs])
     try:
@@ -1027,11 +1040,180 @@ def _render_lightcurve_png(work_dir, out_dir, ra, dec, lc_path, ul_path):
                 result.returncode, cmd,
                 (result.stderr or '')[-1000:]))
         return None
+    if not os.path.isfile(tmp_abs) or os.path.getsize(tmp_abs) == 0:
+        sys.stderr.write(
+            'lightcurve_png: exit 0 but {} was not created\nstderr:\n{}\n'
+            .format(tmp_abs, (result.stderr or '')[-1000:]))
+        return None
+    try:
+        shutil.move(tmp_abs, out_png)
+    except OSError as exc:
+        sys.stderr.write(
+            'lightcurve_png: cannot move {} to {}: {}\n'.format(
+                tmp_abs, out_png, exc))
+        try:
+            os.unlink(tmp_abs)
+        except OSError:
+            pass
+        return None
     if not os.path.isfile(out_png):
         sys.stderr.write(
-            'lightcurve_png: exit 0 but {} was not created\n'.format(out_png))
+            'lightcurve_png: {} was not created\n'.format(out_png))
         return None
     return os.path.basename(out_png)
+
+
+# ---------- matplotlib lightcurve rendering ----------
+
+MATPLOTLIB_FIGSIZE = (10.0, 5.0)
+MATPLOTLIB_PNG_DPI = 150
+MATPLOTLIB_LABEL_FONTSIZE = 15
+MATPLOTLIB_TICK_FONTSIZE = 12
+MATPLOTLIB_TITLE_FONTSIZE = 14
+MATPLOTLIB_UPPER_LIMIT_COLOR = '#cc0000'
+
+
+def _read_numeric_columns(path, n_columns):
+    """Parse a whitespace-separated numeric table (lightcurve.dat /
+    upperlimits.dat format): skip blank lines and # comments, keep rows
+    whose first n_columns tokens all parse as floats. Returns a list of
+    n_columns-tuples; [] on any I/O trouble."""
+    rows = []
+    if path is None:
+        return rows
+    try:
+        with open(path) as fh:
+            for line in fh:
+                stripped = line.strip()
+                if not stripped or stripped.startswith('#'):
+                    continue
+                tokens = stripped.split()
+                if len(tokens) < n_columns:
+                    continue
+                try:
+                    rows.append(tuple(float(tokens[i])
+                                      for i in range(n_columns)))
+                except ValueError:
+                    continue
+    except OSError:
+        return []
+    return rows
+
+
+def _render_lightcurve_matplotlib(out_dir, ra, dec, lc_path, ul_path):
+    """Render lightcurve.png AND lightcurve.eps in out_dir with matplotlib.
+
+    Style: no background grid, large axis labels, magnitude axis inverted
+    (bright up), detections as black circles with error bars, upper limits
+    as red down-pointing triangles (clearly distinct from detections), a
+    legend when both kinds are present, JD axis relative to a round offset
+    so the tick labels stay short.
+
+    Returns (png_basename, eps_basename); eps_basename is None when only
+    the EPS write failed. Returns (None, None) when matplotlib is not
+    importable or anything else goes wrong -- the caller then falls back
+    to the lib/lightcurve_png binary. Never raises."""
+    # matplotlib wants a writable config/font-cache directory; the CGI/
+    # worker environment often has no usable $HOME, which would cost a
+    # slow tempdir font-cache rebuild on every import. Both consumers of
+    # this module run with cwd = the unmw script dir, so park the cache
+    # next to the other served state under uploads/.
+    if not os.environ.get('MPLCONFIGDIR'):
+        cache_dir = os.path.abspath(
+            os.path.join('uploads', '.matplotlib_cache'))
+        try:
+            os.makedirs(cache_dir, mode=0o755, exist_ok=True)
+            os.environ['MPLCONFIGDIR'] = cache_dir
+        except OSError:
+            pass  # matplotlib falls back to a temp dir (slower, works)
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        sys.stderr.write('matplotlib not importable; falling back to '
+                         'lib/lightcurve_png for the lightcurve plot\n')
+        return None, None
+    detections = _read_numeric_columns(lc_path, 3)
+    limits = _read_numeric_columns(ul_path, 2)
+    if not detections and not limits:
+        return None, None
+    try:
+        all_jd = [row[0] for row in detections] + [row[0] for row in limits]
+        # Round-hundred JD offset keeps the tick labels short without
+        # matplotlib's own confusing scientific-notation offset text.
+        jd_offset = math.floor(min(all_jd) / 100.0) * 100.0
+        # Same title (and CodeQL taint barrier) as _render_lightcurve_png.
+        try:
+            ra_safe = _canonicalize_coord(ra)
+            dec_safe = _canonicalize_coord(dec)
+            title = 'Forced photometry at {} {}'.format(ra_safe, dec_safe)
+        except ValueError:
+            title = 'Forced photometry lightcurve'
+        fig = plt.figure(figsize=MATPLOTLIB_FIGSIZE)
+        ax = fig.add_subplot(111)
+        if detections:
+            ax.errorbar([row[0] - jd_offset for row in detections],
+                        [row[1] for row in detections],
+                        yerr=[row[2] for row in detections],
+                        fmt='o', color='black', markersize=4.5,
+                        elinewidth=1.0, capsize=0, zorder=3,
+                        label='detection')
+        if limits:
+            ax.plot([row[0] - jd_offset for row in limits],
+                    [row[1] for row in limits],
+                    marker='v', linestyle='none',
+                    color=MATPLOTLIB_UPPER_LIMIT_COLOR, markersize=8,
+                    zorder=2, label='upper limit')
+        ax.invert_yaxis()  # brighter is up
+        ax.grid(False)
+        ax.set_xlabel('JD - {:.0f}'.format(jd_offset),
+                      fontsize=MATPLOTLIB_LABEL_FONTSIZE)
+        ax.set_ylabel('Magnitude', fontsize=MATPLOTLIB_LABEL_FONTSIZE)
+        ax.set_title(title, fontsize=MATPLOTLIB_TITLE_FONTSIZE)
+        ax.tick_params(labelsize=MATPLOTLIB_TICK_FONTSIZE)
+        if detections and limits:
+            ax.legend(fontsize=11, frameon=False)
+        fig.tight_layout()
+        out_abs = os.path.abspath(out_dir)
+        png_abs = os.path.join(out_abs, 'lightcurve.png')
+        fig.savefig(png_abs, dpi=MATPLOTLIB_PNG_DPI)
+        eps_basename = None
+        eps_abs = os.path.join(out_abs, 'lightcurve.eps')
+        try:
+            fig.savefig(eps_abs, format='eps')
+            if os.path.isfile(eps_abs) and os.path.getsize(eps_abs) > 0:
+                eps_basename = 'lightcurve.eps'
+        except Exception as exc:
+            sys.stderr.write(
+                'matplotlib EPS lightcurve write failed: {}\n'.format(exc))
+        plt.close(fig)
+        if not os.path.isfile(png_abs) or os.path.getsize(png_abs) == 0:
+            return None, None
+        return 'lightcurve.png', eps_basename
+    except Exception as exc:
+        sys.stderr.write(
+            'matplotlib lightcurve rendering failed: {}: {}\n'.format(
+                type(exc).__name__, exc))
+        try:
+            plt.close('all')
+        except Exception:
+            pass
+        return None, None
+
+
+def render_lightcurve_plots(work_dir, out_dir, ra, dec, lc_path, ul_path):
+    """Render the lightcurve plot into out_dir: matplotlib (PNG + EPS)
+    when available, else the lib/lightcurve_png binary from the VaST
+    working copy (PNG only). Returns (png_basename, eps_basename), either
+    of which may be None; when eps_basename is None the caller must not
+    link an EPS file on the results page."""
+    png_basename, eps_basename = _render_lightcurve_matplotlib(
+        out_dir, ra, dec, lc_path, ul_path)
+    if png_basename is not None:
+        return png_basename, eps_basename
+    return (_render_lightcurve_png(work_dir, out_dir, ra, dec, lc_path,
+                                   ul_path), None)
 
 
 def ascii_table(rows):

@@ -74,7 +74,7 @@ from nmw_forced_phot_lib import (
     derive_band, derive_sextractor_config, get_jd_and_atel_date,
     _phase1_parallel_solve_plate, run_forced_photometry_c,
     setup_vast_working_copy, _write_lightcurve_data_files,
-    _render_lightcurve_png, ascii_table, fits_url, _is_float, _fmt_mag,
+    render_lightcurve_plots, ascii_table, fits_url, _is_float, _fmt_mag,
     _fmt_err, _fmt_duration, _html_row, _html_skipped_row,
 )
 
@@ -627,7 +627,7 @@ def main():
         if results:
             _lc_path, _ul_path = _write_lightcurve_data_files(out_dir, results)
             if _lc_path is not None:
-                _png_basename = _render_lightcurve_png(
+                _png_basename, _eps_basename = render_lightcurve_plots(
                     work_dir, out_dir, ra, dec, _lc_path, _ul_path)
                 if _png_basename is not None:
                     _png_url = '{}/{}/{}'.format(
@@ -652,6 +652,13 @@ def main():
                     _links.append(
                         "<a href='{}'>{}</a> (upper limits)".format(
                             html_escape(_ul_url), html_escape(_ul_base)))
+                if _eps_basename is not None:
+                    _eps_url = '{}/{}/{}'.format(
+                        url_prefix, sub_name, _eps_basename)
+                    _links.append(
+                        "<a href='{}'>{}</a> (EPS figure)".format(
+                            html_escape(_eps_url),
+                            html_escape(_eps_basename)))
                 print("<p class='secondary' style='text-align: center;'>"
                       "Data files: {}</p>".format(', '.join(_links)),
                       flush=True)

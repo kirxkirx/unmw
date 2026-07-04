@@ -48,7 +48,7 @@ from nmw_forced_phot_lib import (
     _read_factory_text, derive_band, derive_sextractor_config,
     get_jd_and_atel_date, _phase1_parallel_solve_plate,
     run_forced_photometry_c, setup_vast_working_copy,
-    _write_lightcurve_data_files, _render_lightcurve_png, ascii_table,
+    _write_lightcurve_data_files, render_lightcurve_plots, ascii_table,
     fits_url, _is_float, _fmt_mag, _fmt_err, _fmt_duration, _html_row,
     _html_skipped_row,
 )
@@ -329,7 +329,7 @@ def process_job(job_id, job_dir, request, cfg, local_config_path,
             lc_path, ul_path = _write_lightcurve_data_files(job_dir,
                                                             results)
             if lc_path is not None:
-                png_basename = _render_lightcurve_png(
+                png_basename, eps_basename = render_lightcurve_plots(
                     work_dir, job_dir, ra, dec, lc_path, ul_path)
                 if png_basename is not None:
                     lightcurve_html.append(
@@ -348,6 +348,12 @@ def process_job(job_id, job_dir, request, cfg, local_config_path,
                             html_escape(url_prefix), html_escape(sub_name),
                             html_escape(os.path.basename(ul_path)),
                             html_escape(os.path.basename(ul_path))))
+                if eps_basename is not None:
+                    links.append(
+                        "<a href='{}/{}/{}'>{}</a> (EPS figure)".format(
+                            html_escape(url_prefix), html_escape(sub_name),
+                            html_escape(eps_basename),
+                            html_escape(eps_basename)))
                 lightcurve_html.append(
                     "<p class='secondary' style='text-align: center;'>"
                     "Data files: {}</p>".format(', '.join(links)))
