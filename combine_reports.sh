@@ -682,7 +682,11 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
   # LOG LINE: too many candidates to exclude in the combined report error
   echo "<td><span class='status-error'>ERROR</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td><td>$MAG_LIMIT</td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>too many candidates ($NUMBER_OF_UNIDENTIFIED_CANDIDATES with no ID, $NUMBER_OF_CANDIDATE_TRANSIENTS total) to include in the combined list ($(basename $0))</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  else
-  grep --quiet 'ERROR' "$INPUT_DIR/index.html" | grep 'stuck camera'
+  # Match a line carrying both the ERROR word and either phrasing of the
+  # stuck-camera message ('IMAGE PROCESSING ERROR (stuck camera ...)' in the
+  # processing log banner, 'ERROR the camera is stuck ...' in the filtering
+  # log), both of which are embedded in index.html.
+  grep 'ERROR' "$INPUT_DIR/index.html" | grep --quiet -e 'stuck camera' -e 'camera is stuck'
   if [ $? -eq 0 ];then
    FIELD=$(grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:<br>::g' | awk '{print $1}')
    # LOG LINE: suck camera error
