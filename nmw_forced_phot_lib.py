@@ -27,7 +27,8 @@ import subprocess
 import sys
 import time
 
-from nmw_coord_lib import html_escape, render_thumbnail_link
+from nmw_coord_lib import html_escape, render_thumbnail_link, \
+    _reformat_sexagesimal
 
 # Phase 1 (parallel UCAC5+APASS plate-solve) worker cap. The effective number
 # of workers per request is min(len(images), os.cpu_count() or 4, this).
@@ -101,6 +102,26 @@ def _canonicalize_coord(token):
         sign = ''
     return '{}{:02d}:{:02d}:{:09.6f}'.format(
         sign, int(deg_part), int(parts[1]), float(parts[2]))
+
+
+def _format_title_coords(ra, dec):
+    """Plot-title coordinate strings: the same _canonicalize_coord numeric
+    round-trip the argv call sites use (CodeQL taint barrier), then
+    trimmed for display -- seconds of time to 2 decimals (RA), seconds of
+    arc to 1 decimal (Dec), plain decimal degrees to 5 decimals. Raises
+    ValueError on input that does not parse."""
+    ra_c = _canonicalize_coord(ra)
+    dec_c = _canonicalize_coord(dec)
+    if ':' in ra_c:
+        ra_disp = _reformat_sexagesimal(ra_c, 2)
+    else:
+        ra_disp = '{:.5f}'.format(float(ra_c))
+    if ':' in dec_c:
+        dec_disp = _reformat_sexagesimal(dec_c, 1)
+    else:
+        dec_disp = '{:+.5f}'.format(float(dec_c))
+    return ra_disp, dec_disp
+
 
 # Plain and funpack-compressed FITS endings. The compressed-suffix variants
 # follow the same convention transient_factory_test31.sh uses
@@ -1006,9 +1027,8 @@ def _render_lightcurve_png(work_dir, out_dir, ra, dec, lc_path, ul_path):
     # rather than skip it -- the lightcurve is more valuable than the
     # title.
     try:
-        ra_safe = _canonicalize_coord(ra)
-        dec_safe = _canonicalize_coord(dec)
-        title = 'Forced photometry at {} {}'.format(ra_safe, dec_safe)
+        ra_disp, dec_disp = _format_title_coords(ra, dec)
+        title = 'Forced photometry at {} {}'.format(ra_disp, dec_disp)
     except ValueError:
         title = 'Forced photometry lightcurve'
     # PGPLOT truncates long device filenames (somewhere around 90
@@ -1070,7 +1090,8 @@ MATPLOTLIB_PNG_DPI = 150
 MATPLOTLIB_LABEL_FONTSIZE = 15
 MATPLOTLIB_TICK_FONTSIZE = 12
 MATPLOTLIB_TITLE_FONTSIZE = 14
-MATPLOTLIB_UPPER_LIMIT_COLOR = '#cc0000'
+MATPLOTLIB_DETECTION_COLOR = '#cc0000'
+MATPLOTLIB_UPPER_LIMIT_COLOR = '#0033cc'
 
 
 def _read_numeric_columns(path, n_columns):
@@ -1104,10 +1125,11 @@ def _render_lightcurve_matplotlib(out_dir, ra, dec, lc_path, ul_path):
     """Render lightcurve.png AND lightcurve.eps in out_dir with matplotlib.
 
     Style: no background grid, large axis labels, magnitude axis inverted
-    (bright up), detections as black circles with error bars, upper limits
-    as red down-pointing triangles (clearly distinct from detections), a
-    legend when both kinds are present, JD axis relative to a round offset
-    so the tick labels stay short.
+    (bright up), detections as red circles with error bars, upper limits
+    as blue down-pointing triangles (clearly distinct from detections,
+    and matching lib/lightcurve_png's red/blue convention), a legend when
+    both kinds are present, JD axis relative to a round offset so the
+    tick labels stay short.
 
     Returns (png_basename, eps_basename); eps_basename is None when only
     the EPS write failed. Returns (None, None) when matplotlib is not
@@ -1145,9 +1167,8 @@ def _render_lightcurve_matplotlib(out_dir, ra, dec, lc_path, ul_path):
         jd_offset = math.floor(min(all_jd) / 100.0) * 100.0
         # Same title (and CodeQL taint barrier) as _render_lightcurve_png.
         try:
-            ra_safe = _canonicalize_coord(ra)
-            dec_safe = _canonicalize_coord(dec)
-            title = 'Forced photometry at {} {}'.format(ra_safe, dec_safe)
+            ra_disp, dec_disp = _format_title_coords(ra, dec)
+            title = 'Forced photometry at {} {}'.format(ra_disp, dec_disp)
         except ValueError:
             title = 'Forced photometry lightcurve'
         fig = plt.figure(figsize=MATPLOTLIB_FIGSIZE)
@@ -1156,7 +1177,8 @@ def _render_lightcurve_matplotlib(out_dir, ra, dec, lc_path, ul_path):
             ax.errorbar([row[0] - jd_offset for row in detections],
                         [row[1] for row in detections],
                         yerr=[row[2] for row in detections],
-                        fmt='o', color='black', markersize=4.5,
+                        fmt='o', color=MATPLOTLIB_DETECTION_COLOR,
+                        markersize=4.5,
                         elinewidth=1.0, capsize=0, zorder=3,
                         label='detection')
         if limits:
