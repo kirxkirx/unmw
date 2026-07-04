@@ -2,8 +2,8 @@
 """
 CGI: forced-photometry lightcurve at a sky position over a recent time window.
 
-The user enters one sky position; the page finds every wcs_fd_ image in the
-uploads/ directory (the most recent days by img_<YYYY-MM-DD> dir date; the day window and the maximum image count are both user-selectable on the input form) whose
+The user enters one sky position; the page finds every plate-solved
+(wcs_ prefix) image in the uploads/ directory (the most recent days by img_<YYYY-MM-DD> dir date; the day window and the maximum image count are both user-selectable on the input form) whose
 field covers that position, runs the C forced-photometry implementation on each
 (util/forced_photometry.sh with FORCED_PHOTOMETRY_ONLY_C=yes), and presents the
 results -- newest first -- as an HTML table (with a full-frame preview and a
@@ -107,8 +107,16 @@ _ROW_FLUSH_PAD = "<!-- " + (" " * 1500) + " -->\n"
 # ---------- image discovery ----------
 
 def list_recent_field_images(uploads_dir, covering_fields, window_days):
-    """Return absolute paths of wcs_fd_ images in the last window_days whose
-    field is in covering_fields. Newest directory date first.
+    """Return absolute paths of plate-solved images in the last window_days
+    whose field is in covering_fields. Newest directory date first.
+
+    Only names starting with wcs_ are considered: forced photometry needs
+    the WCS, and the wcs_ prefix is what the processing pipeline puts on
+    plate-solved images. The dark/flat stage between wcs_ and the field
+    name is optional -- cameras whose uploads arrive pre-calibrated (or
+    lack calibration data) produce wcs_<FIELD>_... (e.g. the Stas camera),
+    while NMW-TexasTech produces wcs_fd_<FIELD>_... Raw un-solved uploads
+    (no prefix) in the same directories stay excluded.
 
     Only directories named img_<YYYY-MM-DD>_... are considered.
     """
@@ -137,7 +145,7 @@ def list_recent_field_images(uploads_dir, covering_fields, window_days):
         if not os.path.isdir(dpath):
             continue
         for fname in sorted(os.listdir(dpath)):
-            if not fname.startswith('wcs_fd_'):
+            if not fname.startswith('wcs_'):
                 continue
             if not _looks_like_fits(fname):
                 continue
@@ -406,11 +414,17 @@ def main():
             return
         # Stream rows in (approximate) newest-first order without waiting
         # for all images to be measured. The timestamp embedded in the
-        # wcs_fd_ filename closely tracks JD and is known without opening
-        # the file, so it makes a cheap proxy sort key.
+        # image filename closely tracks JD and is known without opening
+        # the file, so it makes a cheap proxy sort key. The fields are
+        # zero-padded for the string comparison because some cameras write
+        # single-digit month/day/hour values (e.g. 2026-7-4_18-14-34 on
+        # the Stas camera).
         def _img_ts(p):
             m = _IMG_TS_RE.search(os.path.basename(p))
-            return m.group(1) if m else ''
+            if not m:
+                return ''
+            return '{:04d}-{:02d}-{:02d}_{:02d}-{:02d}-{:02d}'.format(
+                *[int(g) for g in m.groups()])
         images.sort(key=_img_ts, reverse=True)
         # Honor the user-selected "Max images" cap from the form.
         # Remembered so we can tell the user when the cap actually clipped

@@ -134,9 +134,13 @@ def _looks_like_fits(name):
     lname = name.lower()
     return any(lname.endswith(end) for end in FITS_FILE_ENDINGS)
 
-# Extracts the YYYY-MM-DD_HH-MM-SS timestamp embedded in a wcs_fd_ filename;
-# sorting on this alone reproduces JD order closely enough for streamed output.
-_IMG_TS_RE = re.compile(r'(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})')
+# Extracts the YYYY-MM-DD_HH-MM-SS timestamp embedded in a plate-solved
+# image filename; sorting on the zero-padded groups reproduces JD order
+# closely enough for streamed output. Month/day/hour/minute/second may be
+# single-digit (the Stas camera writes 2026-7-4_18-14-34), so the groups
+# are captured separately and the caller zero-pads them before comparing.
+_IMG_TS_RE = re.compile(
+    r'(\d{4})-(\d{1,2})-(\d{1,2})_(\d{1,2})-(\d{1,2})-(\d{1,2})')
 
 FACTORY_REL_PATH = os.path.join('util', 'transients', 'transient_factory_test31.sh')
 
