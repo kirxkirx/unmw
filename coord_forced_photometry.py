@@ -91,7 +91,7 @@ TEMP_DIR_PREFIX = 'forced_phot_'
 # main() parsing the form; out-of-range values are clamped to [1, MAX_*].
 DEFAULT_WINDOW_DAYS = 7
 MAX_WINDOW_DAYS = 30
-DEFAULT_MAX_IMAGES = 8
+DEFAULT_MAX_IMAGES = 20
 MAX_MAX_IMAGES = 50
 FORCED_PHOT_MAX_CONCURRENT = 3          # each request uses its own VaST working copy, so this only caps server load
 
