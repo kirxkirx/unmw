@@ -76,6 +76,7 @@ from nmw_forced_phot_lib import (
     setup_vast_working_copy, _write_lightcurve_data_files,
     render_lightcurve_plots, ascii_table, fits_url, _is_float, _fmt_mag,
     _fmt_err, _fmt_duration, _html_row, _html_skipped_row,
+    wide_field_photometry_caveat_html,
 )
 
 # The shared page-chrome helpers build their links from ncl.DEFAULT_FORM_PATH;
@@ -676,6 +677,8 @@ def main():
                 print("<p class='secondary' style='text-align: center;'>"
                       "Data files: {}</p>".format(', '.join(_links)),
                       flush=True)
+
+        print(wide_field_photometry_caveat_html(), flush=True)
 
         # ---- Photometry table for copy/paste -- rendered only after the
         # loop so column widths reflect the full result set. A simple <pre>

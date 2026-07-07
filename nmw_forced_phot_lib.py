@@ -1251,6 +1251,50 @@ def render_lightcurve_plots(work_dir, out_dir, ra, dec, lc_path, ul_path):
                                    ul_path), None)
 
 
+def wide_field_photometry_caveat_html():
+    """A short note on why wide-field photometry is not very precise, shared by
+    the monitoring, archival-forced-photometry and coordinate-forced-photometry
+    result pages (all of which include _PAGE_CSS, so the 'notice' class is
+    styled)."""
+    return (
+        "<div class='notice'>\n"
+        "<b>Why these photometric measurements are not very precise</b>\n"
+        "<p>Photometric measurements obtained with a wide-field camera are not"
+        " very precise, for a number of reasons:</p>\n"
+        "<ul>\n"
+        "<li><b>Undersampled PSF:</b> star images occupy only a few pixels, so"
+        " any uncorrected pixel-to-pixel and intra-pixel sensitivity"
+        " variations affect the measurements more than they would for"
+        " well-sampled telescopic images in which each star is spread across"
+        " many pixels.</li>\n"
+        "<li><b>Differential atmospheric extinction across the image:</b> an"
+        " airmass-dependent magnitude zero-point correction is applied, but it"
+        " is not perfect.</li>\n"
+        "<li><b>Color-dependent (second-order) extinction:</b> a star's"
+        " brightness measured relative to the comparison stars in the field is"
+        " elevation-dependent if the star's color differs from the average"
+        " color of the comparison stars.</li>\n"
+        "<li><b>Blending</b> with nearby stars in crowded fields affects the"
+        " measurements differently depending on the aperture size, which is"
+        " adjusted for each image individually based on the seeing and focus"
+        " quality.</li>\n"
+        "<li><b>Position-dependent PSF:</b> the same star may fall closer to"
+        " the image center in one field and farther from it in another, so a"
+        " different fraction of its PSF is covered by the aperture even when"
+        " the same aperture is used to measure both images. Field-to-field and"
+        " camera-to-camera calibration is therefore an issue, and its"
+        " magnitude differs from source to source.</li>\n"
+        "<li><b>Chromatic aberration:</b> many wide-field lenses suffer from"
+        " it, leaving extremely red stars out of focus while the focus is"
+        " optimal for average-colored stars.</li>\n"
+        "<li><b>Clouds,</b> if present, dramatically degrade the quality of the"
+        " photometry across the entire image.</li>\n"
+        "</ul>\n"
+        "<p>In practice, expect a photometric uncertainty of ~0.1 mag, or"
+        " somewhat better in favorable conditions.</p>\n"
+        "</div>\n")
+
+
 def ascii_table(rows):
     """Build the fixed-width, space-padded plain-text photometry table."""
     header = ['date', 'JD', 'mag/limit', 'err', 'status', 'field', 'image']

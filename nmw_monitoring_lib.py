@@ -564,6 +564,8 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                      lc=LIGHTCURVE_BASENAME, ul=UPPERLIMITS_BASENAME,
                      av=AAVSO_BASENAME))
     parts.append('<p><a href="../index.html">All monitored sources</a></p>\n')
+    from nmw_forced_phot_lib import wide_field_photometry_caveat_html
+    parts.append(wide_field_photometry_caveat_html())
     # Show ALL published measurements (detections + upper limits), newest
     # first, with the ATel-style calendar date as the first column.
     table_rows = sorted(detections + upperlimits,

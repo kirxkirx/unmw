@@ -50,7 +50,7 @@ from nmw_forced_phot_lib import (
     run_forced_photometry_c, setup_vast_working_copy,
     _write_lightcurve_data_files, render_lightcurve_plots, ascii_table,
     fits_url, _is_float, _fmt_mag, _fmt_err, _fmt_duration, _html_row,
-    _html_skipped_row,
+    _html_skipped_row, wide_field_photometry_caveat_html,
 )
 import nmw_archive_phot_lib as apl
 
@@ -382,6 +382,7 @@ def process_job(job_id, job_dir, request, cfg, local_config_path,
             parts.extend(rows_html)
             parts.append("</table>")
         parts.extend(lightcurve_html)
+        parts.append(wide_field_photometry_caveat_html())
         if results:
             parts.append("<h3>Photometry table</h3>")
             parts.append("<pre>{}</pre>".format(
