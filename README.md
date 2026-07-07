@@ -50,6 +50,65 @@ re-installing `legacy-cgi`, **every** CGI breaks at once with the opaque
 "cgi module not found" error. When touching the Apache config or rebuilding
 the venv, keep these two facts wired together.
 
+### Browser caching of result images (Cache-Control)
+
+Result images under `uploads/` are served with an explicit `Cache-Control`
+so browsers do not re-download them on every page view. This is done in the
+vhost with `mod_headers` and must distinguish two kinds of image:
+
+- **Write-once images** (archive / forced-photometry result plots and
+  cutouts) live in a unique per-job directory and are never overwritten, so
+  they can be cached aggressively and permanently.
+- **Monitoring plots** (`uploads/monitoring/<source>/lightcurve.png`) are
+  **overwritten in place** at the same URL every time the lightcurve gains a
+  point, so they must NOT be marked `immutable` - otherwise the browser
+  serves a stale plot for up to a year and does not even revalidate on a
+  normal reload (the whole point of `immutable`).
+
+The original single rule marked ALL `uploads/` images immutable, which was
+wrong for the monitoring plots:
+
+```apache
+#      # Long-cache the immutable result images (they never change once written).
+#      # URL-scoped to /unmw/uploads/ images only; HTML is intentionally left alone.
+#      <LocationMatch "^/unmw/uploads/.*\.(png|jpe?g|gif|webp)$">
+#          Header set Cache-Control "public, max-age=31536000, immutable"
+#      </LocationMatch>
+```
+
+The corrected version excludes the `monitoring/` subfolder from the immutable
+rule (PCRE negative-lookahead `(?!monitoring/)`, supported by Apache 2.4) and
+gives the monitoring plots a `no-cache` (always-revalidate) policy instead -
+so unchanged plots still return a cheap `304 Not Modified`, but a regenerated
+plot is served fresh immediately:
+
+```apache
+        # Long-cache the immutable result images (they never change once written).
+        # URL-scoped to /unmw/uploads/ images only; HTML is intentionally left alone.
+        # The monitoring subfolder is EXCLUDED here: its lightcurve plots are
+        # overwritten in place as lightcurves grow, so they must not be immutable.
+        <LocationMatch "^/unmw/uploads/(?!monitoring/).*\.(png|jpe?g|gif|webp)$">
+            Header set Cache-Control "public, max-age=31536000, immutable"
+        </LocationMatch>
+
+        # Monitoring plots change in place - always revalidate (cheap 304 when
+        # unchanged, fresh 200 the moment the plot is regenerated).
+        <LocationMatch "^/unmw/uploads/monitoring/.*\.(png|jpe?g|gif|webp)$">
+            Header set Cache-Control "no-cache"
+        </LocationMatch>
+```
+
+As a second line of defence that needs no Apache change, the monitoring
+per-source page also appends the plot's mtime to the image URL
+(`lightcurve.png?v=<mtime>`), so a regenerated plot is a new URL that no
+cache holds - this works even if the `immutable` rule is left in place.
+Note that images a browser already cached under the old `immutable` header
+stay stale until a hard reload (Ctrl-Shift-R) or the one-year max-age
+expires; both fixes only govern responses served from the change onward.
+
+After editing the vhost, `apachectl configtest && apachectl -k graceful`
+(or `/etc/init.d/apache2 reload` on OpenRC) applies the new headers.
+
 ***Don't forget to add new camera name to combine_reports.sh***
 
 # draft installation instructions
