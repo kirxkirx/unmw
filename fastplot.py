@@ -39,7 +39,7 @@ REFRESH_INTERVAL = 15
 MIN_FREE_DISK_SPACE_KB = 5 * 1024 * 1024
 
 # Set to True to show log output on error pages (exposes internal paths)
-SHOW_LOG_ON_ERROR = True
+SHOW_LOG_ON_ERROR = False
 
 
 def _parse_config_value(config_path, var_name):

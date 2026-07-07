@@ -1,4 +1,14 @@
 #!/usr/bin/env python2
+#
+# LEGACY CODE - DO NOT USE unless the circumstances are exceptional.
+#
+# This is the old Python-2 upload handler, superseded by upload.py3 (reachable
+# as upload.py). It performs far weaker input validation (only an emergency
+# system-load check; no archive type/size/content validation) and requires a
+# python2 interpreter that modern hosts no longer ship. It is kept only as an
+# emergency fallback and is denied web access in .htaccess. Do not wire it into
+# any form or ScriptAlias without understanding the reduced validation.
+#
 import cgi, os
 import cgitb; cgitb.enable()
 

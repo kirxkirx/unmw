@@ -16,6 +16,7 @@ except ImportError:
 import os
 import random
 import string
+import subprocess
 import time
 import sys
 import socket
@@ -256,16 +257,20 @@ def check_archive_contents(filepath: str) -> Tuple[bool, str]:
         return False, f"Error checking archive: {str(e)}"
 
 
-def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool, str, str]:
+def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool, str, str, str]:
     """
     Handle file upload with security checks
-    Returns: (success, message, dirname)
+    Returns: (success, message, dirname, saved_filepath). saved_filepath is the
+    absolute-or-relative path of the file actually written to disk under the
+    SANITIZED name; the wrapper must be launched with this path, never with a
+    name reconstructed from the raw multipart filename (which is attacker
+    controlled and would allow shell command injection).
     """
     try:
         # Get the uploaded file
         fileitem = form['file']
         if not fileitem.filename:
-            return False, "No file uploaded", ""
+            return False, "No file uploaded", "", ""
 
         # Generate secure directory name
         pid = os.getpid()
@@ -278,7 +283,7 @@ def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool
             os.makedirs(dirname, mode=0o750)  # Restrictive permissions
         except PermissionError as e:
             user_info = pwd.getpwuid(os.getuid())
-            return False, f"Permission error creating directory. Running as {user_info.pw_name}. Exception: {e}", ""
+            return False, f"Permission error creating directory. Running as {user_info.pw_name}. Exception: {e}", "", ""
 
         # Save file with sanitized name
         filename = os.path.basename(fileitem.filename)[:256]
@@ -296,36 +301,36 @@ def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool
                 if total_size > MAX_FILE_SIZE:
                     os.unlink(filepath)
                     os.rmdir(dirname)
-                    return False, f"File too large. Maximum size: {MAX_FILE_SIZE / (1024 * 1024)}MB", ""
+                    return False, f"File too large. Maximum size: {MAX_FILE_SIZE / (1024 * 1024)}MB", "", ""
                 f.write(chunk)
 
         if not validate_archive_size(total_size):
             os.unlink(filepath)
             os.rmdir(dirname)
-            return False, f"File size ({total_size / (1024 * 1024):.1f}MB) outside allowed range", ""
+            return False, f"File size ({total_size / (1024 * 1024):.1f}MB) outside allowed range", "", ""
 
         # Validate archive type
         valid, error_msg = validate_archive_type(filepath)
         if not valid:
             os.unlink(filepath)
             os.rmdir(dirname)
-            return False, error_msg, ""
+            return False, error_msg, "", ""
 
         # Check archive contents
         valid, error_msg = check_archive_contents(filepath)
         if not valid:
             os.unlink(filepath)
             os.rmdir(dirname)
-            return False, error_msg, ""
+            return False, error_msg, "", ""
 
-        return True, "File uploaded and validated successfully", dirname
+        return True, "File uploaded and validated successfully", dirname, filepath
 
     except Exception as e:
         if 'dirname' in locals() and os.path.exists(dirname):
             if 'filepath' in locals() and os.path.exists(filepath):
                 os.unlink(filepath)
             os.rmdir(dirname)
-        return False, f"Upload error: {str(e)}", ""
+        return False, f"Upload error: {str(e)}", "", ""
 
 
 def main():
@@ -417,7 +422,7 @@ def main():
 
     # Handle upload
     form = cgi.FieldStorage()
-    success, message, dirname = secure_upload_handler(form, upload_dir)
+    success, message, dirname, saved_filepath = secure_upload_handler(form, upload_dir)
 
     if not success:
         # Headers (HTTP 200) were already sent above, so the failure is signaled
@@ -443,27 +448,30 @@ def main():
             f.write(f"wrapper.sh executable: {os.access('./wrapper.sh', os.X_OK)}\n")
             f.write(f"Full wrapper path: {os.path.abspath('./wrapper.sh')}\n")
             f.write(f"dirname: {dirname}\n")
-            f.write(f"Command: ./wrapper.sh {dirname}{os.path.basename(form['file'].filename)}\n")
+            f.write(f"Command: ./wrapper.sh {saved_filepath}\n")
 
         # Check if ./wrapper.sh exists in the current directory
         if os.path.isfile('./wrapper.sh'):
-            # Run processing wrapper
-            wrapper_command = f'./wrapper.sh {dirname}{os.path.basename(form["file"].filename)}'
+            # Run the processing wrapper with the SANITIZED saved path passed as
+            # a single argv element (no shell). Never rebuild the path from the
+            # raw multipart filename (form['file'].filename): it is attacker
+            # controlled, and interpolating it into a shell command allowed
+            # command injection. subprocess.call returns the wrapper's real exit
+            # code (0 success, 1 failure) -- unlike os.system, which returned a
+            # wait-status where 'exit 1' shows up as 256.
             try:
-                exit_status = os.system(wrapper_command)
+                exit_status = subprocess.call(['./wrapper.sh', saved_filepath])
             except Exception as e:
                 print(f"<html><body>UNMW_STATUS:ERROR Error running wrapper.sh command: {e}<br>Current working directory: {cwd}</body></html>")
+                exit_status = 1
         else:
             print(f"<html><body>UNMW_STATUS:ERROR ./wrapper.sh does not exist!<br>Current working directory: {cwd}</body></html>")
             exit_status = 1
 
-        # Check exit status of wrapper.sh
-        # 256 wrap around to 0
-        # An exit code of 256 is equivalent to 256 % 256 = 0.
-        # This means the actual exit code might have been 0, but a mistake in interpreting the value or truncation occurred.
-        if exit_status != 0 and exit_status != 256:
+        # Check exit status of wrapper.sh (real exit code from subprocess.call)
+        if exit_status != 0:
             # Cleanup on failure
-            print(f"<html><body>UNMW_STATUS:ERROR Error during processing.<br>./wrapper.sh {dirname}{os.path.basename(form['file'].filename)}<br>Exit status {exit_status}<br>Current working directory: {cwd}<br>Cleaning up...</body></html>")
+            print(f"<html><body>UNMW_STATUS:ERROR Error during processing.<br>./wrapper.sh {saved_filepath}<br>Exit status {exit_status}<br>Current working directory: {cwd}<br>Cleaning up...</body></html>")
             try:
                 for root, dirs, files in os.walk(dirname, topdown=False):
                     for file in files:

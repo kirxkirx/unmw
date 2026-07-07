@@ -19,6 +19,16 @@ Options +ExecCGI
     Require all denied
 </FilesMatch>
 
+# Not CGI entry points either, deny direct web access:
+#   test_python.py - the pytest suite; running it as the web user would spawn
+#                    shells and write files
+#   upload.py2     - legacy Python-2 upload handler with much weaker validation
+#                    than upload.py3; kept for exceptional circumstances only,
+#                    must never be reachable over the web
+<FilesMatch "^(test_python\.py|upload\.py2)$">
+    Require all denied
+</FilesMatch>
+
 # Block CGI execution in all subdirectories
 <DirectoryMatch "^.*/.+/">
     Options -ExecCGI
