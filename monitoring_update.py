@@ -23,6 +23,12 @@ Modes (see source_monitoring_design.md):
   --rescan-archive [<source_id>|--all]
       Manual gap fillers over the recent / archive image populations for
       already-activated sources. No window or count caps.
+  --rebuild-pages
+      Re-render all products (HTML pages, plots, ASCII + AAVSO files) for
+      every activated source from their existing ledgers, without measuring
+      anything. Run this to apply changes to the page/plot templates to
+      already-generated pages (--reconcile only re-renders sources that
+      gained new measurements).
 
 All manual modes refuse to run in a CGI environment, take the global
 monitoring lock and EXIT (never queue) when another instance holds it.
@@ -225,7 +231,8 @@ def mode_ingest(raw_path):
         log('--ingest: {}: {} new row(s), {} duplicate(s) skipped'.format(
             source_id, n_added, len(rows) - n_added))
         nml.rebuild_source_products(uploads_dir, entry, cfg, factory_text)
-    nml.rebuild_central_index(uploads_dir, entries)
+    nml.rebuild_central_index(uploads_dir, entries,
+                              (cfg.get('VAST_REFERENCE_COPY') or '').strip())
     log('--ingest: done, {} row(s) appended'.format(n_total))
     return 0
 
@@ -378,6 +385,41 @@ def mode_rescan(population, source_selector):
     return _run_manual_mode(population, source_selector)
 
 
+def mode_rebuild_pages():
+    """Re-derive all products (pages, plots, ASCII files, AAVSO) for every
+    activated source from their existing ledgers, without measuring anything.
+    Use this to apply changes to the HTML/plot templates to already-generated
+    pages: --reconcile only rebuilds sources that gained new measurements, so
+    a template change would otherwise not reach up-to-date sources."""
+    script_dir, cfg, uploads_dir, local_config_path = load_context()
+    if not os.path.isdir(nml.monitoring_root(uploads_dir)):
+        log('monitoring is not deployed on this machine (no {} directory)'
+            .format(nml.monitoring_root(uploads_dir)))
+        return 1
+    lock_fh = nml.acquire_global_lock(uploads_dir)
+    if lock_fh is None:
+        log('another monitoring reconcile/rescan is already running - '
+            'exiting (NOT queuing)')
+        return 1
+    try:
+        _, entries = list_entries_or_exit()
+        factory_text = read_factory_text(cfg)
+        vast_dir = (cfg.get('VAST_REFERENCE_COPY') or '').strip()
+        n = 0
+        for entry in entries:
+            if not os.path.isdir(nml.source_dir_path(uploads_dir,
+                                                     entry['source_id'])):
+                continue
+            nml.rebuild_source_products(uploads_dir, entry, cfg, factory_text)
+            n += 1
+            log('{}: products rebuilt'.format(entry['source_id']))
+        nml.rebuild_central_index(uploads_dir, entries, vast_dir)
+        log('rebuilt {} source page(s) + the central index'.format(n))
+        return 0
+    finally:
+        lock_fh.close()
+
+
 def _run_manual_mode(mode, source_selector):
     script_dir, cfg, uploads_dir, local_config_path = load_context()
     list_path, entries = list_entries_or_exit()
@@ -460,7 +502,8 @@ def _run_manual_mode(mode, source_selector):
                     source_id, n_new))
             else:
                 log('{}: up to date'.format(source_id))
-        nml.rebuild_central_index(uploads_dir, entries)
+        nml.rebuild_central_index(uploads_dir, entries,
+                              (cfg.get('VAST_REFERENCE_COPY') or '').strip())
         log('central index rebuilt')
         return 0
     finally:
@@ -485,6 +528,8 @@ def main(argv):
         return mode_rescan('rescan-recent', argv[2])
     if len(argv) >= 3 and argv[1] == '--rescan-archive':
         return mode_rescan('rescan-archive', argv[2])
+    if len(argv) >= 2 and argv[1] == '--rebuild-pages':
+        return mode_rebuild_pages()
     sys.stderr.write(__doc__)
     return 1
 

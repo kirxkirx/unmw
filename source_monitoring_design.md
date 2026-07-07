@@ -385,15 +385,26 @@ case the same image is measured twice, stored once).
 
 ### 6.4 Pages
 
-- Per-source `index.html`: `results_page_head()`-style header, display name,
-  coordinates, point/limit counts, first/last JD, the `lightcurve.png` plot,
-  links to `lightcurve.dat`, `upperlimits.dat`, `lightcurve_aavso.txt`, and
-  a table of the most recent ~50 measurements (`_html_row` style). Rebuilt
-  atomically (`write_index_html_atomic` pattern).
+- Per-source `index.html`: display name, coordinates, point/limit counts,
+  the observation DATE RANGE shown in both ATel-style UTC calendar dates and
+  JD, the `lightcurve.png` plot, links to `lightcurve.dat`, `upperlimits.dat`,
+  `lightcurve_aavso.txt`, and a table of ALL published measurements (newest
+  first) whose FIRST column is the ATel-style UTC calendar date, then JD, mag,
+  err, status, camera, image. Calendar dates are produced by
+  `util/get_image_date <JD>` (parsing its `ATel style` output line) so they
+  match the rest of VaST; the JD->date conversion is memoized per process run.
+  Rebuilt atomically.
 - Central `uploads/monitoring/index.html`: one row per source (name, coords,
-  N points, N limits, last JD, camera set, link), sorted by name; rebuilt on
-  every change; linked from `move_to_htdocs/index.html` next to the forced
-  photometry links.
+  N detections, N upper limits, last date in ATel-style UTC and last JD,
+  link), sorted by name; rebuilt on every change; linked from
+  `move_to_htdocs/index.html` next to the forced photometry links.
+
+Applying template changes: because every page is DERIVED from the ledger,
+`monitoring_update.py --rebuild-pages` re-renders all products for every
+activated source from the existing ledgers without measuring anything - run
+it after changing the page/plot rendering. (`--reconcile` only re-renders
+sources that gained new measurements, so it is not sufficient on its own to
+push a template change to up-to-date sources.)
 
 ## 7. Files changed / added
 

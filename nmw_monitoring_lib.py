@@ -363,6 +363,36 @@ def software_version_string(vast_dir):
     return 'VaST'
 
 
+_ATEL_DATE_CACHE = {}
+
+
+def jd_to_atel_date(vast_dir, jd_str):
+    """Convert a JD (string or number) to an ATel-style UTC calendar date
+    (YYYY-MM-DD.fffff) using util/get_image_date, so the calendar dates shown
+    on the monitoring pages use the exact same convention as the rest of VaST.
+    Returns 'na' on any failure (missing binary, non-numeric JD, timeout).
+    Memoized within a process run - the JD -> date mapping is deterministic,
+    and the same JD appears in both the measurement table and the JD range."""
+    jd_str = '{}'.format(jd_str)
+    if jd_str in _ATEL_DATE_CACHE:
+        return _ATEL_DATE_CACHE[jd_str]
+    atel = 'na'
+    if vast_dir:
+        try:
+            float(jd_str)  # only hand a real number to the tool
+            proc = subprocess.run(
+                [os.path.join(vast_dir, 'util', 'get_image_date'), jd_str],
+                capture_output=True, text=True, timeout=30, cwd=vast_dir)
+            for line in proc.stdout.splitlines():
+                if 'ATel style' in line:
+                    atel = line.split()[-1]
+                    break
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            atel = 'na'
+    _ATEL_DATE_CACHE[jd_str] = atel
+    return atel
+
+
 def aavso_filter_for_band(band):
     """Calibration band letter -> AAVSO filter code for an unfiltered CCD
     calibrated to that band (CV = unfiltered with V zero point, etc.)."""
@@ -483,13 +513,13 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
                 ul_path if upperlimits else None)
 
         _write_source_page(source_dir, entry, rows, detections, upperlimits,
-                           png_basename, cameras)
+                           png_basename, cameras, vast_dir)
     finally:
         lock_fh.close()
 
 
 def _write_source_page(source_dir, entry, ledger_rows, detections,
-                       upperlimits, png_basename, cameras):
+                       upperlimits, png_basename, cameras, vast_dir):
     name = entry['name']
     title = 'Monitored source {}'.format(name)
     parts = ['<html><head><title>{}</title>\n{}\n</head><body>\n'.format(
@@ -503,9 +533,17 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                      len(detections), len(upperlimits)))
     if detections or upperlimits:
         all_jd = [r['jd_float'] for r in detections + upperlimits]
-        parts.append('<p>JD range: <span class="code">{:.5f}</span> .. '
+        jd_min = min(all_jd)
+        jd_max = max(all_jd)
+        parts.append('<p>Date range: <span class="code">{}</span> .. '
+                     '<span class="code">{}</span> (UTC) &middot; '
+                     'JD <span class="code">{:.5f}</span> .. '
                      '<span class="code">{:.5f}</span></p>\n'.format(
-                         min(all_jd), max(all_jd)))
+                         html_escape(jd_to_atel_date(vast_dir,
+                                                     '{:.5f}'.format(jd_min))),
+                         html_escape(jd_to_atel_date(vast_dir,
+                                                     '{:.5f}'.format(jd_max))),
+                         jd_min, jd_max))
     if png_basename:
         parts.append('<p><img src="{}" style="max-width:100%"></p>\n'.format(
             html_escape(png_basename)))
@@ -516,14 +554,20 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                      lc=LIGHTCURVE_BASENAME, ul=UPPERLIMITS_BASENAME,
                      av=AAVSO_BASENAME))
     parts.append('<p><a href="../index.html">All monitored sources</a></p>\n')
-    recent = [r for r in ledger_rows
-              if r['status'] not in EXCLUDED_STATUSES][-50:]
-    if recent:
-        parts.append('<h3>Most recent measurements</h3>\n<pre>\n')
-        parts.append('JD             mag     err     status      camera'
-                     '      image\n')
-        for row in reversed(recent):
-            parts.append('{:<14} {:<7} {:<7} {:<11} {:<11} {}\n'.format(
+    # Show ALL published measurements (detections + upper limits), newest
+    # first, with the ATel-style calendar date as the first column.
+    table_rows = sorted(detections + upperlimits,
+                        key=lambda r: r['jd_float'], reverse=True)
+    if table_rows:
+        table_fmt = '{:<16} {:<17} {:<7} {:<8} {:<11} {:<11} {}\n'
+        parts.append('<h3>Photometry table (newest measurements first)</h3>\n'
+                     '<pre>\n')
+        parts.append(table_fmt.format(
+            'Date (UTC)', 'JD(UTC)', 'mag', 'err', 'status', 'camera',
+            'image'))
+        for row in table_rows:
+            parts.append(table_fmt.format(
+                html_escape(jd_to_atel_date(vast_dir, row['jd'])),
                 html_escape(row['jd']), html_escape(row['mag']),
                 html_escape(row['err']), html_escape(row['status']),
                 html_escape(row['camera']), html_escape(row['basename'])))
@@ -532,7 +576,7 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
     _write_text_atomic(os.path.join(source_dir, 'index.html'), ''.join(parts))
 
 
-def rebuild_central_index(uploads_dir, entries):
+def rebuild_central_index(uploads_dir, entries, vast_dir):
     """The central monitoring page: one row per activated source, plus a
     pending list for list entries not activated on this machine."""
     root = monitoring_root(uploads_dir)
@@ -552,22 +596,30 @@ def rebuild_central_index(uploads_dir, entries):
         parts.append('<table border="1" cellpadding="4">\n'
                      '<tr><th>Source</th><th>RA</th><th>Dec</th>'
                      '<th>Detections</th><th>Upper limits</th>'
-                     '<th>Last JD</th></tr>\n')
+                     '<th>Last date (UTC, ATel)</th><th>Last JD</th></tr>\n')
         for entry in sorted(activated, key=lambda e: e['name'].lower()):
             source_dir = source_dir_path(uploads_dir, entry['source_id'])
             rows, _ = read_ledger(source_dir)
             detections, upperlimits = classify_ledger_rows(rows)
             all_jd = [r['jd_float'] for r in detections + upperlimits]
-            last_jd = '{:.5f}'.format(max(all_jd)) if all_jd else 'no data'
+            if all_jd:
+                last_jd_num = max(all_jd)
+                last_jd = '{:.5f}'.format(last_jd_num)
+                last_date = jd_to_atel_date(vast_dir, last_jd)
+            else:
+                last_jd = 'no data'
+                last_date = 'no data'
             parts.append('<tr><td><a href="{}/index.html">{}</a></td>'
                          '<td class="code">{}</td><td class="code">{}</td>'
                          '<td>{}</td><td>{}</td><td class="code">{}</td>'
+                         '<td class="code">{}</td>'
                          '</tr>\n'.format(
                              html_escape(entry['source_id']),
                              html_escape(entry['name']),
                              html_escape(entry['ra']),
                              html_escape(entry['dec']),
-                             len(detections), len(upperlimits), last_jd))
+                             len(detections), len(upperlimits),
+                             html_escape(last_date), last_jd))
         parts.append('</table>\n')
     else:
         parts.append('<p>No sources are activated on this machine yet.</p>\n')
