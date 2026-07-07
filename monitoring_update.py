@@ -237,7 +237,7 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
     source_dir = nml.source_dir_path(uploads_dir, source_id)
     _, already_measured = nml.read_ledger(source_dir)
     todo = [img for img in images
-            if os.path.basename(img) not in already_measured]
+            if nml.ledger_key(os.path.basename(img)) not in already_measured]
     log('{}: {} image(s) to measure ({} already in the ledger)'.format(
         source_id, len(todo), len(images) - len(todo)))
     if not todo:
@@ -394,12 +394,18 @@ def _run_manual_mode(mode, source_selector):
             marker = os.path.join(source_dir, nml.BACKFILL_MARKER_BASENAME)
             if mode == 'reconcile':
                 if os.path.isdir(source_dir) and os.path.exists(marker):
-                    log('{}: already activated and backfilled - '
-                        'untouched'.format(source_id))
-                    continue
-                os.makedirs(source_dir, mode=0o755, exist_ok=True)
-                log('{}: activating ({} {} "{}")'.format(
-                    source_id, entry['ra'], entry['dec'], entry['name']))
+                    # Already activated and backfilled: perform an INCREMENTAL
+                    # sweep - images that migrated into the archive (or new
+                    # uploads processed while monitoring was down) since the
+                    # last run are measured; everything already in the ledger
+                    # is skipped by the basename dedup, so this costs only a
+                    # directory walk when nothing is new.
+                    log('{}: already activated - checking for new '
+                        'images'.format(source_id))
+                else:
+                    os.makedirs(source_dir, mode=0o755, exist_ok=True)
+                    log('{}: activating ({} {} "{}")'.format(
+                        source_id, entry['ra'], entry['dec'], entry['name']))
             covering_fields = covering_fields_for_entry(cfg, entry)
             log('{}: covering field(s): {}'.format(
                 source_id, ' '.join(sorted(covering_fields)) or '(none)'))
@@ -411,14 +417,21 @@ def _run_manual_mode(mode, source_selector):
                 if mode in ('reconcile', 'rescan-recent'):
                     images.extend(nml.list_all_recent_field_images(
                         uploads_dir, covering_fields))
+            n_new = 0
             if images:
-                measure_images_for_source(cfg, local_config_path, entry,
-                                          images, uploads_dir)
+                n_new = measure_images_for_source(cfg, local_config_path,
+                                                  entry, images, uploads_dir)
             if mode == 'reconcile':
                 with open(marker, 'w'):
                     pass
-            nml.rebuild_source_products(uploads_dir, entry, cfg, factory_text)
-            log('{}: products rebuilt'.format(source_id))
+            if n_new > 0 or not os.path.exists(
+                    os.path.join(source_dir, 'index.html')):
+                nml.rebuild_source_products(uploads_dir, entry, cfg,
+                                            factory_text)
+                log('{}: {} new measurement(s), products rebuilt'.format(
+                    source_id, n_new))
+            else:
+                log('{}: up to date'.format(source_id))
         nml.rebuild_central_index(uploads_dir, entries)
         log('central index rebuilt')
         return 0

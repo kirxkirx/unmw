@@ -210,9 +210,20 @@ def acquire_source_lock(uploads_dir, source_id):
 
 # ---------- the measurement ledger ----------
 
+def ledger_key(basename):
+    """Dedup key for a measured image: the basename with a trailing .fz
+    stripped, so an image measured while in uploads/img_* is recognized as
+    already-measured after it gets fpack-compressed on archiving
+    (wcs_fd_X.fts and wcs_fd_X.fts.fz are the same observation)."""
+    if basename.endswith('.fz'):
+        return basename[:-3]
+    return basename
+
+
 def read_ledger(source_dir):
-    """Return (rows, basenames): rows are dicts with keys basename, jd, mag,
-    err, status, camera (all strings); basenames is the dedup set."""
+    """Return (rows, keys): rows are dicts with keys basename, jd, mag,
+    err, status, camera (all strings); keys is the dedup set of
+    ledger_key() values."""
     rows = []
     basenames = set()
     path = os.path.join(source_dir, LEDGER_BASENAME)
@@ -228,7 +239,7 @@ def read_ledger(source_dir):
                 rows.append({'basename': parts[0], 'jd': parts[1],
                              'mag': parts[2], 'err': parts[3],
                              'status': parts[4], 'camera': parts[5]})
-                basenames.add(parts[0])
+                basenames.add(ledger_key(parts[0]))
     except OSError:
         pass
     return rows, basenames
@@ -255,12 +266,12 @@ def append_ledger_rows(uploads_dir, source_id, new_rows):
             if need_header:
                 fh.write('# image_basename JD mag err status camera\n')
             for row in new_rows:
-                if row['basename'] in existing:
+                if ledger_key(row['basename']) in existing:
                     continue
                 fh.write(format_ledger_row(
                     row['basename'], row['jd'], row['mag'], row['err'],
                     row['status'], row['camera']) + '\n')
-                existing.add(row['basename'])
+                existing.add(ledger_key(row['basename']))
                 n_added += 1
         return n_added
     finally:

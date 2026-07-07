@@ -273,8 +273,17 @@ instead of queuing), and have no window, image-count or runtime caps.
         over whatever populations existed at that time; an archive attached
         LATER is picked up by the manual `--rescan-archive`);
   4. rebuild derived files, plot, per-source page, central page.
-  Sources with an existing `backfill_done` marker are untouched
-  (report-only). The backfill measures per image at archive-photometry cost
+  Sources with an existing `backfill_done` marker get an INCREMENTAL
+  sweep instead (2026-07-07 change, user request): the archive and ALL
+  `uploads/img_*` directories are re-enumerated and only ledger-missing
+  images are measured, so images that migrated into the permanent archive
+  since the previous run (e.g. after passing quality control in a staging
+  folder that monitoring deliberately does not scan) are picked up by any
+  later `--reconcile`. When nothing is new this costs a directory walk plus
+  filename matching; products are rebuilt only when new measurements were
+  appended. Note the ledger dedup key strips a trailing `.fz`, so an image
+  measured while in `uploads/img_*` is NOT re-measured after it gets
+  fpack-compressed on archiving. The backfill measures per image at archive-photometry cost
   (~0.5-2 min/image), so a well-covered field means hours - run under
   nohup/screen; per-image progress is printed.
 
