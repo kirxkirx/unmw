@@ -246,10 +246,21 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
     source_id = entry['source_id']
     source_dir = nml.source_dir_path(uploads_dir, source_id)
     _, already_measured = nml.read_ledger(source_dir)
-    todo = [img for img in images
-            if nml.ledger_key(os.path.basename(img)) not in already_measured]
-    log('{}: {} image(s) to measure ({} already in the ledger)'.format(
-        source_id, len(todo), len(images) - len(todo)))
+    # Dedup by ledger key while building the todo list: the archive and recent
+    # passes overlap for a recently-archived observation that is still in
+    # uploads/ (archive/wcs_fd_X.fts.fz and uploads/img_*/wcs_fd_X.fts share a
+    # ledger key), and without this the same image would be funpacked,
+    # plate-solved and measured twice - only the append would dedup it.
+    todo = []
+    todo_seen = set()
+    for img in images:
+        key = nml.ledger_key(os.path.basename(img))
+        if key in already_measured or key in todo_seen:
+            continue
+        todo_seen.add(key)
+        todo.append(img)
+    log('{}: {} image(s) to measure ({} already in the ledger or '
+        'duplicate)'.format(source_id, len(todo), len(images) - len(todo)))
     if not todo:
         return 0
     work_dir = setup_vast_working_copy(vast_dir, 'uploads',

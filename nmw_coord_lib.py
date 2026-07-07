@@ -14,12 +14,9 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 import fcntl
 import html
 import os
-import random
 import re
 import string
 import subprocess
-import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -30,20 +27,13 @@ FITS2PNG_TIMEOUT_SECONDS = 30
 FOV_TIMEOUT_SECONDS = 30
 LOCK_DIR = '/tmp'
 TEMP_PARENT = 'uploads'              # mirrors upload.py's upload_dir
-TEMP_DIR_PREFIX = 'coord_search_'
 DEFAULT_THUMBNAIL_PIXELS = 256       # fallback for in-page thumbnail size
 HIRES_THUMBNAIL_MULTIPLIER = 4       # click-through PNG is this many times
                                      # bigger than the in-page thumbnail
 MIN_THUMBNAIL_PIXELS = 32
 MAX_THUMBNAIL_PIXELS = 4096
 MAX_RESULTS_TO_PROCESS = 200         # safety cap on coord-search matches
-LIST_ALL_MAX_FILES = 2000            # safety cap on the "show all" listing
-LIST_ALL_TIMEOUT_SECONDS = 900       # wall-clock cap for the "show all" flow (15 min)
 DEFAULT_FORM_PATH = '/unmw/coord_search.html'
-DEFAULT_ZOOMIN_PIXELS = 200          # half-width of zoom-in thumbnail in source pix
-DEFAULT_PARALLEL_WORKERS = 16        # threads rendering PNGs concurrently
-MIN_PARALLEL_WORKERS = 1
-MAX_PARALLEL_WORKERS = 32
 
 # Whitelist of characters allowed in the raw coordinate string.
 # Defends every later subprocess that takes the parsed values.

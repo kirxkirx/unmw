@@ -23,6 +23,7 @@ import re
 import time
 import glob
 import fcntl
+import urllib.parse
 import subprocess
 
 
@@ -447,9 +448,6 @@ def send_redirect(url):
 
 def send_processing_page(candidate_id, candidate_url):
     """Send an auto-refreshing page while the job is running."""
-    # Re-request the same URL to poll
-    escaped_url = candidate_url.replace('&', '&amp;').replace('"', '&quot;')
-    refresh_url = "?candidate_url=" + escaped_url
 
     print("Status: 200 OK")
     print("Content-Type: text/html")
@@ -517,7 +515,6 @@ def main():
                 key, _, value = pair.partition('=')
                 # URL-decode
                 try:
-                    import urllib.parse
                     params[key] = urllib.parse.unquote(value)
                 except Exception:
                     params[key] = value

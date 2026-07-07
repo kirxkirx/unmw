@@ -488,7 +488,7 @@ echo "------------------------------------"
 # (moved after zip file creation to give the server more time to start)
 sleep 5  # Give the server some time to start
 # Check if the server is running
-if ! ps -ef | grep thttpd ;then
+if ! ps -ef | grep thttpd | grep -v grep ;then
  echo "$0 test error: looks like the HTTP server is not running"
  exit 1
 fi
@@ -718,7 +718,7 @@ else
  echo "Found V0615 Vul in $LATEST_COMBINED_HTML_REPORT"
 fi
 
-LATEST_COMBINED_HTML_REPORT_FILTERED=$(ls -t *_evening_* *_morning_* 2>/dev/null | grep -v -e 'summary' -e '_filtered' | head -n 1)
+LATEST_COMBINED_HTML_REPORT_FILTERED=$(ls -t *_evening_* *_morning_* 2>/dev/null | grep '_filtered' | grep -v 'summary' | head -n 1)
 if [ -z "$LATEST_COMBINED_HTML_REPORT_FILTERED" ];then
  echo "$0 test error: empty LATEST_COMBINED_HTML_REPORT_FILTERED"
  exit 1

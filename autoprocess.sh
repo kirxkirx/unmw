@@ -54,7 +54,14 @@ Examples:
 or
  $0 /path/to/images.rar
 or
- $0 /path/to/images/"
+ $0 /path/to/images/
+
+Input-data deletion:
+ When invoked by the web pipeline the input lives in a disposable
+ web_upload_* directory, which this script removes when done. On a MANUAL
+ run (a directory whose name does not start with web_upload_) the input data
+ is NEVER deleted - the directory and the archive are left untouched.
+ A DO_NOT_DELETE_THIS_DIR file inside the directory also suppresses deletion."
  exit 1
 fi
 
@@ -243,53 +250,6 @@ is_temperature_low() {
   
   # get here if something is wrong with the above if
   return 0
-}
-
-function is_temperature_low_old_version_based_solely_on_lm-sensors {
- command -v sensors &> /dev/null 
- if [ $? -ne 0 ];then
-  return 0
- fi
- sensors 2>&1 | grep --quiet 'No sensors'
- if [ $? -eq 0 ];then
-  return 0
- fi
- # Every system seem to have its own way of reporting CPU temperature.
- # Most likely you'll need to tweak the expression below when installing the script on a new machine.
- TEMPERATURE=$(sensors 2> /dev/null | grep -e 'Package' -e 'Tctl:' -e 'temp1:' | head -n1 | awk -F'+' '{print $2}' | awk -F'.' '{print $1}')
- if [ -z "$TEMPERATURE" ];then
-  return 0
- fi
- if [[ $TEMPERATURE =~ ^[0-9]+$ ]];then
-  # The string is an integer number
-  #
-  # log the temperature value if asked to do so
-  if [ -n "$1" ];then
-   if [ "$1" = "log" ];then
-    #echo "CPU temperature: $TEMPERATURE C"
-    # temperature check to print the warning
-    echo "$TEMPERATURE" |  awk -v target=$MAX_CPU_TEMP_C '{
-         if ($1 < target) {
-          printf("CPU temperature: %.0f C\n",$1)
-         } else {
-          printf("CPU temperature: %.0f C - WARNING\n",$1)
-         }
-        }'
-   fi
-  fi
-  #
-  # actual temperature check
-  echo "$TEMPERATURE" |  awk -v target=$MAX_CPU_TEMP_C '{
-         if ($1 < target) {
-          exit 0
-         } else {
-          exit 1
-         }
-        }'
-  return $?
- fi
- # The test didn't work after all - assume everything is fine
- return 0
 }
 
 function is_cpu_io_wait_low {
@@ -1038,7 +998,20 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
     # before upload.py gets a chance to read it!
     sleep 3
     #
-    rm -rf "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" 2>&1 | tee -a "$AUTOPROCESS_LOG"
+    # $ABSOLUTE_PATH_TO_ZIP_ARCHIVE is the DIRECTORY containing the archive
+    # (dirname of the input). rm -rf of it is only safe for the disposable
+    # per-upload web_upload_* dir that upload.py creates and relies on
+    # disappearing. For a manual run (e.g. ./autoprocess.sh ~/Downloads/x.zip)
+    # that directory is the user's own - NEVER delete anything: leave both the
+    # directory and the input archive file untouched.
+    case "$(basename "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE")" in
+     web_upload_*)
+      rm -rf "$ABSOLUTE_PATH_TO_ZIP_ARCHIVE" 2>&1 | tee -a "$AUTOPROCESS_LOG"
+      ;;
+     *)
+      echo "Not a web_upload_* directory (manual run) - keeping the input data untouched at $ABSOLUTE_PATH_TO_ZIP_ARCHIVE" | tee -a "$AUTOPROCESS_LOG"
+      ;;
+    esac
    fi
   fi
  fi

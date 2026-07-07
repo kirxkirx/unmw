@@ -73,6 +73,27 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # Default hard limit is 5 GB = 5 * 1024 * 1024 KB
 #export WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB=5242880
 
+# Notification hooks (all optional; no notifications are sent when unset).
+# autoprocess.sh and combine_reports.sh use these to alert the team about
+# bright candidates, errors and stuck cameras.
+#
+# CURL_USERNAME_URL_TO_EMAIL_TEAM / CURL_USERNAME_URL_TO_EMAIL_KIRX are the
+# URLs of a form-to-email relay; the scripts POST name/message/submit fields
+# to them with curl. _TEAM is used for general team alerts, _KIRX for
+# bright-candidate and large-HTML-file alerts.
+#export CURL_USERNAME_URL_TO_EMAIL_TEAM="https://example.com/cgi-bin/formmail"
+#export CURL_USERNAME_URL_TO_EMAIL_KIRX="https://example.com/cgi-bin/formmail"
+#
+# SLACK_WEBHOOK_URL_TEAM is a Slack incoming-webhook URL; the scripts POST a
+# JSON {"text": ...} alert to it.
+#export SLACK_WEBHOOK_URL_TEAM="https://hooks.slack.com/services/XXX/YYY/ZZZ"
+
+# Half-width in source-image pixels of the zoom-in thumbnail produced by the
+# forced-photometry pages (coord_forced_photometry.py and the archival
+# photometry worker). Analogous to COORD_SEARCH_ZOOMIN_PIXELS above but for
+# the forced-photometry tools. Default 200.
+#export COORD_FORCED_PHOT_ZOOMIN_PIXELS=200
+
 # set this variable to indicate this file has been sourced
 # (can be checked in order not to source it twice)
 export UNMW_LOCAL_CONFIG_SOURCED=yes

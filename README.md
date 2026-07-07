@@ -20,6 +20,36 @@ Alternatively, install all dependencies from `requirements.txt` which handles th
 pip install -r requirements.txt
 ```
 
+### How the CGIs find `legacy-cgi` in production (single point of failure)
+
+On Python 3.13+, the CGIs (`upload.py`, `coord_search.py`,
+`coord_forced_photometry.py`, `archive_forced_photometry.py`,
+`archive_phot_status.py`, `fastplot.py`) will exit with an
+`Error: 'cgi' module not found` page unless `legacy-cgi` is importable. On the
+production server this is arranged **entirely through Apache and a dedicated
+virtualenv**, not through the system Python:
+
+- `legacy-cgi` (and the other requirements) are installed into a venv, e.g.
+  `/var/www/cgi-venv`.
+- The Apache vhost points the CGIs' interpreter at that venv by exporting
+  `PATH` (and `VIRTUAL_ENV`) into the CGI environment, e.g. in the
+  `<Directory>`/vhost config:
+
+  ```apache
+  SetEnv VIRTUAL_ENV /var/www/cgi-venv
+  SetEnv PATH /var/www/cgi-venv/bin:/usr/bin:/bin
+  ```
+
+  Because the scripts use `#!/usr/bin/env python3`, that `PATH` makes
+  `env python3` resolve to `/var/www/cgi-venv/bin/python3`, which has
+  `legacy-cgi`.
+
+**This is a single point of failure**: if the venv is deleted/moved, the
+`SetEnv PATH` line is dropped, or the venv's Python is upgraded without
+re-installing `legacy-cgi`, **every** CGI breaks at once with the opaque
+"cgi module not found" error. When touching the Apache config or rebuilding
+the venv, keep these two facts wired together.
+
 ***Don't forget to add new camera name to combine_reports.sh***
 
 # draft installation instructions
@@ -56,6 +86,20 @@ ln -s /home/NMW_web_upload uploads
 */8     *       *       *       *       www-data        /dataX/cgi-bin/unmw/combine_reports.sh &> /dev/null
  ````
 where www-data is the apache user, `/dataX/cgi-bin/unmw/combine_reports.sh` is the full path to `combine_reports.sh` (will be different for your system).
+
+Note: the cron examples in this README use different user names on purpose -
+`www-data` in the draft example above and `apache` in the AlmaLinux example
+below - because they were taken from different machines running different
+Linux distributions (Debian/Ubuntu call the web-server user `www-data`, while
+RedHat/AlmaLinux call it `apache`). Use whichever user runs Apache on **your**
+distribution.
+
+An optional helper `git_unmw_automated_update.sh` can be run manually or from
+cron to auto-update this checkout from upstream once its GitHub Actions checks
+pass. It intentionally **discards** any local changes to tracked files before
+pulling (logging what it discarded): the production tree is meant to track
+upstream only, so all fixes belong upstream, not in local edits. Untracked
+files such as `local_config.sh` are left untouched.
 
 # An overly-detailed and ugly example installation on a fresh AlmaLinux 9
 ````
@@ -311,3 +355,29 @@ the [UCAC5](https://cdsarc.cds.unistra.fr/viz-bin/Cat?I/340) catalog, which is f
 unreliable for production. After initial testing, users are encouraged to
 install local copies of [UCAC5](https://cdsarc.cds.unistra.fr/viz-bin/Cat?I/340)
 (you may place its files at `uploads/ucac5` or `$HOME/ucac5`) and [astrometry.net code](https://github.com/dstndstn/astrometry.net) (and its associated [index files](http://data.astrometry.net/)).
+
+## Notes for maintainers
+
+- **Test datasets** (e.g. `NMW-STL__find_Neptune_test`, `NMW-TexasTech__*`)
+  are downloaded on demand by VaST's `util/examples/test_vast.sh` from
+  `http://tau.kirx.net/vast_test_data/<name>.tar.bz2`. To add a new test
+  dataset, create the tarball and place it in that hosting directory
+  (`/var/www/tau.kirx.net/htdocs/vast_test_data/` on the tau server); the
+  test scripts unpack it into the parent directory beside the vast checkout.
+
+- **Cross-repo string contracts**: several markers in the VaST-produced
+  `transient_report/index.html` are grepped by the unmw scripts here
+  (`combine_reports.sh`, `autoprocess.sh`) and by `filter_report.py` - for
+  example `Processing fields`, `Processing complete!`,
+  `printCandidateNameWithAbsLink`, `The object was found in`,
+  `mag brighter than the`, and `Last  image` (two spaces). `unmw_selftest.sh`
+  even depends on the exact misspelling `too few refereence images`. If any
+  of these strings is changed on the VaST side, the corresponding consumer
+  here must be updated in step (and vice versa). When adding an ATTENTION/NOTE
+  line, keep the phrases `The object was`, `found in`, `not found` out of it -
+  they are parser anchors.
+
+- **New non-CGI Python modules** added to the repo root execute as CGI unless
+  denied. Add importable libraries, workers and test files to the deny list in
+  `.htaccess` (following the existing `FilesMatch` blocks) so a stranger cannot
+  request them over the web.
