@@ -900,6 +900,23 @@ $MSG
 
 "  | tee -a "$AUTOPROCESS_LOG"
 ############################################################################
+# Source monitoring: pre-factory prep (see source_monitoring_design.md).
+# Writes the positions file of activated monitored sources that fall on this
+# field and exports MONITORING_POSITIONS_FILE for the factory's monitoring
+# block. Completely inert when uploads/monitoring/ does not exist on this
+# machine (the registry root is created only by a manual --reconcile run).
+UNMW_SCRIPT_DIR_FOR_MONITORING="$(dirname "$(readlink -f "$0")")"
+unset MONITORING_POSITIONS_FILE
+if [ -s "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" ] && [ -d "$IMAGE_DATA_ROOT/monitoring" ];then
+ MONITORING_POSITIONS_FILE=$(python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --prepare "$ABSOLUTE_PATH_TO_IMAGES" 2>> "$IMAGE_DATA_ROOT/monitoring_update.log")
+ if [ -n "$MONITORING_POSITIONS_FILE" ] && [ -s "$MONITORING_POSITIONS_FILE" ];then
+  export MONITORING_POSITIONS_FILE
+  echo "Source monitoring: positions file $MONITORING_POSITIONS_FILE" | tee -a "$AUTOPROCESS_LOG"
+ else
+  unset MONITORING_POSITIONS_FILE
+ fi
+fi
+############################################################################
 echo "Starting work"  | tee -a "$AUTOPROCESS_LOG"
 UNIXSEC_START=$(date +%s)
 ########################## ACTUAL WORK ##########################
@@ -977,6 +994,14 @@ $MSG"
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
   fi
  fi # grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
+ # Source monitoring: ingest the factory's monitoring measurements, on
+ # successful runs only (nonempty report and zero exit code). Detached so
+ # the transient alerts above are never delayed.
+ if [ $SCRIPT_EXIT_CODE -eq 0 ] && [ -n "$MONITORING_POSITIONS_FILE" ] && [ -s transient_report/monitoring_raw_measurements.txt ];then
+  MONITORING_RAW_ABS=$(readlink -f transient_report/monitoring_raw_measurements.txt)
+  setsid python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --ingest "$MONITORING_RAW_ABS" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1 < /dev/null &
+  echo "Source monitoring: detached ingest started for $MONITORING_RAW_ABS" | tee -a "$AUTOPROCESS_LOG"
+ fi
 fi # if [ ! -f transient_report/index.html ];then
 ##
 UNIXSEC_STOP=$(date +%s)

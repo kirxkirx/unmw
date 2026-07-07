@@ -77,3 +77,9 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # (can be checked in order not to source it twice)
 export UNMW_LOCAL_CONFIG_SOURCED=yes
 
+
+# AAVSO observer code used in the AAVSO-format lightcurve files produced by
+# the source monitoring feature (uploads/monitoring/<source>/lightcurve_aavso.txt).
+# When unset, the code is taken from AAVSO_previously_used_header.txt in the
+# VaST reference copy, falling back to the XXX placeholder.
+#export AAVSO_OBSCODE="SKA"

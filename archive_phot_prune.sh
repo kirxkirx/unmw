@@ -107,14 +107,20 @@ find "$UPLOADS" -maxdepth 1 -type d \
 # Normal operation deletes these when the request/job finishes; one older
 # than a day whose owning process is gone is crash debris. The owning pid is
 # embedded in the directory name right after the prefix
-# (vast_archive_phot_<pid><random> / vast_forced_phot_<pid><random>).
+# (vast_archive_phot_<pid><random> / vast_forced_phot_<pid><random> /
+# vast_monitoring_<pid><random>).
+# Note: the persistent per-source monitoring registry uploads/monitoring/
+# is deliberately OUT OF SCOPE of this script - only the prefix-matched
+# names below are ever touched.
 find "$UPLOADS" -maxdepth 1 -type d \
- \( -name 'vast_archive_phot_*' -o -name 'vast_forced_phot_*' \) \
+ \( -name 'vast_archive_phot_*' -o -name 'vast_forced_phot_*' \
+    -o -name 'vast_monitoring_*' \) \
  -mtime +1 -print0 2>/dev/null |
  while IFS= read -r -d '' DIR; do
   BASE="$(basename "$DIR")"
   REST="${BASE#vast_archive_phot_}"
   REST="${REST#vast_forced_phot_}"
+  REST="${REST#vast_monitoring_}"
   PID="${REST%%[!0-9]*}"
   if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
    echo "skipping $DIR (owner pid $PID is alive)"
