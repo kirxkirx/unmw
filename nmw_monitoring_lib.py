@@ -39,8 +39,8 @@ EXCLUDED_STATUSES = ('edge', 'saturated', 'bad_region', 'nan_pixel',
                      'calib_fail', 'fail', 'tool_fail')
 
 # Name and coordinate validation for monitoring_list.txt lines
-NAME_CHARSET_RE = re.compile(r'^[A-Za-z0-9+._ -]+$')
-SOURCE_ID_RE = re.compile(r'^[A-Za-z0-9+._-]+$')
+NAME_CHARSET_RE = re.compile(r'^[A-Za-z0-9+.()= _-]+$')
+SOURCE_ID_RE = re.compile(r'^[A-Za-z0-9+.()=_-]+$')
 RA_SEXAGESIMAL_RE = re.compile(r'^\d{1,2}:\d{2}:\d{2}(\.\d+)?$')
 DEC_SEXAGESIMAL_RE = re.compile(r'^[+-]?\d{1,3}:\d{2}:\d{2}(\.\d+)?$')
 
@@ -144,7 +144,7 @@ def parse_monitoring_list(path):
         if not NAME_CHARSET_RE.match(name):
             problems.append(
                 'line {}: name "{}" has characters outside '
-                '[A-Za-z0-9+._ -]'.format(line_no, name))
+                '[A-Za-z0-9+.()= _-]'.format(line_no, name))
             continue
         source_id = sanitize_source_id(name)
         if source_id is None:

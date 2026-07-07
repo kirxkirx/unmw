@@ -75,10 +75,12 @@ HH:MM:SS.SS +DD:MM:SS.S Source Name With Spaces
 
 - First two whitespace-separated tokens are RA and Dec (sexagesimal, signed
   Dec); everything after them is the display name.
-- Name charset validation: `[A-Za-z0-9+._ -]` - letters, digits, spaces,
-  `+`, `-`, `.` and `_` (dot and underscore added by user request; the dot
-  lets survey names with decimal coordinates, e.g.
-  `ASASSN-V J010901.57+471816.4`, be pasted verbatim). Leading/trailing
+- Name charset validation: `[A-Za-z0-9+.()= _-]` - letters, digits, spaces,
+  `+`, `-`, `.`, `_`, `(`, `)` and `=` (dot/underscore and later parentheses
+  and the equals sign added by user request; the dot lets survey names with
+  decimal coordinates, e.g. `ASASSN-V J010901.57+471816.4`, be pasted
+  verbatim, and the 2026-07-07 additions allow AAVSO-style blazar aliases
+  like `QSO B1420+326 - blazar (AAVSO name)` and `AU CVn = 1308+326 - blazar`). Leading/trailing
   whitespace and trailing dots are trimmed. Lines failing coordinate or name
   validation are reported to the update log and skipped, never fatal.
   Note that since whitespace maps to `_` in the id, the names `V0615 Vul`
@@ -127,7 +129,7 @@ uploads/.monitoring_locks/                   flock files (per source + one globa
 ```
 
 `<source_id>` = display name with whitespace runs replaced by `_`, restricted
-to `[A-Za-z0-9+._-]` (dot allowed, see section 3); the id is the join key
+to `[A-Za-z0-9+.()=_-]` (dot, parentheses and equals allowed, see section 3); the id is the join key
 back to the `monitoring_list.txt` line, which remains the only home of the
 name and coordinates. The reconciler refuses a new list line whose id
 collides with an existing different source (logged, skipped) and warns on
