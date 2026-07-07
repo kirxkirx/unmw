@@ -545,8 +545,18 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                                                      '{:.5f}'.format(jd_max))),
                          jd_min, jd_max))
     if png_basename:
-        parts.append('<p><img src="{}" style="max-width:100%"></p>\n'.format(
-            html_escape(png_basename)))
+        # Cache-bust: the plot is overwritten in place at the same URL as the
+        # lightcurve grows, but the served images carry a long/immutable
+        # Cache-Control (fine for the write-once archive-photometry images).
+        # Appending the plot's mtime makes each regenerated plot a new URL so
+        # browsers fetch the fresh one instead of a stale cached copy.
+        try:
+            plot_version = int(os.path.getmtime(
+                os.path.join(source_dir, png_basename)))
+        except OSError:
+            plot_version = 0
+        parts.append('<p><img src="{}?v={}" style="max-width:100%"></p>\n'
+                     .format(html_escape(png_basename), plot_version))
     parts.append('<p>Data files: <a href="{lc}">{lc}</a> (JD mag err camera)'
                  ' &middot; <a href="{ul}">{ul}</a> (JD limit_mag camera)'
                  ' &middot; <a href="{av}">{av}</a> (AAVSO Extended Format'
