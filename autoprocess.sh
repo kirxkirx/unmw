@@ -412,6 +412,10 @@ function wait_for_our_turn_to_start_processing {
  done
  
  # if exponential backoff didn't work - wait impatiently
+ # NOTE: the leading "1" is INTENTIONAL (not a typo): it prefixes the value,
+ # so with MAX_WAIT_ITERATIONS=30 this loops "1" .. "130", i.e. ~10x longer
+ # than the exponential-backoff loop above, to keep waiting on a busy server
+ # before the final go-anyway fallback. Do NOT "fix" it to $MAX_WAIT_ITERATIONS.
  for WAIT_ITERATION in $(seq 1 1$MAX_WAIT_ITERATIONS) ; do
   is_system_load_low && is_temperature_low && check_sysrem_processes_are_not_too_many && check_unrar_processes_are_not_too_many && is_cpu_io_wait_low
   if [ $? -eq 0 ]; then
@@ -434,23 +438,22 @@ function wait_for_our_turn_to_start_processing {
 
 # Note that the same function is found in util/transients/transient_factory_test31.sh
 function check_free_space() {
-    if [ -n "$1" ];then
-     dir_to_check="$1"
+    # Check every directory passed as an argument (default: the current
+    # directory). Fails (returns 1) if ANY of them is below the hard limit,
+    # after reporting all of them - so a caller can verify all the disks the
+    # run will actually use (uploads, processing, working copy) in one call,
+    # even before it has cd'd into any of them.
+    local dirs_to_check
+    if [ $# -gt 0 ];then
+     dirs_to_check="$*"
     else
-     dir_to_check="."
-    fi
-    
-    if [ ! -d "$dir_to_check" ];then
-     echo "WARNING from check_free_space(): $dir_to_check is not a directory"
-     return 0
+     dirs_to_check="."
     fi
 
-
-    # Check free space in the current directory
     local free_space_kb
-
-    # Use 'df -k .' for portability across Linux, macOS, and FreeBSD
-    free_space_kb=$(df -k "$dir_to_check" | awk 'NR==2 {print $4}')
+    local overall_status=0
+    local already_checked=""
+    local dir_to_check
 
     # Hard limit for minimum required space in KB (5 GB = 5 * 1024 * 1024 KB)
     local required_space_kb_hardlimit=5242880
@@ -474,17 +477,32 @@ function check_free_space() {
      required_space_kb_softlimit="$required_space_kb_hardlimit"
     fi
 
-    
-    if [ "$free_space_kb" -ge "$required_space_kb_softlimit" ]; then
-        echo "server $HOSTNAME has sufficient free disk space available: $((free_space_kb / 1024)) MB at $dir_to_check"
-        return 0
-    elif [ "$free_space_kb" -ge "$required_space_kb_hardlimit" ]; then
-        echo "WARNING: server $HOSTNAME is low on disk space, only $((free_space_kb / 1024)) MB free at $dir_to_check"
-        return 0
-    else
-        echo "ERROR: server $HOSTNAME is out of disk space, only $((free_space_kb / 1024)) MB free at $dir_to_check"
-        return 1
-    fi
+    for dir_to_check in $dirs_to_check ;do
+        if [ ! -d "$dir_to_check" ];then
+         echo "WARNING from check_free_space(): $dir_to_check is not a directory"
+         continue
+        fi
+        # Skip a directory we already reported (IMAGE_DATA_ROOT and
+        # DATA_PROCESSING_ROOT are frequently the same path)
+        case " $already_checked " in
+         *" $dir_to_check "*) continue ;;
+        esac
+        already_checked="$already_checked $dir_to_check"
+
+        # Use 'df -k' for portability across Linux, macOS, and FreeBSD
+        free_space_kb=$(df -k "$dir_to_check" | awk 'NR==2 {print $4}')
+
+        if [ "$free_space_kb" -ge "$required_space_kb_softlimit" ]; then
+            echo "server $HOSTNAME has sufficient free disk space available: $((free_space_kb / 1024)) MB at $dir_to_check"
+        elif [ "$free_space_kb" -ge "$required_space_kb_hardlimit" ]; then
+            echo "WARNING: server $HOSTNAME is low on disk space, only $((free_space_kb / 1024)) MB free at $dir_to_check"
+        else
+            echo "ERROR: server $HOSTNAME is out of disk space, only $((free_space_kb / 1024)) MB free at $dir_to_check"
+            overall_status=1
+        fi
+    done
+
+    return $overall_status
 }
 
 
@@ -651,7 +669,9 @@ fi
 #
 ###########################################################################
 ############ Do not start the wait if we are out of disk space ############
-if ! check_free_space ;then
+# Runs before any cd, so name the disks the run will actually use rather than
+# the CGI's cwd (typically a different, smaller filesystem)
+if ! check_free_space "$IMAGE_DATA_ROOT" "$DATA_PROCESSING_ROOT" ;then
  echo "ERROR free disk space check faield before starting to wait for our turn" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi
@@ -838,8 +858,9 @@ sudo chown -R $USER $PWD" | tee -a "$AUTOPROCESS_LOG"
 fi
 #
 
-# Make sure we have enough disk space before doing this
-if ! check_free_space ;then
+# Make sure we have enough disk space before doing this (we are cd'd into
+# DATA_PROCESSING_ROOT here, which is where the VaST working copy is rsynced)
+if ! check_free_space "$DATA_PROCESSING_ROOT" ;then
  echo "ERROR free disk space check faield before rsync" | tee -a "$AUTOPROCESS_LOG"
  exit 1
 fi

@@ -457,7 +457,7 @@ if [ -x "./combine_reports.sh" ]; then
    for i in $(seq 1 24); do
     sleep 5
     # Check if we should exit (this allows quicker response to signals)
-    if ! kill -0 $ 2>/dev/null; then
+    if ! kill -0 $$ 2>/dev/null; then
      exit 0
     fi
    done
@@ -583,7 +583,7 @@ while true; do
      # Use signal-interruptible sleep
      for i in $(seq 1 24); do
       sleep 5
-      if ! kill -0 $ 2>/dev/null; then
+      if ! kill -0 $$ 2>/dev/null; then
        exit 0
       fi
      done

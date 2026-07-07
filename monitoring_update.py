@@ -193,7 +193,17 @@ def mode_ingest(raw_path):
     if not rows_by_source:
         log('--ingest: no measurement rows in {}'.format(raw_path))
         return 0
-    _, entries = list_entries_or_exit()
+    list_path, entries = list_entries_or_exit()
+    # If the list is temporarily unreadable (NFS blip, env mismatch in the
+    # detached ingest) do NOT proceed: every row would be dropped as "no
+    # longer in the list" and rebuild_central_index(...[]) would overwrite the
+    # central page with "no sources activated". Bail and let the next run - or
+    # a manual --rescan-recent - recover the measurements.
+    if list_path is None or not entries:
+        log('--ingest: monitoring_list.txt is missing or empty; not '
+            'ingesting {} (measurements preserved in the raw file)'.format(
+                raw_path))
+        return 1
     entries_by_id = {e['source_id']: e for e in entries}
     factory_text = read_factory_text(cfg)
     n_total = 0
@@ -275,12 +285,19 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
                     work_dir, local_config_path, img, compute_path,
                     entry['ra'], entry['dec'], band, debug_log=skip_log)
             if fp is None:
-                log('{}: {}/{} skipped {}'.format(
-                    source_id, idx, len(todo), os.path.basename(img)))
-                pending_rows.append(
-                    {'basename': os.path.basename(img), 'jd': 'na',
-                     'mag': '99.0000', 'err': '99.0000', 'status': 'fail',
-                     'camera': camera})
+                # A None result means the measurement failed for a reason we
+                # cannot classify here: a failed plate solve, a forced-photometry
+                # error, or - importantly - a transient UCAC5/APASS/VizieR
+                # network failure or timeout. Do NOT write a permanent ledger
+                # row: a 'fail' row would be dedup-permanent and no rescan would
+                # ever retry it, so one remote-service blip during a backfill
+                # would truncate the lightcurve forever. Leaving the image out
+                # of the ledger lets the next --reconcile / --rescan retry it.
+                # (Genuinely off-frame positions come back as a normal 'edge'
+                # dict and are recorded through the else branch below.)
+                log('{}: {}/{} not measured (will retry on next rescan): '
+                    '{}'.format(source_id, idx, len(todo),
+                                os.path.basename(img)))
             else:
                 jd = fp.get('jd')
                 if not jd:

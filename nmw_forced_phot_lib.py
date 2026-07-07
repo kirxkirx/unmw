@@ -361,9 +361,12 @@ def _funpack_to_workdir(work_dir, fits_path):
                           os.path.basename(fits_path)[:-len('.fz')])
     funpack = os.path.join(work_dir, 'util', 'funpack')
     try:
+        # Cap the funpack run: a corrupt .fz or a stalled NFS/storage read must
+        # not hang forever, which would wedge the ThreadPoolExecutor future and
+        # keep the worker holding its queue slot with no self-healing path.
         result = subprocess.run([funpack, '-O', target, fits_path],
-                                capture_output=True, text=True)
-    except OSError:
+                                capture_output=True, text=True, timeout=900)
+    except (subprocess.TimeoutExpired, OSError):
         return None
     if result.returncode != 0 or not os.path.isfile(target):
         return None
@@ -896,8 +899,14 @@ def setup_vast_working_copy(vast_ref, parent_dir, prefix=VAST_WORK_DIR_PREFIX):
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 timeout=VAST_COPY_TIMEOUT_SECONDS)
     except (subprocess.TimeoutExpired, OSError):
+        # A timeout/OSError may leave a half-copied tree behind; the caller
+        # never learns its name, so remove it here rather than leaking a
+        # partial VaST copy under uploads/ (self-amplifying when the failure
+        # cause is a full disk).
+        shutil.rmtree(work, ignore_errors=True)
         return None
     if result.returncode != 0 or not os.path.isdir(work):
+        shutil.rmtree(work, ignore_errors=True)
         return None
     # Symlink the excluded large/static data back (mirrors autoprocess.sh).
     try:

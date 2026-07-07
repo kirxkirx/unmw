@@ -185,8 +185,19 @@ fi
 
 echo "All $TOTAL_COUNT GitHub Actions check runs passed. Proceeding with update."
 
-# Stash any local changes to tracked files
-git stash --quiet 2>/dev/null
+# Discard any local changes to tracked files before pulling.
+# Policy (intentional): the production tree must track upstream only - local
+# hotfixes are NOT preserved. All fixes belong upstream. The previous
+# 'git stash' silently accumulated them in an ever-growing stash stack;
+# instead we discard them outright, but LOG what was discarded first so the
+# cron mail / update log records it (never a silent loss). Untracked files
+# (local_config.sh, logs, uploads) are left untouched by reset --hard.
+LOCAL_TRACKED_CHANGES=$(git status --porcelain --untracked-files=no)
+if [ -n "$LOCAL_TRACKED_CHANGES" ]; then
+    echo "WARNING: discarding local changes to tracked files (production tracks upstream only - put fixes upstream):"
+    echo "$LOCAL_TRACKED_CHANGES"
+    git reset --hard --quiet
+fi
 
 # Pull the latest version
 echo "Pulling latest version..."

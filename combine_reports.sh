@@ -578,15 +578,22 @@ for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
    NAME="$USER$HOST"
    #DATETIME=$(LANG=C date --utc)
    SCRIPTNAME=$(basename $0)
-   MSG="The combined list of candidates at $URL_OF_DATA_PROCESSING_ROOT/$OUTPUT_COMBINED_HTML_NAME
-is too large -- $INPUT_HTML_FILE_SIZE_MB MB. This is very-very wrong!
+   MSG="The individual-field report at $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/index.html
+is too large -- $INPUT_HTML_FILE_SIZE_MB MB. This is very-very wrong! It is being
+skipped and left out of the combined list $OUTPUT_COMBINED_HTML_NAME.
 
 Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/autoprocess.txt"
    if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
     curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR: large HTML file] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
    fi
-   rm -f "${LOCKFILE}"
-   exit 1
+   # Mark this dir as processed and skip it, rather than exit 1: exiting here
+   # aborted the whole cron cycle (all remaining dirs and cameras) AND never
+   # recorded the dir, so the same oversized report was rediscovered and
+   # re-emailed on every run (~8 min) until it aged out of the scan window.
+   # 'continue' keeps the huge file out of the combined list while letting the
+   # rest of the run proceed; do NOT drop the lockfile - the run continues.
+   echo "$INPUT_DIR/index.html" >> combine_reports.log
+   continue
   fi
  fi
 
