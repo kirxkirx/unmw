@@ -19,6 +19,15 @@ if [ -z "$UNMW_LOCAL_CONFIG_SOURCED" ];then
  fi
 fi
 
+# Absolute directory holding this script and its companion tools
+# (monitoring_update.py and friends). This must be resolved BEFORE any 'cd'
+# below: wrapper.sh invokes this script as './autoprocess.sh', and such a
+# relative $0 can only be resolved against the initial working directory.
+# Resolving it later (after cd to the image directory) silently pointed
+# UNMW_SCRIPT_DIR_FOR_MONITORING at the image directory, so the source
+# monitoring pre-factory prep hook never ran on production.
+UNMW_SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+
 
 # Normally $IMAGE_DATA_ROOT $DATA_PROCESSING_ROOT $URL_OF_DATA_PROCESSING_ROOT are 
 # exported in local_config.sh that is sourced by wrapper.sh
@@ -886,7 +895,7 @@ $MSG
 # field and exports MONITORING_POSITIONS_FILE for the factory's monitoring
 # block. Completely inert when uploads/monitoring/ does not exist on this
 # machine (the registry root is created only by a manual --reconcile run).
-UNMW_SCRIPT_DIR_FOR_MONITORING="$(dirname "$(readlink -f "$0")")"
+UNMW_SCRIPT_DIR_FOR_MONITORING="$UNMW_SCRIPT_DIR"
 unset MONITORING_POSITIONS_FILE
 if [ -s "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" ] && [ -d "$IMAGE_DATA_ROOT/monitoring" ];then
  MONITORING_POSITIONS_FILE=$(python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --prepare "$ABSOLUTE_PATH_TO_IMAGES" 2>> "$IMAGE_DATA_ROOT/monitoring_update.log")
