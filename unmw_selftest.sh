@@ -286,14 +286,44 @@ VAST_INSTALL_DIR="$PWD"
 # VaST should be ready for work now
 
 # Download test data
-export REFERENCE_IMAGES="$UPLOADS_DIR/NMW__NovaVul24_Stas_test/reference_images" 
+export REFERENCE_IMAGES="$UPLOADS_DIR/NMW__NovaVul24_Stas_test/reference_images"
 if [ ! -d "$REFERENCE_IMAGES" ];then
  cd "$UPLOADS_DIR" || exit 1
- {
-  curl --silent --show-error -O "http://scan.sai.msu.ru/~kirx/pub/NMW__NovaVul24_Stas_test.tar.bz2" && \
-  tar -xvjf NMW__NovaVul24_Stas_test.tar.bz2 && \
+ # Retry the large test data download a few times, resuming the partial file
+ # with '--continue-at -': a transient network glitch mid-transfer (like
+ # 'curl: (18) transfer closed with N bytes remaining to read', which plain
+ # '--retry' does not consider a retryable error) must not derail the test.
+ # Try the primary server first, then fall back to the secondary one.
+ TEST_DATA_DOWNLOAD_OK=0
+ for TEST_DATA_URL in "http://tau.kirx.net/vast_test_data/NMW__NovaVul24_Stas_test.tar.bz2" "http://scan.sai.msu.ru/~kirx/pub/NMW__NovaVul24_Stas_test.tar.bz2" ;do
+  # Never resume a partial file left by a different server (or an earlier
+  # script run): the mirrors are supposed to be identical, but if they ever
+  # diverge a cross-server resume would silently produce a corrupt archive.
   rm -f NMW__NovaVul24_Stas_test.tar.bz2
- } || exit 1
+  for TEST_DATA_DOWNLOAD_ATTEMPT in 1 2 3 ;do
+   if curl --silent --show-error --connect-timeout 10 --retry 2 --retry-delay 10 --continue-at - -O "$TEST_DATA_URL" ;then
+    TEST_DATA_DOWNLOAD_OK=1
+    break
+   fi
+   echo "Test data download attempt $TEST_DATA_DOWNLOAD_ATTEMPT from $TEST_DATA_URL failed - will retry in 30 seconds"
+   sleep 30
+  done
+  if [ "$TEST_DATA_DOWNLOAD_OK" -eq 1 ];then
+   break
+  fi
+  echo "Giving up on $TEST_DATA_URL"
+ done
+ if [ "$TEST_DATA_DOWNLOAD_OK" -ne 1 ];then
+  echo "ERROR downloading NMW__NovaVul24_Stas_test.tar.bz2 from all servers"
+  rm -f NMW__NovaVul24_Stas_test.tar.bz2
+  exit 1
+ fi
+ if ! tar -xvjf NMW__NovaVul24_Stas_test.tar.bz2 ;then
+  echo "ERROR unpacking NMW__NovaVul24_Stas_test.tar.bz2 - removing the broken file"
+  rm -f NMW__NovaVul24_Stas_test.tar.bz2
+  exit 1
+ fi
+ rm -f NMW__NovaVul24_Stas_test.tar.bz2
 fi
 cd "$SCRIPTDIR" || exit 1
 
