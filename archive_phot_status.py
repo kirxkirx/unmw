@@ -410,7 +410,7 @@ def main():
                      status_line="Status: 404 Not Found")
         return
     job_dir = apl.job_dir_path(job_id)
-    if not os.path.isdir(job_dir):
+    if job_dir is None or not os.path.isdir(job_dir):
         _render_page("Unknown job",
                      "<p>No job <span class='code'>{}</span> on record "
                      "(it may have been pruned).</p>".format(

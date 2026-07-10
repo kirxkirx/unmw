@@ -148,7 +148,18 @@ def is_valid_job_id(job_id):
 
 
 def job_dir_path(job_id):
-    return os.path.join(TEMP_PARENT, JOB_DIR_PREFIX + job_id)
+    """Job directory path for a job id, or None when the id does not have
+    the valid job id shape or the resulting path would escape TEMP_PARENT.
+    The normpath + prefix check is defense in depth against path traversal:
+    the status CGI passes a user-supplied id here (it validates the id shape
+    first, but this keeps the path contained even if a caller forgets)."""
+    if not is_valid_job_id(job_id):
+        return None
+    base = os.path.normpath(TEMP_PARENT)
+    path = os.path.normpath(os.path.join(base, JOB_DIR_PREFIX + job_id))
+    if not path.startswith(base + os.sep):
+        return None
+    return path
 
 
 # ---------- small JSON file helpers ----------
@@ -438,6 +449,9 @@ def create_job(request_dict):
     (job_id, job_dir). Raises OSError on filesystem trouble."""
     job_id = new_job_id()
     final_dir = job_dir_path(job_id)
+    if final_dir is None:
+        raise OSError(
+            'cannot construct the job directory path for {}'.format(job_id))
     tmp_dir = os.path.join(TEMP_PARENT,
                            '.{}tmp_{}'.format(JOB_DIR_PREFIX, job_id))
     os.makedirs(tmp_dir, mode=0o755)
