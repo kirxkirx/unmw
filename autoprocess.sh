@@ -28,8 +28,15 @@ fi
 # monitoring pre-factory prep hook never ran on production.
 UNMW_SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 
+# This script is a batch job, never a CGI endpoint, but on production it is
+# spawned by the upload CGI and inherits the CGI environment. Strip the CGI
+# request markers so guarded helpers (monitoring_update.py) do not mistake
+# this pipeline for a web request - the same markers that
+# nmw_archive_phot_lib.py kick_worker() strips for archive_phot_worker.py.
+unset GATEWAY_INTERFACE REQUEST_METHOD QUERY_STRING CONTENT_LENGTH CONTENT_TYPE
 
-# Normally $IMAGE_DATA_ROOT $DATA_PROCESSING_ROOT $URL_OF_DATA_PROCESSING_ROOT are 
+
+# Normally $IMAGE_DATA_ROOT $DATA_PROCESSING_ROOT $URL_OF_DATA_PROCESSING_ROOT are
 # exported in local_config.sh that is sourced by wrapper.sh
 if [ -z "$IMAGE_DATA_ROOT" ] || [ -z "$DATA_PROCESSING_ROOT" ] || [ -z "$URL_OF_DATA_PROCESSING_ROOT" ];then
  # Manual setup at vast.sai.msu.ru: 
