@@ -756,5 +756,84 @@ def test_visit_consistency_singleton_never_flagged():
     assert len(kept) == 1 and not flagged
 
 
+# ---------------------------------------------------------------------------
+# Monitoring frame quality (cloud) check (nmw_frame_quality_lib)
+# ---------------------------------------------------------------------------
+
+import nmw_frame_quality_lib as nfq
+
+
+def _grid_stars(n_side=30, mag=-10.0):
+    # a uniform grid of fake stars over a 4000x3000 px frame with a fake
+    # linear WCS of 2 arcsec/px around RA=180 Dec=0
+    stars = []
+    for i in range(n_side):
+        for j in range(n_side):
+            x = 50.0 + i * 3900.0 / (n_side - 1)
+            y = 50.0 + j * 2900.0 / (n_side - 1)
+            ra = 180.0 + (x - 2000.0) * 2.0 / 3600.0
+            dec = (y - 1500.0) * 2.0 / 3600.0
+            stars.append((ra, dec, x, y, mag))
+    return stars
+
+
+def test_frame_quality_identical_frame_is_ok():
+    ref = _grid_stars()
+    metrics = nfq.frame_quality_metrics(list(ref), ref)
+    cloudy, tripped = nfq.frame_verdict(metrics)
+    assert not cloudy and metrics['missing'] == 0.0
+
+
+def test_frame_quality_uniform_haze_is_ok():
+    # 0.8 mag uniform dimming: big zero-point shift but NOT cloudy (the
+    # per-image calibration absorbs uniform transparency loss)
+    ref = _grid_stars()
+    frame = [(ra, dec, x, y, mag + 0.8) for ra, dec, x, y, mag in ref]
+    metrics = nfq.frame_quality_metrics(frame, ref)
+    cloudy, tripped = nfq.frame_verdict(metrics)
+    assert not cloudy and abs(metrics['dzp'] - 0.8) < 0.01
+
+
+def test_frame_quality_patchy_cloud_is_cloudy():
+    # left half of the frame dimmed by 0.6 mag: patchiness + faint tail
+    ref = _grid_stars()
+    frame = [(ra, dec, x, y, mag + (0.6 if x < 2000.0 else 0.0))
+             for ra, dec, x, y, mag in ref]
+    metrics = nfq.frame_quality_metrics(frame, ref)
+    cloudy, tripped = nfq.frame_verdict(metrics)
+    assert cloudy and 'patch' in tripped
+
+
+def test_frame_quality_missing_stars_is_cloudy():
+    # a third of the reference stars are gone (thick clouds)
+    ref = _grid_stars()
+    frame = [s for k, s in enumerate(ref) if k % 3 != 0]
+    metrics = nfq.frame_quality_metrics(frame, ref)
+    cloudy, tripped = nfq.frame_verdict(metrics)
+    assert cloudy and 'missing' in tripped
+
+
+def test_frame_quality_small_reference_skips_check():
+    ref = _grid_stars(n_side=10)  # 100 stars < MIN_REF_STARS_FOR_CHECK
+    metrics = nfq.frame_quality_metrics(list(ref), ref)
+    assert metrics is None
+    cloudy, tripped = nfq.frame_verdict(metrics)
+    assert not cloudy
+
+
+def test_classify_routes_cloudy_rows():
+    rows = [
+        {'basename': 'a.fits', 'jd': '2461000.5', 'mag': '9.7',
+         'err': '0.01', 'status': 'detection', 'camera': 'C1'},
+        {'basename': 'b.fits', 'jd': '2461000.6', 'mag': '10.4',
+         'err': '0.02', 'status': 'cloudy', 'camera': 'C1'},
+        {'basename': 'c.fits', 'jd': '2461000.7', 'mag': '<13.0',
+         'err': 'na', 'status': 'upperlimit', 'camera': 'C1'},
+    ]
+    det, ul, excl = nml.classify_ledger_rows(rows)
+    assert len(det) == 1 and len(ul) == 1 and len(excl) == 1
+    assert excl[0]['reason'] == nml.REASON_CLOUDY
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

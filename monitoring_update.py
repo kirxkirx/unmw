@@ -9,11 +9,21 @@ Modes (see source_monitoring_design.md):
       positions file path on stdout (empty output = nothing to do).
       Silent no-op when uploads/monitoring/ does not exist - its existence
       is the per-machine "monitoring is deployed here" switch.
+  --frame-quality <raw_measurements_file> <vast_working_dir>
+      Frame quality (cloud) check called synchronously by autoprocess.sh
+      right before --ingest, while the VaST working copy (holding the
+      frame and reference-frame .wcscat catalogs) is still alive. Rewrites
+      the status of measurements from cloud-affected frames to 'cloudy' in
+      the raw file; the ingest then records them in the ledger (so the
+      frames are never re-measured) but they are excluded from the
+      published products. Never blocks the ingest: any trouble is logged
+      and the raw file is left untouched. New uploads only - archived
+      images are vetted clean and the backfill/rescan paths skip this.
   --ingest <raw_measurements_file>
-      Post-factory ingest called (detached) by autoprocess.sh on SUCCESSFUL
-      runs: append the factory's hand-off rows to the per-source ledgers
-      and rebuild the derived products. Pure text processing + plots; no
-      VaST working copy.
+      Post-factory ingest called synchronously by autoprocess.sh on
+      SUCCESSFUL runs: append the factory's hand-off rows to the
+      per-source ledgers and rebuild the derived products. Pure text
+      processing + plots; no VaST working copy.
   --reconcile
       Manual activation + one-time backfill of new monitoring_list.txt
       entries (archive pass + ALL uploads/img_* recent pass). Resumable:
@@ -172,6 +182,23 @@ def mode_prepare(img_dir):
     log('--prepare: {} monitored source(s) on field(s) {}'.format(
         len(positions_lines), ' '.join(sorted(fields))))
     print(positions_path)
+    return 0
+
+
+# ---------- --frame-quality ----------
+
+def mode_frame_quality(raw_path, work_dir):
+    """Cloud check for the frames of one upload; see the module docstring.
+    Always returns 0: a failed check must never block the ingest."""
+    import nmw_frame_quality_lib as nfq
+    try:
+        n_cloudy = nfq.check_and_mark_raw_file(raw_path, work_dir, log)
+        if n_cloudy:
+            log('--frame-quality: {} frame(s) marked {}'.format(
+                n_cloudy, nfq.CLOUDY_STATUS))
+    except Exception as exc:
+        log('--frame-quality: check failed ({}); raw file left '
+            'untouched'.format(exc))
     return 0
 
 
@@ -520,6 +547,8 @@ def main(argv):
     os.environ['FORCED_PHOTOMETRY_AIRMASS_ZEROPOINT'] = 'yes'
     if len(argv) >= 3 and argv[1] == '--prepare':
         return mode_prepare(argv[2])
+    if len(argv) >= 4 and argv[1] == '--frame-quality':
+        return mode_frame_quality(argv[2], argv[3])
     if len(argv) >= 3 and argv[1] == '--ingest':
         return mode_ingest(argv[2])
     if len(argv) >= 2 and argv[1] == '--reconcile':

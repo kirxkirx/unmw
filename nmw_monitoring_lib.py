@@ -48,11 +48,18 @@ EXCLUDED_STATUSES = ('edge', 'saturated', 'bad_region', 'nan_pixel',
 # (typically by patchy clouds) and there is no way to tell which one, so
 # every detection of that visit is excluded from the published products
 # (lightcurve.dat, the plot and the AAVSO file) and listed in
-# INCONSISTENT_BASENAME instead.
+# EXCLUDED_MEASUREMENTS_BASENAME instead.
 VISIT_GROUP_MAX_GAP_DAYS = 0.007
 VISIT_CONSISTENCY_MAG_TOLERANCE = 0.3
 VISIT_CONSISTENCY_ERR_SCALE = 4.0
-INCONSISTENT_BASENAME = 'inconsistent_visits.dat'
+
+# Measurements excluded by the quality checks (the within-visit consistency
+# check above and the per-frame cloud check applied at ingest time, status
+# 'cloudy') are published in this file and on the source page instead of
+# the lightcurve/plot/AAVSO products.
+EXCLUDED_MEASUREMENTS_BASENAME = 'excluded_measurements.dat'
+REASON_VISIT = 'visit_inconsistent'
+REASON_CLOUDY = 'cloudy_frame'
 
 # Name and coordinate validation for monitoring_list.txt lines
 NAME_CHARSET_RE = re.compile(r'^[A-Za-z0-9+.()= _-]+$')
@@ -302,11 +309,14 @@ def _float_or_none(text):
 
 
 def classify_ledger_rows(rows):
-    """Split ledger rows into (detections, upperlimits), each JD-sorted and
-    with parsed jd/mag floats attached; everything else is excluded from the
-    published products."""
+    """Split ledger rows into (detections, upperlimits, quality_excluded),
+    each JD-sorted and with parsed jd/mag floats attached. Rows with the
+    'cloudy' status (condemned by the per-frame cloud check at ingest time)
+    go to quality_excluded; everything else that is neither a detection nor
+    an upper limit is excluded from the published products entirely."""
     detections = []
     upperlimits = []
+    quality_excluded = []
     for row in rows:
         if row['status'] in EXCLUDED_STATUSES:
             continue
@@ -322,9 +332,14 @@ def classify_ledger_rows(rows):
             detections.append(parsed)
         elif row['status'] == 'upperlimit':
             upperlimits.append(parsed)
+        elif row['status'] == 'cloudy':
+            parsed['err_float'] = _float_or_none(row['err'])
+            parsed['reason'] = REASON_CLOUDY
+            quality_excluded.append(parsed)
     detections.sort(key=lambda r: r['jd_float'])
     upperlimits.sort(key=lambda r: r['jd_float'])
-    return detections, upperlimits
+    quality_excluded.sort(key=lambda r: r['jd_float'])
+    return detections, upperlimits, quality_excluded
 
 
 def split_inconsistent_visits(detections):
@@ -519,8 +534,13 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
     lock_fh = acquire_source_lock(uploads_dir, source_id)
     try:
         rows, _ = read_ledger(source_dir)
-        detections, upperlimits = classify_ledger_rows(rows)
+        detections, upperlimits, quality_excluded = \
+            classify_ledger_rows(rows)
         detections, inconsistent = split_inconsistent_visits(detections)
+        for row in inconsistent:
+            row['reason'] = REASON_VISIT
+        excluded = sorted(quality_excluded + inconsistent,
+                          key=lambda r: r['jd_float'])
 
         lc_lines = ['# JD(UTC) mag err camera']
         for row in detections:
@@ -539,17 +559,16 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
         ul_path = os.path.join(source_dir, UPPERLIMITS_BASENAME)
         _write_text_atomic(ul_path, '\n'.join(ul_lines) + '\n')
 
-        inc_lines = ['# JD(UTC) mag err camera image_basename',
-                     '# detections excluded from lightcurve.dat, the plot'
-                     ' and the AAVSO file: frames of the same visit'
-                     ' disagree in magnitude (clouds?)']
-        for row in inconsistent:
+        inc_lines = ['# JD(UTC) mag err camera reason image_basename',
+                     '# measurements excluded from lightcurve.dat, the plot'
+                     ' and the AAVSO file by the quality checks']
+        for row in excluded:
             err = row.get('err_float')
-            inc_lines.append('{:.5f} {:.4f} {:.4f} {} {}'.format(
+            inc_lines.append('{:.5f} {:.4f} {:.4f} {} {} {}'.format(
                 row['jd_float'], row['mag_float'],
                 err if err is not None and err < 90.0 else 0.001,
-                row['camera'], row['basename']))
-        inc_path = os.path.join(source_dir, INCONSISTENT_BASENAME)
+                row['camera'], row['reason'], row['basename']))
+        inc_path = os.path.join(source_dir, EXCLUDED_MEASUREMENTS_BASENAME)
         _write_text_atomic(inc_path, '\n'.join(inc_lines) + '\n')
 
         cameras = sorted(set(r['camera'] for r in detections + upperlimits))
@@ -579,13 +598,13 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
                 ul_path if upperlimits else None)
 
         _write_source_page(source_dir, entry, rows, detections, upperlimits,
-                           inconsistent, png_basename, cameras, vast_dir)
+                           excluded, png_basename, cameras, vast_dir)
     finally:
         lock_fh.close()
 
 
 def _write_source_page(source_dir, entry, ledger_rows, detections,
-                       upperlimits, inconsistent, png_basename, cameras,
+                       upperlimits, excluded, png_basename, cameras,
                        vast_dir):
     name = entry['name']
     title = 'Monitored source {}'.format(name)
@@ -593,9 +612,9 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
         html_escape(title), ncl._PAGE_CSS)]
     parts.append('<h2>{}</h2>\n'.format(html_escape(title)))
     excluded_note = ''
-    if inconsistent:
-        excluded_note = (' &middot; {} excluded by the visit-consistency'
-                         ' check'.format(len(inconsistent)))
+    if excluded:
+        excluded_note = (' &middot; {} excluded by the quality'
+                         ' checks'.format(len(excluded)))
     parts.append('<p>Position: <span class="code">{} {}</span>'
                  ' &middot; cameras: {} &middot; {} detections,'
                  ' {} upper limits{}</p>\n'.format(
@@ -655,28 +674,33 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                 html_escape(row['err']), html_escape(row['status']),
                 html_escape(row['camera']), html_escape(row['basename'])))
         parts.append('</pre>\n')
-    if inconsistent:
+    if excluded:
         parts.append(
-            '<h3>Detections excluded by the within-visit consistency'
-            ' check</h3>\n'
-            '<p class="secondary">Frames of the same field taken minutes'
-            ' apart disagree by more than the expected measurement scatter;'
-            ' a real star cannot change that fast, so at least one frame of'
-            ' each visit below is corrupted (typically by patchy clouds)'
-            ' and all frames of that visit are excluded from the'
-            ' lightcurve, the plot and the AAVSO file. The excluded rows'
-            ' are kept in <a href="{f}">{f}</a>.</p>\n<pre>\n'.format(
-                f=INCONSISTENT_BASENAME))
-        table_fmt = '{:<16} {:<17} {:<7} {:<8} {:<11} {:<11} {}\n'
+            '<h3>Measurements excluded by the quality checks</h3>\n'
+            '<p class="secondary">These measurements are excluded from the'
+            ' lightcurve, the plot and the AAVSO file.'
+            ' Reason <span class="code">{rv}</span>: frames of the same'
+            ' field taken minutes apart disagree by more than the expected'
+            ' measurement scatter - a real star cannot change that fast, so'
+            ' at least one frame of the visit is corrupted (typically by'
+            ' patchy clouds) and there is no way to tell which one.'
+            ' Reason <span class="code">{rc}</span>: the frame failed the'
+            ' cloud check - its field stars disagree with the reference'
+            ' frame in a way uniform transparency loss cannot explain.'
+            ' The excluded rows are kept in'
+            ' <a href="{f}">{f}</a>.</p>\n<pre>\n'.format(
+                rv=REASON_VISIT, rc=REASON_CLOUDY,
+                f=EXCLUDED_MEASUREMENTS_BASENAME))
+        table_fmt = '{:<16} {:<17} {:<7} {:<8} {:<18} {:<11} {}\n'
         parts.append(table_fmt.format(
-            'Date (UTC)', 'JD(UTC)', 'mag', 'err', 'status', 'camera',
+            'Date (UTC)', 'JD(UTC)', 'mag', 'err', 'reason', 'camera',
             'image'))
-        for row in sorted(inconsistent, key=lambda r: r['jd_float'],
+        for row in sorted(excluded, key=lambda r: r['jd_float'],
                           reverse=True):
             parts.append(table_fmt.format(
                 html_escape(jd_to_atel_date(vast_dir, row['jd'])),
                 html_escape(row['jd']), html_escape(row['mag']),
-                html_escape(row['err']), html_escape(row['status']),
+                html_escape(row['err']), html_escape(row['reason']),
                 html_escape(row['camera']), html_escape(row['basename'])))
         parts.append('</pre>\n')
     parts.append('</body></html>\n')
@@ -707,7 +731,7 @@ def rebuild_central_index(uploads_dir, entries, vast_dir):
         for entry in sorted(activated, key=lambda e: e['name'].lower()):
             source_dir = source_dir_path(uploads_dir, entry['source_id'])
             rows, _ = read_ledger(source_dir)
-            detections, upperlimits = classify_ledger_rows(rows)
+            detections, upperlimits, _excluded = classify_ledger_rows(rows)
             detections, _inconsistent = split_inconsistent_visits(detections)
             all_jd = [r['jd_float'] for r in detections + upperlimits]
             if all_jd:

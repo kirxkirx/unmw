@@ -991,13 +991,23 @@ $MSG"
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
   fi
  fi # grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
- # Source monitoring: ingest the factory's monitoring measurements, on
- # successful runs only (nonempty report and zero exit code). Detached so
- # the transient alerts above are never delayed.
+ # Source monitoring: quality-check and ingest the factory's monitoring
+ # measurements, on successful runs only (nonempty report and zero exit
+ # code). The frame-quality (cloud) check needs the frame and
+ # reference-frame star catalogs that live in the VaST working copy, and
+ # the ingest reads the raw measurements file from the same copy, so BOTH
+ # run synchronously here, before the working copy is deleted further
+ # down (the previous detached ingest raced that deletion). The transient
+ # alerts above are already sent at this point, so the only cost is a
+ # slightly later script completion.
  if [ $SCRIPT_EXIT_CODE -eq 0 ] && [ -n "$MONITORING_POSITIONS_FILE" ] && [ -s transient_report/monitoring_raw_measurements.txt ];then
   MONITORING_RAW_ABS=$(readlink -f transient_report/monitoring_raw_measurements.txt)
-  setsid python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --ingest "$MONITORING_RAW_ABS" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1 < /dev/null &
-  echo "Source monitoring: detached ingest started for $MONITORING_RAW_ABS" | tee -a "$AUTOPROCESS_LOG"
+  # The cloud check rewrites the status of measurements from
+  # cloud-affected frames to 'cloudy'; it always exits 0 and leaves the
+  # raw file untouched on any trouble, so it can never block the ingest
+  python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --frame-quality "$MONITORING_RAW_ABS" "$PWD" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
+  python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --ingest "$MONITORING_RAW_ABS" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
+  echo "Source monitoring: ingest completed for $MONITORING_RAW_ABS" | tee -a "$AUTOPROCESS_LOG"
  fi
 fi # if [ ! -f transient_report/index.html ];then
 ##
