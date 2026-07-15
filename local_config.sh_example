@@ -104,3 +104,22 @@ export UNMW_LOCAL_CONFIG_SOURCED=yes
 # When unset, the code is taken from AAVSO_previously_used_header.txt in the
 # VaST reference copy, falling back to the XXX placeholder.
 #export AAVSO_OBSCODE="SKA"
+
+# Parallel worker cap for the plate-solve/catalog pass of the monitoring
+# backfill/rescan modes (monitoring_update.py --reconcile/--rescan-*).
+# The same-name environment variable, when set, overrides this value.
+# Falls back to 4 when neither is set. Mind the RAM use (each worker
+# SExtracts a full frame) and avoid wide rescans while the nightly
+# processing is running.
+export MONITORING_RESCAN_WORKERS=12
+
+# Magnitude calibration catalog for the forced photometry tools (the
+# coordinate/archival forced photometry pages and the monitoring
+# backfill/rescan measurements; VaST util/forced_photometry.sh reads this).
+# Set to "tycho2" on deployments whose transient pipeline calibrates with
+# PHOTOMETRIC_CALIBRATION=TYCHO2_V (wide-field NMW telephoto cameras): the
+# forced photometry then uses the same photometric system as the nightly
+# lightcurves and the local Tycho-2 catalog instead of a VizieR APASS query
+# for every image. Leave unset (= "apass") for narrow-field cameras whose
+# pipeline calibrates with APASS.
+export FORCED_PHOTOMETRY_CALIBRATION_METHOD=tycho2

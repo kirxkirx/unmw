@@ -49,14 +49,35 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 import nmw_coord_lib as ncl
 import nmw_monitoring_lib as nml
 
 
 def log(message):
-    sys.stderr.write('monitoring: {}\n'.format(message))
+    sys.stderr.write('monitoring: {} {}\n'.format(
+        time.strftime('%Y-%m-%d %H:%M:%S'), message))
     sys.stderr.flush()
+
+
+def _rescan_worker_cap(cfg=None):
+    """Parallel worker cap for the plate-solve/catalog pass of the manual
+    backfill/rescan modes. Resolution order: the MONITORING_RESCAN_WORKERS
+    environment variable (explicit per-run override), then the same-name
+    local_config.sh setting, then 4. Keep an eye on RAM (each worker
+    SExtracts a full frame) and on the transient pipeline: autoprocess
+    defers uploads when the system load is high, so a wide reconcile at
+    night delays transient processing."""
+    for raw in (os.environ.get('MONITORING_RESCAN_WORKERS'),
+                (cfg or {}).get('MONITORING_RESCAN_WORKERS')):
+        try:
+            cap = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if cap >= 1:
+            return cap
+    return 4
 
 
 def load_context():
@@ -66,7 +87,8 @@ def load_context():
     os.chdir(script_dir)
     cfg = ncl.read_config_vars(
         'IMAGE_DATA_ROOT', 'VAST_REFERENCE_COPY', 'IMAGE_ARCHIVE_DIR',
-        'REFERENCE_IMAGES', 'URL_OF_DATA_PROCESSING_ROOT', 'AAVSO_OBSCODE')
+        'REFERENCE_IMAGES', 'URL_OF_DATA_PROCESSING_ROOT', 'AAVSO_OBSCODE',
+        'MONITORING_RESCAN_WORKERS')
     uploads_dir = (cfg.get('IMAGE_DATA_ROOT') or '').strip() or 'uploads'
     local_config_path = os.path.join(script_dir, 'local_config.sh')
     return script_dir, cfg, uploads_dir, local_config_path
@@ -305,7 +327,8 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
     n_appended = 0
     try:
         skip_log = os.path.join(source_dir, 'measurement_skipped.log')
-        workers = min(len(todo) or 1, os.cpu_count() or 4, 4)
+        workers = min(len(todo) or 1, os.cpu_count() or 4,
+                      _rescan_worker_cap(cfg))
         log('{}: plate-solve/catalog pass with {} worker(s)'.format(
             source_id, workers))
         _, _, _, compute_path_map, _ = _phase1_parallel_solve_plate(
