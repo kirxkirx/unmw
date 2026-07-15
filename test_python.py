@@ -689,5 +689,72 @@ echo "$FWHM_PIX"
             os.unlink(temp_path)
 
 
+# ---------------------------------------------------------------------------
+# Monitoring within-visit consistency check (nmw_monitoring_lib)
+# ---------------------------------------------------------------------------
+
+import nmw_monitoring_lib as nml
+
+
+def _det(basename, jd, mag, err=0.01, camera='CAM1'):
+    return {'basename': basename, 'jd': str(jd), 'mag': str(mag),
+            'err': str(err), 'status': 'detection', 'camera': camera,
+            'jd_float': jd, 'mag_float': mag, 'err_float': err}
+
+
+def test_visit_consistency_clean_pair_kept():
+    rows = [_det('a.fits', 2461000.500, 9.70),
+            _det('b.fits', 2461000.501, 9.72)]
+    kept, flagged = nml.split_inconsistent_visits(rows)
+    assert len(kept) == 2 and not flagged
+
+
+def test_visit_consistency_discrepant_pair_flagged():
+    rows = [_det('a.fits', 2461000.500, 9.66),
+            _det('b.fits', 2461000.501, 10.31)]
+    kept, flagged = nml.split_inconsistent_visits(rows)
+    assert not kept and len(flagged) == 2
+
+
+def test_visit_consistency_separate_visits_not_compared():
+    # same camera, 0.65 mag apart but 1 hour apart: separate visits
+    rows = [_det('a.fits', 2461000.500, 9.66),
+            _det('b.fits', 2461000.542, 10.31)]
+    kept, flagged = nml.split_inconsistent_visits(rows)
+    assert len(kept) == 2 and not flagged
+
+
+def test_visit_consistency_cameras_independent():
+    # two cameras at the same time never form one visit
+    rows = [_det('a.fits', 2461000.500, 9.66, camera='CAM1'),
+            _det('b.fits', 2461000.501, 10.31, camera='CAM2')]
+    kept, flagged = nml.split_inconsistent_visits(rows)
+    assert len(kept) == 2 and not flagged
+
+
+def test_visit_consistency_large_errors_tolerated():
+    # near the detection limit the spread must beat ERR_SCALE * err
+    rows = [_det('a.fits', 2461000.500, 14.1, err=0.2),
+            _det('b.fits', 2461000.501, 14.6, err=0.2)]
+    kept, flagged = nml.split_inconsistent_visits(rows)
+    assert len(kept) == 2 and not flagged
+
+
+def test_visit_consistency_three_frame_visit_chained():
+    # gap chaining: 3 frames each 5 min apart form one visit; one outlier
+    # condemns all three
+    rows = [_det('a.fits', 2461000.500, 9.70),
+            _det('b.fits', 2461000.5035, 9.71),
+            _det('c.fits', 2461000.507, 10.40)]
+    kept, flagged = nml.split_inconsistent_visits(rows)
+    assert not kept and len(flagged) == 3
+
+
+def test_visit_consistency_singleton_never_flagged():
+    rows = [_det('a.fits', 2461000.500, 12.0)]
+    kept, flagged = nml.split_inconsistent_visits(rows)
+    assert len(kept) == 1 and not flagged
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

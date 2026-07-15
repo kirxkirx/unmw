@@ -38,6 +38,22 @@ GLOBAL_LOCK_BASENAME = 'monitoring_global.lock'
 EXCLUDED_STATUSES = ('edge', 'saturated', 'bad_region', 'nan_pixel',
                      'calib_fail', 'fail', 'tool_fail')
 
+# Within-visit consistency check (monitoring products only). The transient
+# pipeline takes its second-epoch frames of one field minutes apart, so
+# consecutive detections from the same camera closer in time than
+# VISIT_GROUP_MAX_GAP_DAYS form one visit. When the magnitudes within a
+# visit disagree by more than max(VISIT_CONSISTENCY_MAG_TOLERANCE,
+# VISIT_CONSISTENCY_ERR_SCALE * the largest per-point error of the visit),
+# a real star cannot have done that - at least one frame is corrupted
+# (typically by patchy clouds) and there is no way to tell which one, so
+# every detection of that visit is excluded from the published products
+# (lightcurve.dat, the plot and the AAVSO file) and listed in
+# INCONSISTENT_BASENAME instead.
+VISIT_GROUP_MAX_GAP_DAYS = 0.007
+VISIT_CONSISTENCY_MAG_TOLERANCE = 0.3
+VISIT_CONSISTENCY_ERR_SCALE = 4.0
+INCONSISTENT_BASENAME = 'inconsistent_visits.dat'
+
 # Name and coordinate validation for monitoring_list.txt lines
 NAME_CHARSET_RE = re.compile(r'^[A-Za-z0-9+.()= _-]+$')
 SOURCE_ID_RE = re.compile(r'^[A-Za-z0-9+.()=_-]+$')
@@ -311,6 +327,42 @@ def classify_ledger_rows(rows):
     return detections, upperlimits
 
 
+def split_inconsistent_visits(detections):
+    """Partition JD-sorted detections into (consistent, inconsistent) using
+    the within-visit consistency check described next to
+    VISIT_GROUP_MAX_GAP_DAYS above. Both returned lists stay JD-sorted.
+    Rows are identified by their image basename (unique within a ledger)."""
+    by_camera = {}
+    for row in detections:
+        by_camera.setdefault(row['camera'], []).append(row)
+    bad_basenames = set()
+    for camera_rows in by_camera.values():
+        visit = []
+        for row in camera_rows + [None]:
+            if visit and (row is None or
+                          row['jd_float'] - visit[-1]['jd_float'] >
+                          VISIT_GROUP_MAX_GAP_DAYS):
+                if len(visit) > 1:
+                    mags = [v['mag_float'] for v in visit]
+                    errs = [v['err_float']
+                            if v['err_float'] is not None
+                            and v['err_float'] < 90.0 else 0.0
+                            for v in visit]
+                    tolerance = max(VISIT_CONSISTENCY_MAG_TOLERANCE,
+                                    VISIT_CONSISTENCY_ERR_SCALE * max(errs))
+                    if max(mags) - min(mags) > tolerance:
+                        for v in visit:
+                            bad_basenames.add(v['basename'])
+                visit = []
+            if row is not None:
+                visit.append(row)
+    consistent = [r for r in detections
+                  if r['basename'] not in bad_basenames]
+    inconsistent = [r for r in detections
+                    if r['basename'] in bad_basenames]
+    return consistent, inconsistent
+
+
 # ---------- camera descriptions and AAVSO output ----------
 
 def parse_factory_camera_comments(factory_text):
@@ -468,6 +520,7 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
     try:
         rows, _ = read_ledger(source_dir)
         detections, upperlimits = classify_ledger_rows(rows)
+        detections, inconsistent = split_inconsistent_visits(detections)
 
         lc_lines = ['# JD(UTC) mag err camera']
         for row in detections:
@@ -485,6 +538,19 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
                 row['jd_float'], row['mag_float'], row['camera']))
         ul_path = os.path.join(source_dir, UPPERLIMITS_BASENAME)
         _write_text_atomic(ul_path, '\n'.join(ul_lines) + '\n')
+
+        inc_lines = ['# JD(UTC) mag err camera image_basename',
+                     '# detections excluded from lightcurve.dat, the plot'
+                     ' and the AAVSO file: frames of the same visit'
+                     ' disagree in magnitude (clouds?)']
+        for row in inconsistent:
+            err = row.get('err_float')
+            inc_lines.append('{:.5f} {:.4f} {:.4f} {} {}'.format(
+                row['jd_float'], row['mag_float'],
+                err if err is not None and err < 90.0 else 0.001,
+                row['camera'], row['basename']))
+        inc_path = os.path.join(source_dir, INCONSISTENT_BASENAME)
+        _write_text_atomic(inc_path, '\n'.join(inc_lines) + '\n')
 
         cameras = sorted(set(r['camera'] for r in detections + upperlimits))
         camera_comments = parse_factory_camera_comments(factory_text) \
@@ -513,24 +579,29 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
                 ul_path if upperlimits else None)
 
         _write_source_page(source_dir, entry, rows, detections, upperlimits,
-                           png_basename, cameras, vast_dir)
+                           inconsistent, png_basename, cameras, vast_dir)
     finally:
         lock_fh.close()
 
 
 def _write_source_page(source_dir, entry, ledger_rows, detections,
-                       upperlimits, png_basename, cameras, vast_dir):
+                       upperlimits, inconsistent, png_basename, cameras,
+                       vast_dir):
     name = entry['name']
     title = 'Monitored source {}'.format(name)
     parts = ['<html><head><title>{}</title>\n{}\n</head><body>\n'.format(
         html_escape(title), ncl._PAGE_CSS)]
     parts.append('<h2>{}</h2>\n'.format(html_escape(title)))
+    excluded_note = ''
+    if inconsistent:
+        excluded_note = (' &middot; {} excluded by the visit-consistency'
+                         ' check'.format(len(inconsistent)))
     parts.append('<p>Position: <span class="code">{} {}</span>'
                  ' &middot; cameras: {} &middot; {} detections,'
-                 ' {} upper limits</p>\n'.format(
+                 ' {} upper limits{}</p>\n'.format(
                      html_escape(entry['ra']), html_escape(entry['dec']),
                      html_escape(' '.join(cameras) or 'none yet'),
-                     len(detections), len(upperlimits)))
+                     len(detections), len(upperlimits), excluded_note))
     if detections or upperlimits:
         all_jd = [r['jd_float'] for r in detections + upperlimits]
         jd_min = min(all_jd)
@@ -584,6 +655,30 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                 html_escape(row['err']), html_escape(row['status']),
                 html_escape(row['camera']), html_escape(row['basename'])))
         parts.append('</pre>\n')
+    if inconsistent:
+        parts.append(
+            '<h3>Detections excluded by the within-visit consistency'
+            ' check</h3>\n'
+            '<p class="secondary">Frames of the same field taken minutes'
+            ' apart disagree by more than the expected measurement scatter;'
+            ' a real star cannot change that fast, so at least one frame of'
+            ' each visit below is corrupted (typically by patchy clouds)'
+            ' and all frames of that visit are excluded from the'
+            ' lightcurve, the plot and the AAVSO file. The excluded rows'
+            ' are kept in <a href="{f}">{f}</a>.</p>\n<pre>\n'.format(
+                f=INCONSISTENT_BASENAME))
+        table_fmt = '{:<16} {:<17} {:<7} {:<8} {:<11} {:<11} {}\n'
+        parts.append(table_fmt.format(
+            'Date (UTC)', 'JD(UTC)', 'mag', 'err', 'status', 'camera',
+            'image'))
+        for row in sorted(inconsistent, key=lambda r: r['jd_float'],
+                          reverse=True):
+            parts.append(table_fmt.format(
+                html_escape(jd_to_atel_date(vast_dir, row['jd'])),
+                html_escape(row['jd']), html_escape(row['mag']),
+                html_escape(row['err']), html_escape(row['status']),
+                html_escape(row['camera']), html_escape(row['basename'])))
+        parts.append('</pre>\n')
     parts.append('</body></html>\n')
     _write_text_atomic(os.path.join(source_dir, 'index.html'), ''.join(parts))
 
@@ -613,6 +708,7 @@ def rebuild_central_index(uploads_dir, entries, vast_dir):
             source_dir = source_dir_path(uploads_dir, entry['source_id'])
             rows, _ = read_ledger(source_dir)
             detections, upperlimits = classify_ledger_rows(rows)
+            detections, _inconsistent = split_inconsistent_visits(detections)
             all_jd = [r['jd_float'] for r in detections + upperlimits]
             if all_jd:
                 last_jd_num = max(all_jd)
