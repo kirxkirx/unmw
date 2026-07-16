@@ -39,6 +39,22 @@ Modes (see source_monitoring_design.md):
       anything. Run this to apply changes to the page/plot templates to
       already-generated pages (--reconcile only re-renders sources that
       gained new measurements).
+  --exclude-measurement <image_basename> [--source <source_id>]
+      Manually exclude the measurement(s) coming from one image: flip the
+      matching ledger row to the 'manual' status so the point moves from
+      the published lightcurve/plot/AAVSO file to the "excluded by the
+      quality checks" table (reason manual_exclusion). By default every
+      activated source whose ledger contains the image is updated (a bad
+      frame is bad for all sources on it); --source restricts to one.
+      The image is matched by basename with the trailing .fz ignored.
+      The ledger row keeps the original magnitude, so the exclusion is
+      reversible; the row also keeps deduplicating rescans, so the image
+      is never re-measured. Note that a full registry wipe + reconcile
+      re-measures everything and forgets manual exclusions.
+  --restore-measurement <image_basename> [--source <source_id>]
+      Undo --exclude-measurement: manually excluded rows go back to
+      'detection' (or 'upperlimit' for fainter-than rows) and the point is
+      published again on the rebuilt products.
 
 All manual modes refuse to run in a CGI environment, take the global
 monitoring lock and EXIT (never queue) when another instance holds it.
@@ -470,6 +486,66 @@ def mode_rebuild_pages():
         lock_fh.close()
 
 
+def mode_flag_measurement(image_basename, source_filter, restore):
+    """Manually exclude (or restore) the measurement(s) of one image in the
+    per-source ledgers and rebuild the affected products. See the module
+    docstring for the CLI semantics."""
+    action = 'restore' if restore else 'exclude'
+    script_dir, cfg, uploads_dir, local_config_path = load_context()
+    if not os.path.isdir(nml.monitoring_root(uploads_dir)):
+        log('monitoring is not deployed on this machine (no {} directory)'
+            .format(nml.monitoring_root(uploads_dir)))
+        return 1
+    lock_fh = nml.acquire_global_lock(uploads_dir)
+    if lock_fh is None:
+        log('another monitoring reconcile/rescan is already running - '
+            'exiting (NOT queuing)')
+        return 1
+    try:
+        _, entries = list_entries_or_exit()
+        if not entries:
+            log('nothing to do: the monitoring list is missing or empty')
+            return 1
+        targets = []
+        for entry in entries:
+            if source_filter and entry['source_id'] != source_filter:
+                continue
+            if os.path.isdir(nml.source_dir_path(uploads_dir,
+                                                 entry['source_id'])):
+                targets.append(entry)
+        if source_filter and not targets:
+            log('{}-measurement: source {} is not in monitoring_list.txt or '
+                'not activated on this machine'.format(action, source_filter))
+            return 1
+        factory_text = read_factory_text(cfg)
+        vast_dir = (cfg.get('VAST_REFERENCE_COPY') or '').strip()
+        n_total = 0
+        for entry in targets:
+            n = nml.rewrite_measurement_status(
+                uploads_dir, entry['source_id'], image_basename,
+                restore=restore)
+            if n:
+                log('{}-measurement: {}: {} ledger row(s) updated for '
+                    '{}'.format(action, entry['source_id'], n,
+                                image_basename))
+                nml.rebuild_source_products(uploads_dir, entry, cfg,
+                                            factory_text)
+                n_total += n
+        if n_total:
+            nml.rebuild_central_index(uploads_dir, entries, vast_dir)
+            log('{}-measurement: done, {} row(s) updated'.format(
+                action, n_total))
+            return 0
+        log('{}-measurement: no matching ledger row for {} in {} source(s)'
+            ' - nothing changed (check the image basename{})'.format(
+                action, image_basename, len(targets),
+                '' if restore else '; rows already excluded or with a'
+                ' non-detection status are left as they are'))
+        return 1
+    finally:
+        lock_fh.close()
+
+
 def _run_manual_mode(mode, source_selector):
     script_dir, cfg, uploads_dir, local_config_path = load_context()
     list_path, entries = list_entries_or_exit()
@@ -582,6 +658,18 @@ def main(argv):
         return mode_rescan('rescan-archive', argv[2])
     if len(argv) >= 2 and argv[1] == '--rebuild-pages':
         return mode_rebuild_pages()
+    if len(argv) >= 3 and argv[1] in ('--exclude-measurement',
+                                      '--restore-measurement'):
+        source_filter = None
+        if len(argv) >= 5 and argv[3] == '--source':
+            source_filter = argv[4]
+        elif len(argv) >= 4:
+            sys.stderr.write('unrecognized extra arguments for {} (expected'
+                             ' --source <source_id>)\n'.format(argv[1]))
+            return 1
+        return mode_flag_measurement(
+            argv[2], source_filter,
+            restore=(argv[1] == '--restore-measurement'))
     sys.stderr.write(__doc__)
     return 1
 

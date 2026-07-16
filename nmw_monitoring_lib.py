@@ -60,6 +60,10 @@ VISIT_CONSISTENCY_ERR_SCALE = 4.0
 EXCLUDED_MEASUREMENTS_BASENAME = 'excluded_measurements.dat'
 REASON_VISIT = 'visit_inconsistent'
 REASON_CLOUDY = 'cloudy_frame'
+# Ledger status token and displayed reason of measurements excluded by hand
+# (monitoring_update.py --exclude-measurement)
+MANUAL_STATUS = 'manual'
+REASON_MANUAL = 'manual_exclusion'
 
 # Name and coordinate validation for monitoring_list.txt lines
 NAME_CHARSET_RE = re.compile(r'^[A-Za-z0-9+.()= _-]+$')
@@ -301,6 +305,60 @@ def append_ledger_rows(uploads_dir, source_id, new_rows):
         lock_fh.close()
 
 
+def rewrite_measurement_status(uploads_dir, source_id, image_basename,
+                               restore=False):
+    """Flip the status of the ledger row(s) of one source that match
+    image_basename (compared via ledger_key, so a trailing .fz does not
+    matter), rewriting the ledger atomically under the per-source lock -
+    the same lock append_ledger_rows takes, so a concurrent autoprocess
+    ingest simply waits the few milliseconds this takes.
+
+    restore=False: 'detection'/'upperlimit' rows become MANUAL_STATUS (the
+    manual quality exclusion; the published products drop the point on the
+    next rebuild). restore=True: MANUAL_STATUS rows go back to 'upperlimit'
+    when their magnitude carries the '<' prefix and to 'detection'
+    otherwise (the original magnitude and error are still in the row).
+
+    Returns the number of rows changed (0 when the image is not in this
+    source's ledger or no row was in a flippable state)."""
+    source_dir = source_dir_path(uploads_dir, source_id)
+    ledger_path = os.path.join(source_dir, LEDGER_BASENAME)
+    if not os.path.isfile(ledger_path):
+        return 0
+    key = ledger_key(os.path.basename(image_basename))
+    lock_fh = acquire_source_lock(uploads_dir, source_id)
+    try:
+        with open(ledger_path) as fh:
+            lines = fh.read().splitlines()
+        changed = 0
+        out_lines = []
+        for line in lines:
+            parts = line.split()
+            if (len(parts) >= 6 and not line.lstrip().startswith('#')
+                    and ledger_key(parts[0]) == key):
+                status = parts[4]
+                if not restore and status in ('detection', 'upperlimit'):
+                    parts[4] = MANUAL_STATUS
+                    out_lines.append(' '.join(parts))
+                    changed += 1
+                    continue
+                if restore and status == MANUAL_STATUS:
+                    parts[4] = ('upperlimit' if parts[2].startswith('<')
+                                else 'detection')
+                    out_lines.append(' '.join(parts))
+                    changed += 1
+                    continue
+            out_lines.append(line)
+        if changed:
+            tmp = '{}.tmp{}'.format(ledger_path, os.getpid())
+            with open(tmp, 'w') as fh:
+                fh.write('\n'.join(out_lines) + '\n')
+            os.replace(tmp, ledger_path)
+        return changed
+    finally:
+        lock_fh.close()
+
+
 def _float_or_none(text):
     try:
         return float(text)
@@ -335,6 +393,10 @@ def classify_ledger_rows(rows):
         elif row['status'] == 'cloudy':
             parsed['err_float'] = _float_or_none(row['err'])
             parsed['reason'] = REASON_CLOUDY
+            quality_excluded.append(parsed)
+        elif row['status'] == MANUAL_STATUS:
+            parsed['err_float'] = _float_or_none(row['err'])
+            parsed['reason'] = REASON_MANUAL
             quality_excluded.append(parsed)
     detections.sort(key=lambda r: r['jd_float'])
     upperlimits.sort(key=lambda r: r['jd_float'])
@@ -727,7 +789,7 @@ def rebuild_central_index(uploads_dir, entries, vast_dir):
         parts.append('<table border="1" cellpadding="4">\n'
                      '<tr><th>Source</th><th>RA</th><th>Dec</th>'
                      '<th>Detections</th><th>Upper limits</th>'
-                     '<th>Last date (UTC, ATel)</th><th>Last JD</th></tr>\n')
+                     '<th>Last date (UTC)</th><th>Last JD</th></tr>\n')
         for entry in sorted(activated, key=lambda e: e['name'].lower()):
             source_dir = source_dir_path(uploads_dir, entry['source_id'])
             rows, _ = read_ledger(source_dir)
@@ -761,6 +823,13 @@ def rebuild_central_index(uploads_dir, entries, vast_dir):
                      'monitoring_update.py --reconcile: {}</p>\n'.format(
                          len(pending),
                          html_escape(', '.join(e['name'] for e in pending))))
+    parts.append(
+        '<p class="secondary">Want your favorite sources added to the'
+        ' monitoring list? E-mail'
+        ' <a href="mailto:kirx@kirx.net">kirx@kirx.net</a> or open a pull'
+        ' request on GitHub updating <a href="https://github.com/kirxkirx/'
+        'nmw_calibration/blob/main/monitoring_list.txt">'
+        'monitoring_list.txt</a>.</p>\n')
     parts.append('</body></html>\n')
     _write_text_atomic(os.path.join(root, 'index.html'), ''.join(parts))
 

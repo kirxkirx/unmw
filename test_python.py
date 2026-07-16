@@ -835,5 +835,58 @@ def test_classify_routes_cloudy_rows():
     assert excl[0]['reason'] == nml.REASON_CLOUDY
 
 
+def test_classify_routes_manual_rows():
+    rows = [
+        {'basename': 'a.fits', 'jd': '2461000.5', 'mag': '9.7',
+         'err': '0.01', 'status': 'manual', 'camera': 'C1'},
+        {'basename': 'b.fits', 'jd': '2461000.6', 'mag': '<13.0',
+         'err': 'na', 'status': 'manual', 'camera': 'C1'},
+    ]
+    det, ul, excl = nml.classify_ledger_rows(rows)
+    assert not det and not ul and len(excl) == 2
+    assert all(r['reason'] == nml.REASON_MANUAL for r in excl)
+
+
+def test_rewrite_measurement_status_roundtrip():
+    import tempfile, shutil
+    uploads = tempfile.mkdtemp()
+    try:
+        sdir = nml.source_dir_path(uploads, 'SRC')
+        os.makedirs(sdir)
+        ledger = os.path.join(sdir, nml.LEDGER_BASENAME)
+        with open(ledger, 'w') as fh:
+            fh.write('# image_basename JD mag err status camera\n'
+                     'good.fits 2461000.5 9.70 0.01 detection C1\n'
+                     'bad.fits 2461000.6 10.40 0.02 detection C1\n'
+                     'faint.fits 2461000.7 <13.0 na upperlimit C1\n')
+        # exclude with a .fz-suffixed name: must match via ledger_key
+        assert nml.rewrite_measurement_status(uploads, 'SRC',
+                                              'bad.fits.fz') == 1
+        lines = open(ledger).read().splitlines()
+        assert lines[0].startswith('#')
+        assert 'good.fits 2461000.5 9.70 0.01 detection C1' in lines[1]
+        assert 'bad.fits 2461000.6 10.40 0.02 manual C1' in lines[2]
+        # excluding again is a no-op
+        assert nml.rewrite_measurement_status(uploads, 'SRC',
+                                              'bad.fits') == 0
+        # unknown image is a no-op
+        assert nml.rewrite_measurement_status(uploads, 'SRC',
+                                              'nosuch.fits') == 0
+        # restore flips back to detection
+        assert nml.rewrite_measurement_status(uploads, 'SRC', 'bad.fits',
+                                              restore=True) == 1
+        assert 'bad.fits 2461000.6 10.40 0.02 detection C1' in \
+            open(ledger).read()
+        # upper limit round trip: manual and back to upperlimit
+        assert nml.rewrite_measurement_status(uploads, 'SRC',
+                                              'faint.fits') == 1
+        assert nml.rewrite_measurement_status(uploads, 'SRC', 'faint.fits',
+                                              restore=True) == 1
+        assert 'faint.fits 2461000.7 <13.0 na upperlimit C1' in \
+            open(ledger).read()
+    finally:
+        shutil.rmtree(uploads, ignore_errors=True)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
