@@ -3,7 +3,8 @@
 CGI: forced-photometry lightcurve at a sky position over a recent time window.
 
 The user enters one sky position; the page finds every plate-solved
-(wcs_ prefix) image in the uploads/ directory (the most recent days by img_<YYYY-MM-DD> dir date; the day window and the maximum image count are both user-selectable on the input form) whose
+(wcs_ prefix) image in the uploads/ directory and, when IMAGE_QUARANTINE_DIR
+is configured, in the quarantine directory (the most recent days by img_<YYYY-MM-DD> dir date; the day window and the maximum image count are both user-selectable on the input form) whose
 field covers that position, runs the C forced-photometry implementation on each
 (util/forced_photometry.sh with FORCED_PHOTOMETRY_ONLY_C=yes), and presents the
 results -- newest first -- as an HTML table (with a full-frame preview and a
@@ -27,6 +28,10 @@ Configuration (read from local_config.sh next to this script):
   URL_OF_DATA_PROCESSING_ROOT     URL prefix for the served uploads/ directory
   COORD_SEARCH_THUMBNAIL_PIXELS   in-page thumbnail size (optional)
   COORD_FORCED_PHOT_ZOOMIN_PIXELS zoom-in half-width in source pixels (optional)
+  IMAGE_QUARANTINE_DIR            optional second uploads-style img_* tree
+                                  (offloaded, not yet archived fields); its
+                                  images are measured too but carry no FITS
+                                  download link (the tree is not web-served)
 
 Per-request output directory uploads/forced_phot_<pid><rand>/ is left in place;
 external housekeeping prunes uploads/forced_phot_* (this CGI prunes nothing).
@@ -267,7 +272,7 @@ def main():
         cfg = read_config_vars(
             'REFERENCE_IMAGES', 'VAST_REFERENCE_COPY',
             'URL_OF_DATA_PROCESSING_ROOT', 'COORD_SEARCH_THUMBNAIL_PIXELS',
-            'COORD_FORCED_PHOT_ZOOMIN_PIXELS')
+            'COORD_FORCED_PHOT_ZOOMIN_PIXELS', 'IMAGE_QUARANTINE_DIR')
         ref_dir = cfg['REFERENCE_IMAGES'].strip()
         vast_dir = cfg['VAST_REFERENCE_COPY'].strip()
         url_prefix = cfg['URL_OF_DATA_PROCESSING_ROOT'].strip().rstrip('/')
@@ -413,6 +418,36 @@ def main():
                 html_escape(search_again_url)))
             print("</body></html>")
             return
+        # Also consider the optional quarantine directory: an uploads-style
+        # tree (img_* subdirectories) holding processed fields moved off
+        # the SSD workdir but not yet quality-controlled into the archive.
+        # Same date-window and field filters as the workdir; images that
+        # are (still) present in the workdir - mid-migration duplicates -
+        # are skipped. Quarantine rows get no FITS download link (the tree
+        # is not web-served); fits_url() returns '' for them by itself.
+        quarantine_dir = (cfg.get('IMAGE_QUARANTINE_DIR') or '').strip()
+        if quarantine_dir and os.path.isdir(quarantine_dir):
+            try:
+                quarantine_images = list_recent_field_images(
+                    quarantine_dir, covering_fields, window_days)
+            except OSError:
+                quarantine_images = []
+
+            def _dedup_key(path):
+                base = os.path.basename(path)
+                return base[:-3] if base.endswith('.fz') else base
+            seen_basenames = set(_dedup_key(p) for p in images)
+            n_from_quarantine = 0
+            for path in quarantine_images:
+                if _dedup_key(path) in seen_basenames:
+                    continue
+                seen_basenames.add(_dedup_key(path))
+                images.append(path)
+                n_from_quarantine += 1
+            if n_from_quarantine:
+                print("<p class='secondary'>{} image(s) come from the "
+                      "quarantine directory (no FITS download links for "
+                      "these).</p>".format(n_from_quarantine), flush=True)
         # Stream rows in (approximate) newest-first order without waiting
         # for all images to be measured. The timestamp embedded in the
         # image filename closely tracks JD and is known without opening

@@ -26,9 +26,12 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # same layout as IMAGE_DATA_ROOT) on a big disk holding processed fields that
 # were moved off the SSD workdir but have not yet been quality-controlled for
 # ingestion into IMAGE_ARCHIVE_DIR. The source monitoring backfill/rescan
-# (monitoring_update.py --reconcile / --rescan-recent) also enumerates this
-# tree so lightcurves stay complete after workdir offloading. Skipped
-# silently when unset; skipped with a log note when the directory is missing.
+# (monitoring_update.py --reconcile / --rescan-recent) and the coordinate
+# forced-photometry page (coord_forced_photometry.py) also enumerate this
+# tree so lightcurves stay complete after workdir offloading (quarantine
+# rows on the forced-photometry page carry no FITS download link - the tree
+# is not web-served). Skipped silently when unset; the monitoring rescan
+# logs a note when the configured directory is missing.
 #export IMAGE_QUARANTINE_DIR="/mnt/nmwttu1/NMW-TexasTech_quarantine"
 
 # Archival photometry queue protection (defaults shown):
