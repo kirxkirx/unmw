@@ -888,5 +888,35 @@ def test_rewrite_measurement_status_roundtrip():
         shutil.rmtree(uploads, ignore_errors=True)
 
 
+def test_quarantine_enumeration():
+    import tempfile, shutil
+    import monitoring_update as mu
+    fields = {'CrB-02-Q1b1x1'}
+    # unset -> silent skip
+    assert mu.enumerate_quarantine_images({}, fields) == []
+    # configured but missing -> skip
+    assert mu.enumerate_quarantine_images(
+        {'IMAGE_QUARANTINE_DIR': '/nonexistent/quarantine'}, fields) == []
+    # populated quarantine: only wcs_* images of covering fields are picked
+    q = tempfile.mkdtemp()
+    try:
+        d = os.path.join(q, 'img_2026-07-01_CI_CrB-02-Q1b1x1_x')
+        os.makedirs(d)
+        good = 'wcs_fd_CrB-02-Q1b1x1_2026-07-01_01-00-00_20.00sec_' \
+               '5.00C_LIGHT_0001.fits'
+        for name in (good,
+                     'fd_CrB-02-Q1b1x1_2026-07-01_01-00-00_20.00sec_'
+                     '5.00C_LIGHT_0001.fits',
+                     'wcs_fd_Vul-09-Q1b1x1_2026-07-01_01-05-00_20.00sec_'
+                     '5.00C_LIGHT_0002.fits'):
+            open(os.path.join(d, name), 'w').close()
+        os.makedirs(os.path.join(q, 'results_not_an_img_dir'))
+        found = mu.enumerate_quarantine_images(
+            {'IMAGE_QUARANTINE_DIR': q}, fields)
+        assert [os.path.basename(p) for p in found] == [good]
+    finally:
+        shutil.rmtree(q, ignore_errors=True)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

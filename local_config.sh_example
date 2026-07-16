@@ -22,6 +22,15 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # large archive images are never copied into the results directory).
 #export IMAGE_ARCHIVE_URL="http://example.com/NMW-TexasTech_archive"
 
+# Optional quarantine directory: an uploads-style tree (img_* subdirectories,
+# same layout as IMAGE_DATA_ROOT) on a big disk holding processed fields that
+# were moved off the SSD workdir but have not yet been quality-controlled for
+# ingestion into IMAGE_ARCHIVE_DIR. The source monitoring backfill/rescan
+# (monitoring_update.py --reconcile / --rescan-recent) also enumerates this
+# tree so lightcurves stay complete after workdir offloading. Skipped
+# silently when unset; skipped with a log note when the directory is missing.
+#export IMAGE_QUARANTINE_DIR="/mnt/nmwttu1/NMW-TexasTech_quarantine"
+
 # Archival photometry queue protection (defaults shown):
 # maximum queued+running jobs, maximum queued+running jobs per client IP,
 # and how many jobs may run at the same time (worker slots).

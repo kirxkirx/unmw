@@ -103,7 +103,8 @@ def load_context():
     os.chdir(script_dir)
     cfg = ncl.read_config_vars(
         'IMAGE_DATA_ROOT', 'VAST_REFERENCE_COPY', 'IMAGE_ARCHIVE_DIR',
-        'REFERENCE_IMAGES', 'URL_OF_DATA_PROCESSING_ROOT', 'AAVSO_OBSCODE',
+        'IMAGE_QUARANTINE_DIR', 'REFERENCE_IMAGES',
+        'URL_OF_DATA_PROCESSING_ROOT', 'AAVSO_OBSCODE',
         'MONITORING_RESCAN_WORKERS')
     uploads_dir = (cfg.get('IMAGE_DATA_ROOT') or '').strip() or 'uploads'
     local_config_path = os.path.join(script_dir, 'local_config.sh')
@@ -441,6 +442,29 @@ def enumerate_archive_images(cfg, covering_fields):
     return images
 
 
+def enumerate_quarantine_images(cfg, covering_fields):
+    """Images of the covering fields in the quarantine directory: a second
+    uploads-style tree (img_* subdirectories) on a big disk that holds
+    processed fields moved off the SSD workdir but not yet quality-controlled
+    into the long-term archive. Optional: silently skipped when
+    IMAGE_QUARANTINE_DIR is not configured, skipped with a note when the
+    configured directory does not exist. The ledger basename dedup makes the
+    overlap with the workdir and archive populations harmless."""
+    quarantine_dir = (cfg.get('IMAGE_QUARANTINE_DIR') or '').strip()
+    if not quarantine_dir:
+        return []
+    if not os.path.isdir(quarantine_dir):
+        log('quarantine pass skipped: IMAGE_QUARANTINE_DIR={} does not '
+            'exist'.format(quarantine_dir))
+        return []
+    images = nml.list_all_recent_field_images(quarantine_dir,
+                                              covering_fields)
+    log('quarantine pass: {} image(s) for field(s) {} under {}'.format(
+        len(images), ' '.join(sorted(covering_fields)) or '(none)',
+        quarantine_dir))
+    return images
+
+
 # ---------- --reconcile / --rescan ----------
 
 def mode_reconcile():
@@ -613,6 +637,8 @@ def _run_manual_mode(mode, source_selector):
                 if mode in ('reconcile', 'rescan-recent'):
                     images.extend(nml.list_all_recent_field_images(
                         uploads_dir, covering_fields))
+                    images.extend(enumerate_quarantine_images(
+                        cfg, covering_fields))
             n_new = 0
             if images:
                 n_new = measure_images_for_source(cfg, local_config_path,
