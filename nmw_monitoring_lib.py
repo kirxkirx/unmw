@@ -604,20 +604,25 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
         excluded = sorted(quality_excluded + inconsistent,
                           key=lambda r: r['jd_float'])
 
-        lc_lines = ['# JD(UTC) mag err camera']
+        # The trailing field-name column is extracted from the image
+        # basename; the plot readers parse only the leading numeric columns
+        # and ignore trailing tokens, so it does not disturb them.
+        lc_lines = ['# JD(UTC) mag err camera field']
         for row in detections:
             err = row.get('err_float')
-            lc_lines.append('{:.5f} {:.4f} {:.4f} {}'.format(
+            lc_lines.append('{:.5f} {:.4f} {:.4f} {} {}'.format(
                 row['jd_float'], row['mag_float'],
                 err if err is not None and err < 90.0 else 0.001,
-                row['camera']))
+                row['camera'],
+                ncl.field_name_from_fits(row['basename'])))
         lc_path = os.path.join(source_dir, LIGHTCURVE_BASENAME)
         _write_text_atomic(lc_path, '\n'.join(lc_lines) + '\n')
 
-        ul_lines = ['# JD(UTC) limit_mag camera']
+        ul_lines = ['# JD(UTC) limit_mag camera field']
         for row in upperlimits:
-            ul_lines.append('{:.5f} {:.4f} {}'.format(
-                row['jd_float'], row['mag_float'], row['camera']))
+            ul_lines.append('{:.5f} {:.4f} {} {}'.format(
+                row['jd_float'], row['mag_float'], row['camera'],
+                ncl.field_name_from_fits(row['basename'])))
         ul_path = os.path.join(source_dir, UPPERLIMITS_BASENAME)
         _write_text_atomic(ul_path, '\n'.join(ul_lines) + '\n')
 
@@ -660,14 +665,16 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
                 ul_path if upperlimits else None)
 
         _write_source_page(source_dir, entry, rows, detections, upperlimits,
-                           excluded, png_basename, cameras, vast_dir)
+                           excluded, png_basename, cameras, vast_dir,
+                           page_message=(cfg.get('MONITORING_PAGE_MESSAGE')
+                                         or '').strip())
     finally:
         lock_fh.close()
 
 
 def _write_source_page(source_dir, entry, ledger_rows, detections,
                        upperlimits, excluded, png_basename, cameras,
-                       vast_dir):
+                       vast_dir, page_message=''):
     name = entry['name']
     title = 'Monitored source {}'.format(name)
     parts = ['<html><head><title>{}</title>\n{}\n</head><body>\n'.format(
@@ -709,8 +716,10 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
             plot_version = 0
         parts.append('<p><img src="{}?v={}" style="max-width:100%"></p>\n'
                      .format(html_escape(png_basename), plot_version))
-    parts.append('<p>Data files: <a href="{lc}">{lc}</a> (JD mag err camera)'
-                 ' &middot; <a href="{ul}">{ul}</a> (JD limit_mag camera)'
+    parts.append('<p>Data files: <a href="{lc}">{lc}</a>'
+                 ' (JD mag err camera field)'
+                 ' &middot; <a href="{ul}">{ul}</a>'
+                 ' (JD limit_mag camera field)'
                  ' &middot; <a href="{av}">{av}</a> (AAVSO Extended Format'
                  ' incl. fainter-than records)</p>\n'.format(
                      lc=LIGHTCURVE_BASENAME, ul=UPPERLIMITS_BASENAME,
@@ -718,6 +727,11 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
     parts.append('<p><a href="../index.html">All monitored sources</a></p>\n')
     from nmw_forced_phot_lib import wide_field_photometry_caveat_html
     parts.append(wide_field_photometry_caveat_html())
+    # Per-installation note from local_config.sh (MONITORING_PAGE_MESSAGE),
+    # e.g. a data-usage statement. HTML-escaped so the variable can only
+    # ever inject plain text; nothing is shown when it is unset or empty.
+    if page_message:
+        parts.append('<p>{}</p>\n'.format(html_escape(page_message)))
     # Show ALL published measurements (detections + upper limits), newest
     # first, with the ATel-style calendar date as the first column.
     table_rows = sorted(detections + upperlimits,

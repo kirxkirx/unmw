@@ -918,5 +918,27 @@ def test_quarantine_enumeration():
         shutil.rmtree(q, ignore_errors=True)
 
 
+def test_page_message_rendering_and_sanitization():
+    import tempfile, shutil
+    sandbox = tempfile.mkdtemp()
+    try:
+        entry = {'name': 'Fake', 'ra': '12:00:00.00', 'dec': '+30:00:00.0',
+                 'source_id': 'Fake'}
+        # message present: rendered after the caveat block, HTML-escaped
+        nml._write_source_page(
+            sandbox, entry, [], [], [], [], None, [], '',
+            page_message='Use freely. <script>alert(1)</script>')
+        html = open(os.path.join(sandbox, 'index.html')).read()
+        assert 'Use freely. &lt;script&gt;alert(1)&lt;/script&gt;' in html
+        assert '<script>alert(1)</script>' not in html
+        assert html.index('Use freely.') > html.index('not very precise')
+        # no message: nothing extra rendered
+        nml._write_source_page(sandbox, entry, [], [], [], [], None, [], '')
+        html = open(os.path.join(sandbox, 'index.html')).read()
+        assert 'Use freely.' not in html
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

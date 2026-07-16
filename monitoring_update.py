@@ -105,7 +105,7 @@ def load_context():
         'IMAGE_DATA_ROOT', 'VAST_REFERENCE_COPY', 'IMAGE_ARCHIVE_DIR',
         'IMAGE_QUARANTINE_DIR', 'REFERENCE_IMAGES',
         'URL_OF_DATA_PROCESSING_ROOT', 'AAVSO_OBSCODE',
-        'MONITORING_RESCAN_WORKERS')
+        'MONITORING_RESCAN_WORKERS', 'MONITORING_PAGE_MESSAGE')
     uploads_dir = (cfg.get('IMAGE_DATA_ROOT') or '').strip() or 'uploads'
     local_config_path = os.path.join(script_dir, 'local_config.sh')
     return script_dir, cfg, uploads_dir, local_config_path

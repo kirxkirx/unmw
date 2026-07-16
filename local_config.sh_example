@@ -114,6 +114,13 @@ export UNMW_LOCAL_CONFIG_SOURCED=yes
 # VaST reference copy, falling back to the XXX placeholder.
 #export AAVSO_OBSCODE="SKA"
 
+# Optional per-installation note shown near the bottom of every per-source
+# monitoring page, right after the 'Why these photometric measurements are
+# not very precise' block - e.g. a data-usage statement. One line of PLAIN
+# TEXT: the value is HTML-escaped on output, so links and markup are not
+# possible. Nothing is shown when unset or empty.
+#export MONITORING_PAGE_MESSAGE="The photometric measurements are performed without a filter; the zero-point of the instrumental magnitude scale is set by the V magnitudes of the field stars. You are welcome to use these data in any way you see fit, providing a link to this page as the origin of the data."
+
 # Parallel worker cap for the plate-solve/catalog pass of the monitoring
 # backfill/rescan modes (monitoring_update.py --reconcile/--rescan-*).
 # The same-name environment variable, when set, overrides this value.

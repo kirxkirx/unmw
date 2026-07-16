@@ -1292,6 +1292,9 @@ def wide_field_photometry_caveat_html():
         "</ul>\n"
         "<p>In practice, expect a photometric uncertainty of ~0.1 mag, or"
         " somewhat better in favorable conditions.</p>\n"
+        "<p><b>The intended use of these data is a quick check of the"
+        " current state of a source (flaring or quiescent) - not precise"
+        " photometry.</b></p>\n"
         "</div>\n")
 
 
