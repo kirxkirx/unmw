@@ -13,18 +13,28 @@ trigger; the cloud signatures are:
   - ftail:    fraction of stars >0.3 mag fainter than the median offset
               (clouds only ever make stars fainter - a one-sided tail)
   - patch:    spread of the median offset across a 4x3 grid of image
-              blocks (patchy clouds dim different parts of the frame by
-              different amounts)
+              blocks AFTER removing the best-fit plane (patchy clouds dim
+              different parts of the frame by different amounts; a smooth
+              differential-extinction gradient across the wide field at
+              low altitude is a plane and is NOT a cloud signature)
 
 The check is differential against the same field's own baseline, so
-Milky Way fields are safe by construction: diffuse background never
-enters the statistics and the star density is the same in both frames.
+Milky Way fields are largely safe by construction: diffuse background
+never enters the statistics and the star density is the same in both
+frames. Crowding does, however, inflate 'missing' and 'scatter' (epoch
+seeing differences change the deblending of close pairs), so their
+thresholds must leave room for the densest galactic-plane fields.
 
-The thresholds were calibrated on the 2026-07-10..14 T CrB frames
-(TTU cameras): clean frames show scatter 0.00-0.08, ftail 0.00-0.05,
-patch 0.00-0.17, missing 0.00-0.09; cloud-affected frames exceed at
-least one threshold with a wide margin. Override per camera via the
-MONITORING_FRAME_QUALITY_* environment variables if needed.
+The thresholds were first calibrated on the 2026-07-10..14 T CrB frames
+(TTU cameras) and recalibrated 2026-07-18 on the dense Milky Way fields
+covering Nova Sct 2026: cloud-free dense frames (Aql-03: 76k reference
+stars, dzp=-0.01, ftail=0.01) show missing up to 0.19 and scatter up to
+0.18 from crowding alone, while genuinely cloudy frames (Per-02
+2026-07-18: dzp=+1.17) show missing 0.69, scatter 0.20, ftail 0.20.
+ftail is the primary (one-sided, physical) cloud signature and keeps a
+tight threshold; missing and scatter act on gross violations only.
+Override per camera via the MONITORING_FRAME_QUALITY_* environment
+variables if needed.
 
 Input catalogs are the 10-column .wcscat files written by VaST
 (NUMBER RA Dec X Y FLUX FLUXERR MAG MAGERR FLAGS).
@@ -34,8 +44,8 @@ import os
 from bisect import bisect_left
 
 # Verdict thresholds (calibrated, see module docstring)
-MAX_MISSING_FRACTION = 0.15
-MAX_SCATTER_MAG = 0.12
+MAX_MISSING_FRACTION = 0.30
+MAX_SCATTER_MAG = 0.25
 MAX_FAINT_TAIL_FRACTION = 0.08
 MAX_PATCHINESS_MAG = 0.3
 
@@ -165,11 +175,46 @@ def frame_quality_metrics(frame_stars, ref_stars):
         bx = min(int(x * PATCH_GRID_X / max_x), PATCH_GRID_X - 1)
         by = min(int(y * PATCH_GRID_Y / max_y), PATCH_GRID_Y - 1)
         block_offsets.setdefault((bx, by), []).append(v)
-    block_medians = [_median(v) for v in block_offsets.values()
-                     if len(v) >= PATCH_MIN_STARS_PER_BLOCK]
-    if len(block_medians) >= PATCH_MIN_BLOCKS:
-        metrics['patch'] = max(block_medians) - min(block_medians)
+    blocks = [(bx, by, _median(v)) for (bx, by), v in block_offsets.items()
+              if len(v) >= PATCH_MIN_STARS_PER_BLOCK]
+    if len(blocks) >= PATCH_MIN_BLOCKS:
+        # Remove the best-fit plane from the block medians before measuring
+        # their spread: a smooth transparency gradient across the wide field
+        # (differential atmospheric extinction at low altitude) is a plane
+        # and must not count as cloud patchiness; real patchy clouds leave
+        # residuals the plane cannot absorb.
+        residuals = _plane_residuals(blocks)
+        metrics['patch'] = max(residuals) - min(residuals)
     return metrics
+
+
+def _plane_residuals(blocks):
+    """Least-squares fit of v = a*bx + b*by + c to the (bx, by, v) block
+    medians; returns the list of fit residuals. Falls back to zero-mean
+    offsets (equivalent to the plain range) when the fit is degenerate
+    (e.g. all blocks in one row)."""
+    n = float(len(blocks))
+    sx = sum(b[0] for b in blocks)
+    sy = sum(b[1] for b in blocks)
+    sv = sum(b[2] for b in blocks)
+    sxx = sum(b[0] * b[0] for b in blocks)
+    syy = sum(b[1] * b[1] for b in blocks)
+    sxy = sum(b[0] * b[1] for b in blocks)
+    sxv = sum(b[0] * b[2] for b in blocks)
+    syv = sum(b[1] * b[2] for b in blocks)
+    # normal equations for [a, b, c]
+    det = (sxx * (syy * n - sy * sy) - sxy * (sxy * n - sy * sx)
+           + sx * (sxy * sy - syy * sx))
+    if abs(det) < 1e-12:
+        mean_v = sv / n
+        return [b[2] - mean_v for b in blocks]
+    a = ((syy * n - sy * sy) * sxv + (sy * sx - sxy * n) * syv
+         + (sxy * sy - syy * sx) * sv) / det
+    bcoef = ((sy * sx - sxy * n) * sxv + (sxx * n - sx * sx) * syv
+             + (sxy * sx - sxx * sy) * sv) / det
+    c = ((sxy * sy - syy * sx) * sxv + (sxy * sx - sxx * sy) * syv
+         + (sxx * syy - sxy * sxy) * sv) / det
+    return [b[2] - (a * b[0] + bcoef * b[1] + c) for b in blocks]
 
 
 def frame_verdict(metrics, thresholds=None):
