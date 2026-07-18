@@ -17,7 +17,9 @@ Design: source_monitoring_design.md. Key points:
 import fcntl
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 
 import nmw_coord_lib as ncl
 from nmw_coord_lib import html_escape
@@ -28,6 +30,14 @@ BACKFILL_MARKER_BASENAME = 'backfill_done'
 LIGHTCURVE_BASENAME = 'lightcurve.dat'
 UPPERLIMITS_BASENAME = 'upperlimits.dat'
 AAVSO_BASENAME = 'lightcurve_aavso.txt'
+
+# The recent-window lightcurve plot shown above the full-range plot on the
+# source page. The window is anchored at the NEWEST published point (not at
+# the wall clock) so a source that stopped being observed still shows its
+# last month of data instead of an empty panel.
+RECENT_PLOT_WINDOW_DAYS = 30.0
+RECENT_PLOT_PNG_BASENAME = 'lightcurve_recent.png'
+RECENT_PLOT_EPS_BASENAME = 'lightcurve_recent.eps'
 
 MONITORING_SUBDIR = 'monitoring'
 LOCK_SUBDIR = '.monitoring_locks'
@@ -658,22 +668,102 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
         # 4-column lightcurve.dat and 3-column upperlimits.dat feed them
         # directly (trailing camera tokens are ignored).
         png_basename = None
+        recent_png_basename = None
         if detections or upperlimits:
             png_basename, _ = render_lightcurve_plots(
                 vast_dir, source_dir, entry['ra'], entry['dec'],
                 lc_path if detections else None,
                 ul_path if upperlimits else None)
+            recent_png_basename = _render_recent_plot(
+                vast_dir, source_dir, entry, detections, upperlimits)
+        if recent_png_basename is None:
+            # keep the rebuild idempotent: no lingering recent plot when the
+            # current data does not produce one
+            for stale_basename in (RECENT_PLOT_PNG_BASENAME,
+                                   RECENT_PLOT_EPS_BASENAME):
+                try:
+                    os.remove(os.path.join(source_dir, stale_basename))
+                except OSError:
+                    pass
 
         _write_source_page(source_dir, entry, rows, detections, upperlimits,
-                           excluded, png_basename, cameras, vast_dir,
+                           excluded, png_basename, recent_png_basename,
+                           cameras, vast_dir,
                            page_message=(cfg.get('MONITORING_PAGE_MESSAGE')
                                          or '').strip())
     finally:
         lock_fh.close()
 
 
+def _render_recent_plot(vast_dir, source_dir, entry, detections,
+                        upperlimits):
+    """Render the last-RECENT_PLOT_WINDOW_DAYS lightcurve plot (same style
+    as the full-range plot) into source_dir as lightcurve_recent.png/.eps.
+    The window ends at the newest published point. Returns the PNG basename
+    or None when the recent plot is not rendered: no points in the window,
+    or ALL points are within the window (the full-range plot already IS the
+    last-month view then, and showing it twice would be pointless).
+    Best-effort: any rendering problem just leaves the page without the
+    recent plot."""
+    from nmw_forced_phot_lib import render_lightcurve_plots
+    all_jd = [r['jd_float'] for r in detections + upperlimits]
+    if not all_jd:
+        return None
+    cutoff = max(all_jd) - RECENT_PLOT_WINDOW_DAYS
+    if min(all_jd) >= cutoff:
+        # everything already fits in the window - the full plot covers it
+        return None
+    recent_det = [r for r in detections if r['jd_float'] >= cutoff]
+    recent_ul = [r for r in upperlimits if r['jd_float'] >= cutoff]
+    if not recent_det and not recent_ul:
+        return None
+    tmp_dir = tempfile.mkdtemp(prefix='.recent_plot_', dir=source_dir)
+    try:
+        lc_path = None
+        if recent_det:
+            lines = ['# JD(UTC) mag err camera field']
+            for row in recent_det:
+                err = row.get('err_float')
+                lines.append('{:.5f} {:.4f} {:.4f} {} {}'.format(
+                    row['jd_float'], row['mag_float'],
+                    err if err is not None and err < 90.0 else 0.001,
+                    row['camera'],
+                    ncl.field_name_from_fits(row['basename'])))
+            lc_path = os.path.join(tmp_dir, LIGHTCURVE_BASENAME)
+            with open(lc_path, 'w') as fh:
+                fh.write('\n'.join(lines) + '\n')
+        ul_path = None
+        if recent_ul:
+            lines = ['# JD(UTC) limit_mag camera field']
+            for row in recent_ul:
+                lines.append('{:.5f} {:.4f} {} {}'.format(
+                    row['jd_float'], row['mag_float'], row['camera'],
+                    ncl.field_name_from_fits(row['basename'])))
+            ul_path = os.path.join(tmp_dir, UPPERLIMITS_BASENAME)
+            with open(ul_path, 'w') as fh:
+                fh.write('\n'.join(lines) + '\n')
+        # The renderers hardcode the lightcurve.png/.eps output names, so
+        # render into the temporary directory and move the products to the
+        # recent-plot names next to the full-range plot.
+        png_basename, eps_basename = render_lightcurve_plots(
+            vast_dir, tmp_dir, entry['ra'], entry['dec'], lc_path, ul_path)
+        if not png_basename:
+            return None
+        os.replace(os.path.join(tmp_dir, png_basename),
+                   os.path.join(source_dir, RECENT_PLOT_PNG_BASENAME))
+        if eps_basename:
+            os.replace(os.path.join(tmp_dir, eps_basename),
+                       os.path.join(source_dir, RECENT_PLOT_EPS_BASENAME))
+        return RECENT_PLOT_PNG_BASENAME
+    except (OSError, ValueError):
+        return None
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 def _write_source_page(source_dir, entry, ledger_rows, detections,
-                       upperlimits, excluded, png_basename, cameras,
+                       upperlimits, excluded, png_basename,
+                       recent_png_basename, cameras,
                        vast_dir, page_message=''):
     name = entry['name']
     title = 'Monitored source {}'.format(name)
@@ -703,7 +793,14 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                          html_escape(jd_to_atel_date(vast_dir,
                                                      '{:.5f}'.format(jd_max))),
                          jd_min, jd_max))
-    if png_basename:
+    # The last-30-days plot (when rendered) goes ABOVE the full-range plot;
+    # both carry a heading so the reader knows which time span is which.
+    for plot_file, plot_label in (
+            (recent_png_basename,
+             'Lightcurve - last {:.0f} days'.format(RECENT_PLOT_WINDOW_DAYS)),
+            (png_basename, 'Lightcurve - full time range')):
+        if not plot_file:
+            continue
         # Cache-bust: the plot is overwritten in place at the same URL as the
         # lightcurve grows, but the served images carry a long/immutable
         # Cache-Control (fine for the write-once archive-photometry images).
@@ -711,11 +808,12 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
         # browsers fetch the fresh one instead of a stale cached copy.
         try:
             plot_version = int(os.path.getmtime(
-                os.path.join(source_dir, png_basename)))
+                os.path.join(source_dir, plot_file)))
         except OSError:
             plot_version = 0
+        parts.append('<h3>{}</h3>\n'.format(html_escape(plot_label)))
         parts.append('<p><img src="{}?v={}" style="max-width:100%"></p>\n'
-                     .format(html_escape(png_basename), plot_version))
+                     .format(html_escape(plot_file), plot_version))
     parts.append('<p>Data files: <a href="{lc}">{lc}</a>'
                  ' (JD mag err camera field)'
                  ' &middot; <a href="{ul}">{ul}</a>'
