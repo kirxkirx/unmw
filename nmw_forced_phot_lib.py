@@ -1142,7 +1142,7 @@ def _render_lightcurve_matplotlib(out_dir, ra, dec, lc_path, ul_path):
     as blue down-pointing triangles (clearly distinct from detections,
     and matching lib/lightcurve_png's red/blue convention), a legend when
     both kinds are present, JD axis relative to a round offset so the
-    tick labels stay short.
+    tick labels stay short, calendar date (UTC) ticks along the top axis.
 
     Returns (png_basename, eps_basename); eps_basename is None when only
     the EPS write failed. Returns (None, None) when matplotlib is not
@@ -1207,6 +1207,33 @@ def _render_lightcurve_matplotlib(out_dir, ra, dec, lc_path, ul_path):
         ax.set_ylabel('Magnitude', fontsize=MATPLOTLIB_LABEL_FONTSIZE)
         ax.set_title(title, fontsize=MATPLOTLIB_TITLE_FONTSIZE)
         ax.tick_params(labelsize=MATPLOTLIB_TICK_FONTSIZE)
+        # Calendar date (UTC) ticks along the top axis, JD stays on the
+        # bottom. JD 2440587.5 = 1970-01-01T00:00 UTC; the date2num() term
+        # keeps the mapping correct for any matplotlib date-epoch setting.
+        # Best-effort: secondary_xaxis needs matplotlib >= 3.1, so on any
+        # failure the plot simply keeps only the JD axis.
+        try:
+            import datetime
+            import matplotlib.dates as mdates
+            epoch_offset = mdates.date2num(datetime.datetime(1970, 1, 1))
+
+            def _jd_to_datenum(x):
+                return x + jd_offset - 2440587.5 + epoch_offset
+
+            def _datenum_to_jd(x):
+                return x - epoch_offset + 2440587.5 - jd_offset
+
+            secax = ax.secondary_xaxis(
+                'top', functions=(_jd_to_datenum, _datenum_to_jd))
+            date_locator = mdates.AutoDateLocator()
+            secax.xaxis.set_major_locator(date_locator)
+            secax.xaxis.set_major_formatter(
+                mdates.ConciseDateFormatter(date_locator))
+            secax.tick_params(labelsize=MATPLOTLIB_TICK_FONTSIZE)
+        except Exception as exc:
+            sys.stderr.write(
+                'top calendar-date axis skipped: {}: {}\n'.format(
+                    type(exc).__name__, exc))
         if detections and limits:
             ax.legend(fontsize=11, frameon=False)
         fig.tight_layout()
