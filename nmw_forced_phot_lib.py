@@ -1103,8 +1103,13 @@ MATPLOTLIB_PNG_DPI = 150
 MATPLOTLIB_LABEL_FONTSIZE = 15
 MATPLOTLIB_TICK_FONTSIZE = 12
 MATPLOTLIB_TITLE_FONTSIZE = 14
-MATPLOTLIB_DETECTION_COLOR = '#cc0000'
-MATPLOTLIB_UPPER_LIMIT_COLOR = '#0033cc'
+# Paul Tol inspired pair: the desaturated blue makes the upper-limit
+# symbols recede so the red detections stand out; the pair keeps strong
+# separation under all color-vision-deficiency types and >=3:1 contrast
+# on white. lib/lightcurve_png (the no-matplotlib fallback) uses the
+# same two colors -- keep them in sync.
+MATPLOTLIB_DETECTION_COLOR = '#cc3311'
+MATPLOTLIB_UPPER_LIMIT_COLOR = '#5588bb'
 
 
 def _read_numeric_columns(path, n_columns):
