@@ -102,9 +102,11 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 
 # Half-width in source-image pixels of the zoom-in thumbnail produced by the
 # forced-photometry pages (coord_forced_photometry.py and the archival
-# photometry worker). Analogous to COORD_SEARCH_ZOOMIN_PIXELS above but for
-# the forced-photometry tools. Default 200.
-#export COORD_FORCED_PHOT_ZOOMIN_PIXELS=200
+# photometry worker); the cutout covers a 2N x 2N pixel square centred on
+# the target. Analogous to COORD_SEARCH_ZOOMIN_PIXELS above but for the
+# forced-photometry tools. Default 40 (kept small so the photometric
+# aperture circle is clearly visible).
+#export COORD_FORCED_PHOT_ZOOMIN_PIXELS=40
 
 # set this variable to indicate this file has been sourced
 # (can be checked in order not to source it twice)
