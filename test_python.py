@@ -943,5 +943,19 @@ def test_page_message_rendering_and_sanitization():
         shutil.rmtree(sandbox, ignore_errors=True)
 
 
+def test_aavso_star_name_stripping():
+    assert nml.aavso_star_name('AT 2026rdg - Nova in Aql 2026') \
+        == 'AT 2026rdg'
+    assert nml.aavso_star_name('TCP J02191736+2857158 - dwarf nova') \
+        == 'TCP J02191736+2857158'
+    assert nml.aavso_star_name('  GK Per  ') == 'GK Per'
+    # the '= alias' convention is cut too - VSX does not resolve it
+    assert nml.aavso_star_name('AU CVn = 1308+326') == 'AU CVn'
+    # hyphenated identifiers survive: the cut is only at a '-' that
+    # follows whitespace
+    assert nml.aavso_star_name('ASAS-SN 26abc - CV') == 'ASAS-SN 26abc'
+    assert nml.aavso_star_name('QSO B1420+326') == 'QSO B1420+326'
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

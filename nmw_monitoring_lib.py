@@ -544,12 +544,25 @@ def aavso_filter_for_band(band):
     return 'C' + band
 
 
+def aavso_star_name(display_name):
+    """Bare star identifier for the AAVSO NAME field. The monitoring list
+    conventions are 'identifier - comment' (e.g. 'AT 2026rdg - Nova in
+    Aql 2026') and 'identifier = alias' (e.g. 'AU CVn = 1308+326'), but
+    VSX/WebObs resolve only the bare identifier (checked empirically:
+    the '=' form returns zero rows from the VSX API while the bare name
+    resolves). The cut is at the first '-' or '=' that follows
+    whitespace, so hyphenated identifiers such as ASAS-SN names survive
+    intact."""
+    return re.sub(r'\s[-=].*$', '', display_name).strip()
+
+
 def write_aavso_file(source_dir, name, detections, upperlimits, obscode,
                      software, camera_comments, camera_bands):
     """AAVSO Extended Format file including the upper limits as fainter-than
     records: MAG prefixed with '<' and MERR set to 'na', per the AAVSO
     Extended File Format specification. NOTES carries the camera
     description (commas replaced - the field delimiter is a comma)."""
+    name = aavso_star_name(name)
     records = []
     for row in detections:
         records.append((row['jd_float'], row, False))
