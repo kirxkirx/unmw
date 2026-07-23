@@ -705,14 +705,14 @@ def _det(basename, jd, mag, err=0.01, camera='CAM1'):
 def test_visit_consistency_clean_pair_kept():
     rows = [_det('a.fits', 2461000.500, 9.70),
             _det('b.fits', 2461000.501, 9.72)]
-    kept, flagged = nml.split_inconsistent_visits(rows)
+    kept, _kept_lim, flagged = nml.split_inconsistent_visits(rows, [])
     assert len(kept) == 2 and not flagged
 
 
 def test_visit_consistency_discrepant_pair_flagged():
     rows = [_det('a.fits', 2461000.500, 9.66),
             _det('b.fits', 2461000.501, 10.31)]
-    kept, flagged = nml.split_inconsistent_visits(rows)
+    kept, _kept_lim, flagged = nml.split_inconsistent_visits(rows, [])
     assert not kept and len(flagged) == 2
 
 
@@ -720,7 +720,7 @@ def test_visit_consistency_separate_visits_not_compared():
     # same camera, 0.65 mag apart but 1 hour apart: separate visits
     rows = [_det('a.fits', 2461000.500, 9.66),
             _det('b.fits', 2461000.542, 10.31)]
-    kept, flagged = nml.split_inconsistent_visits(rows)
+    kept, _kept_lim, flagged = nml.split_inconsistent_visits(rows, [])
     assert len(kept) == 2 and not flagged
 
 
@@ -728,7 +728,7 @@ def test_visit_consistency_cameras_independent():
     # two cameras at the same time never form one visit
     rows = [_det('a.fits', 2461000.500, 9.66, camera='CAM1'),
             _det('b.fits', 2461000.501, 10.31, camera='CAM2')]
-    kept, flagged = nml.split_inconsistent_visits(rows)
+    kept, _kept_lim, flagged = nml.split_inconsistent_visits(rows, [])
     assert len(kept) == 2 and not flagged
 
 
@@ -736,7 +736,7 @@ def test_visit_consistency_large_errors_tolerated():
     # near the detection limit the spread must beat ERR_SCALE * err
     rows = [_det('a.fits', 2461000.500, 14.1, err=0.2),
             _det('b.fits', 2461000.501, 14.6, err=0.2)]
-    kept, flagged = nml.split_inconsistent_visits(rows)
+    kept, _kept_lim, flagged = nml.split_inconsistent_visits(rows, [])
     assert len(kept) == 2 and not flagged
 
 
@@ -746,14 +746,61 @@ def test_visit_consistency_three_frame_visit_chained():
     rows = [_det('a.fits', 2461000.500, 9.70),
             _det('b.fits', 2461000.5035, 9.71),
             _det('c.fits', 2461000.507, 10.40)]
-    kept, flagged = nml.split_inconsistent_visits(rows)
+    kept, _kept_lim, flagged = nml.split_inconsistent_visits(rows, [])
     assert not kept and len(flagged) == 3
 
 
 def test_visit_consistency_singleton_never_flagged():
     rows = [_det('a.fits', 2461000.500, 12.0)]
-    kept, flagged = nml.split_inconsistent_visits(rows)
+    kept, _kept_lim, flagged = nml.split_inconsistent_visits(rows, [])
     assert len(kept) == 1 and not flagged
+
+
+def _lim(basename, jd, mag, camera='CAM1'):
+    return {'basename': basename, 'jd': str(jd), 'mag': str(mag),
+            'err': '99.0', 'status': 'upperlimit', 'camera': camera,
+            'jd_float': jd, 'mag_float': mag, 'err_float': 99.0}
+
+
+def test_visit_mixed_detection_and_limit_discarded_whole():
+    # a visit with one detection and one upper limit is discarded whole,
+    # regardless of how physical the pair looks
+    dets = [_det('a.fits', 2461000.500, 14.0)]
+    lims = [_lim('b.fits', 2461000.501, 13.0)]
+    kept_det, kept_lim, flagged = nml.split_inconsistent_visits(dets, lims)
+    assert not kept_det and not kept_lim and len(flagged) == 2
+
+
+def test_visit_mixed_deep_limit_discarded_whole():
+    # the unphysical case (limit deeper than the detection) as well
+    dets = [_det('a.fits', 2461000.500, 14.0)]
+    lims = [_lim('b.fits', 2461000.501, 15.5)]
+    kept_det, kept_lim, flagged = nml.split_inconsistent_visits(dets, lims)
+    assert not kept_det and not kept_lim and len(flagged) == 2
+
+
+def test_visit_limits_only_always_kept():
+    lims = [_lim('a.fits', 2461000.500, 13.0),
+            _lim('b.fits', 2461000.501, 15.5)]
+    kept_det, kept_lim, flagged = nml.split_inconsistent_visits([], lims)
+    assert not kept_det and len(kept_lim) == 2 and not flagged
+
+
+def test_visit_mixed_other_camera_not_grouped():
+    # a limit from ANOTHER camera at the same time does not poison the visit
+    dets = [_det('a.fits', 2461000.500, 14.0, camera='CAM1')]
+    lims = [_lim('b.fits', 2461000.501, 15.5, camera='CAM2')]
+    kept_det, kept_lim, flagged = nml.split_inconsistent_visits(dets, lims)
+    assert len(kept_det) == 1 and len(kept_lim) == 1 and not flagged
+
+
+def test_visit_mixed_three_frame_discarded_whole():
+    # two consistent detections plus one limit in the same visit: all out
+    dets = [_det('a.fits', 2461000.500, 14.0),
+            _det('b.fits', 2461000.5035, 14.02)]
+    lims = [_lim('c.fits', 2461000.507, 14.5)]
+    kept_det, kept_lim, flagged = nml.split_inconsistent_visits(dets, lims)
+    assert not kept_det and not kept_lim and len(flagged) == 3
 
 
 # ---------------------------------------------------------------------------

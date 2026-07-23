@@ -59,6 +59,13 @@ EXCLUDED_STATUSES = ('edge', 'saturated', 'bad_region', 'nan_pixel',
 # every detection of that visit is excluded from the published products
 # (lightcurve.dat, the plot and the AAVSO file) and listed in
 # EXCLUDED_MEASUREMENTS_BASENAME instead.
+# A visit that contains BOTH a detection and an upper limit is discarded
+# whole on the same grounds, regardless of the magnitudes involved: a star
+# cannot cross the detection threshold within minutes, so either the
+# "detection" is a noise excursion or the "upper limit" is an unphysically
+# deep one produced by a misplaced aperture - and the data cannot tell
+# which. Visits consisting of upper limits only are always kept (the
+# achieved depth may legitimately differ between frames).
 VISIT_GROUP_MAX_GAP_DAYS = 0.007
 VISIT_CONSISTENCY_MAG_TOLERANCE = 0.3
 VISIT_CONSISTENCY_ERR_SCALE = 4.0
@@ -414,40 +421,54 @@ def classify_ledger_rows(rows):
     return detections, upperlimits, quality_excluded
 
 
-def split_inconsistent_visits(detections):
-    """Partition JD-sorted detections into (consistent, inconsistent) using
-    the within-visit consistency check described next to
-    VISIT_GROUP_MAX_GAP_DAYS above. Both returned lists stay JD-sorted.
-    Rows are identified by their image basename (unique within a ledger)."""
+def split_inconsistent_visits(detections, upperlimits):
+    """Partition JD-sorted detections and upper limits into
+    (consistent_detections, consistent_upperlimits, inconsistent) using the
+    within-visit consistency check described next to VISIT_GROUP_MAX_GAP_DAYS
+    above. A visit containing both a detection and an upper limit is always
+    discarded whole (see the comment block above). All returned lists stay
+    JD-sorted. Rows are identified by their image basename (unique within a
+    ledger)."""
     by_camera = {}
-    for row in detections:
+    for row in detections + upperlimits:
         by_camera.setdefault(row['camera'], []).append(row)
     bad_basenames = set()
     for camera_rows in by_camera.values():
+        camera_rows.sort(key=lambda r: r['jd_float'])
         visit = []
         for row in camera_rows + [None]:
             if visit and (row is None or
                           row['jd_float'] - visit[-1]['jd_float'] >
                           VISIT_GROUP_MAX_GAP_DAYS):
-                if len(visit) > 1:
-                    mags = [v['mag_float'] for v in visit]
+                visit_dets = [v for v in visit
+                              if v['status'] == 'detection']
+                if visit_dets and len(visit_dets) != len(visit):
+                    # mixed detection + upper limit visit: discard whole
+                    for v in visit:
+                        bad_basenames.add(v['basename'])
+                elif len(visit_dets) > 1:
+                    mags = [v['mag_float'] for v in visit_dets]
                     errs = [v['err_float']
                             if v['err_float'] is not None
                             and v['err_float'] < 90.0 else 0.0
-                            for v in visit]
+                            for v in visit_dets]
                     tolerance = max(VISIT_CONSISTENCY_MAG_TOLERANCE,
                                     VISIT_CONSISTENCY_ERR_SCALE * max(errs))
                     if max(mags) - min(mags) > tolerance:
-                        for v in visit:
+                        for v in visit_dets:
                             bad_basenames.add(v['basename'])
                 visit = []
             if row is not None:
                 visit.append(row)
-    consistent = [r for r in detections
-                  if r['basename'] not in bad_basenames]
-    inconsistent = [r for r in detections
-                    if r['basename'] in bad_basenames]
-    return consistent, inconsistent
+    consistent_det = [r for r in detections
+                      if r['basename'] not in bad_basenames]
+    consistent_lim = [r for r in upperlimits
+                      if r['basename'] not in bad_basenames]
+    inconsistent = sorted(
+        [r for r in detections + upperlimits
+         if r['basename'] in bad_basenames],
+        key=lambda r: r['jd_float'])
+    return consistent_det, consistent_lim, inconsistent
 
 
 # ---------- camera descriptions and AAVSO output ----------
@@ -621,7 +642,8 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
         rows, _ = read_ledger(source_dir)
         detections, upperlimits, quality_excluded = \
             classify_ledger_rows(rows)
-        detections, inconsistent = split_inconsistent_visits(detections)
+        detections, upperlimits, inconsistent = \
+            split_inconsistent_visits(detections, upperlimits)
         for row in inconsistent:
             row['reason'] = REASON_VISIT
         excluded = sorted(quality_excluded + inconsistent,
@@ -919,7 +941,8 @@ def rebuild_central_index(uploads_dir, entries, vast_dir):
             source_dir = source_dir_path(uploads_dir, entry['source_id'])
             rows, _ = read_ledger(source_dir)
             detections, upperlimits, _excluded = classify_ledger_rows(rows)
-            detections, _inconsistent = split_inconsistent_visits(detections)
+            detections, upperlimits, _inconsistent = \
+                split_inconsistent_visits(detections, upperlimits)
             all_jd = [r['jd_float'] for r in detections + upperlimits]
             if all_jd:
                 last_jd_num = max(all_jd)
