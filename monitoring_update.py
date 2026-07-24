@@ -55,6 +55,20 @@ Modes (see source_monitoring_design.md):
       Undo --exclude-measurement: manually excluded rows go back to
       'detection' (or 'upperlimit' for fainter-than rows) and the point is
       published again on the rebuilt products.
+  --set-detection-threshold <source> <mag>
+      Set a manual per-source detection threshold: detections FAINTER than
+      <mag> are published as upper limits at the measured magnitude (use
+      case: the photometric aperture is contaminated by an unrelated
+      nearby source, so only a target outshining the contaminant yields a
+      true detection). Stored machine-locally in the source's registry
+      directory (detection_threshold.txt) - thresholds are camera-specific
+      and do not belong in the shared monitoring list. Applied at product
+      rebuild, so it is retroactive and fully reversible; the measurement
+      ledger is untouched. <source> accepts the source_id, the full name,
+      or the short AAVSO name (the part before ' - '/' = ', e.g.
+      "AT 2026xyz" for "AT 2026xyz - Nova in Cyg 2026").
+  --clear-detection-threshold <source>
+      Remove the manual threshold and rebuild the products.
 
 All manual modes refuse to run in a CGI environment, take the global
 monitoring lock and EXIT (never queue) when another instance holds it.
@@ -570,6 +584,72 @@ def mode_flag_measurement(image_basename, source_filter, restore):
         lock_fh.close()
 
 
+def resolve_source_selector(entries, selector):
+    """Match a user-supplied source selector against the monitoring list:
+    the source_id, the full display name, the sanitized form of the
+    selector, or the short AAVSO name (the part of the display name before
+    ' - '/' = ', whitespace-trimmed) all match. Returns
+    (entry, None) on a unique match, (None, message) otherwise."""
+    selector_stripped = selector.strip()
+    selector_id = nml.sanitize_source_id(selector_stripped)
+    matches = []
+    for entry in entries:
+        if entry['source_id'] == selector_stripped \
+                or entry['name'] == selector_stripped \
+                or (selector_id and entry['source_id'] == selector_id) \
+                or nml.aavso_star_name(entry['name']) == selector_stripped:
+            matches.append(entry)
+    if len(matches) == 1:
+        return matches[0], None
+    if not matches:
+        return None, ('no monitoring list entry matches "{}" (accepted: '
+                      'source_id, full name, or short AAVSO name)'
+                      .format(selector))
+    return None, ('selector "{}" is ambiguous, matches: {}'.format(
+        selector, ', '.join(e['source_id'] for e in matches)))
+
+
+def mode_set_threshold(source_selector, threshold):
+    """Set (float) or clear (None) the manual detection threshold of one
+    source and rebuild its products. See the module docstring."""
+    script_dir, cfg, uploads_dir, local_config_path = load_context()
+    if not os.path.isdir(nml.monitoring_root(uploads_dir)):
+        log('monitoring is not deployed on this machine (no {} directory)'
+            .format(nml.monitoring_root(uploads_dir)))
+        return 1
+    lock_fh = nml.acquire_global_lock(uploads_dir)
+    if lock_fh is None:
+        log('another monitoring reconcile/rescan is already running - '
+            'exiting (NOT queuing)')
+        return 1
+    try:
+        _, entries = list_entries_or_exit()
+        if not entries:
+            log('nothing to do: the monitoring list is missing or empty')
+            return 1
+        entry, problem = resolve_source_selector(entries, source_selector)
+        if entry is None:
+            log('detection-threshold: {}'.format(problem))
+            return 1
+        source_dir = nml.source_dir_path(uploads_dir, entry['source_id'])
+        if not os.path.isdir(source_dir):
+            log('detection-threshold: source {} is not activated on this '
+                'machine'.format(entry['source_id']))
+            return 1
+        action = nml.write_detection_threshold(source_dir, threshold)
+        log('detection-threshold: {}: {}'.format(entry['source_id'],
+                                                 action))
+        factory_text = read_factory_text(cfg)
+        vast_dir = (cfg.get('VAST_REFERENCE_COPY') or '').strip()
+        nml.rebuild_source_products(uploads_dir, entry, cfg, factory_text)
+        nml.rebuild_central_index(uploads_dir, entries, vast_dir)
+        log('detection-threshold: {}: products rebuilt'.format(
+            entry['source_id']))
+        return 0
+    finally:
+        lock_fh.close()
+
+
 def _run_manual_mode(mode, source_selector):
     script_dir, cfg, uploads_dir, local_config_path = load_context()
     list_path, entries = list_entries_or_exit()
@@ -684,6 +764,19 @@ def main(argv):
         return mode_rescan('rescan-archive', argv[2])
     if len(argv) >= 2 and argv[1] == '--rebuild-pages':
         return mode_rebuild_pages()
+    if len(argv) >= 4 and argv[1] == '--set-detection-threshold':
+        try:
+            threshold = float(argv[3])
+        except ValueError:
+            sys.stderr.write('bad threshold magnitude: {}\n'.format(argv[3]))
+            return 1
+        if not 0.0 < threshold < 30.0:
+            sys.stderr.write('threshold magnitude {} out of range\n'.format(
+                argv[3]))
+            return 1
+        return mode_set_threshold(argv[2], threshold)
+    if len(argv) >= 3 and argv[1] == '--clear-detection-threshold':
+        return mode_set_threshold(argv[2], None)
     if len(argv) >= 3 and argv[1] in ('--exclude-measurement',
                                       '--restore-measurement'):
         source_filter = None

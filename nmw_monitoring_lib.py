@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 
 import nmw_coord_lib as ncl
@@ -98,6 +99,19 @@ NMW_CALIBRATION_FALLBACK_DIRS = (
 
 MONITORING_LIST_BASENAME = 'monitoring_list.txt'
 
+# Optional per-source manual detection threshold, one plain number in
+# this file inside the source's registry directory (machine-local, since
+# the threshold depends on the camera's pixel scale/PSF; managed with
+# monitoring_update.py --set-detection-threshold). Detections FAINTER
+# than the threshold are published as upper limits at the measured
+# magnitude: the use case is a photometric aperture contaminated by an
+# unrelated nearby source, where below the threshold a measurement only
+# bounds the target brightness from above, and only a target outshining
+# the contaminant yields a true detection.
+DETECTION_THRESHOLD_BASENAME = 'detection_threshold.txt'
+# Displayed status of threshold-demoted rows on the source page table
+STATUS_BELOW_THRESHOLD = 'below_threshold'
+
 FITS_EXTENSIONS = ('.fts', '.fits', '.fit')
 
 
@@ -124,6 +138,68 @@ def monitoring_list_path():
         return None
     path = os.path.join(calib_dir, MONITORING_LIST_BASENAME)
     return path if os.path.isfile(path) else None
+
+
+def read_detection_threshold(source_dir):
+    """The manual detection threshold of one source, or None. The value is
+    the first non-comment token of detection_threshold.txt in the source's
+    registry directory; an unparseable file is reported to stderr and
+    treated as no threshold."""
+    path = os.path.join(source_dir, DETECTION_THRESHOLD_BASENAME)
+    try:
+        with open(path) as fh:
+            content = fh.read()
+    except OSError:
+        return None
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        try:
+            mag = float(line.split()[0])
+        except ValueError:
+            break
+        if 0.0 < mag < 30.0:
+            return mag
+        break
+    sys.stderr.write('{}: unparseable or out-of-range threshold - '
+                     'ignored\n'.format(path))
+    return None
+
+
+def write_detection_threshold(source_dir, mag):
+    """Set (mag as float) or clear (mag None) the manual detection
+    threshold of one source. Returns the human-readable action taken."""
+    path = os.path.join(source_dir, DETECTION_THRESHOLD_BASENAME)
+    if mag is None:
+        try:
+            os.remove(path)
+            return 'threshold cleared'
+        except OSError:
+            return 'no threshold was set'
+    _write_text_atomic(path,
+                       '# manual detection threshold: detections fainter'
+                       ' than this magnitude are published as upper'
+                       ' limits\n{:.4f}\n'.format(mag))
+    return 'threshold set to {:.2f}'.format(mag)
+
+
+def apply_detection_threshold(detections, upperlimits, threshold):
+    """Demote detections fainter than the manual threshold to upper limits
+    at the measured magnitude (the aperture is contaminated, so such a
+    measurement only bounds the target from above). Demoted rows get the
+    STATUS_BELOW_THRESHOLD display status. Returns the new
+    (detections, upperlimits) pair; no-op when threshold is None."""
+    if threshold is None:
+        return detections, upperlimits
+    demoted = [r for r in detections if r['mag_float'] > threshold]
+    if not demoted:
+        return detections, upperlimits
+    for row in demoted:
+        row['status'] = STATUS_BELOW_THRESHOLD
+    kept = [r for r in detections if r['mag_float'] <= threshold]
+    return kept, sorted(upperlimits + demoted,
+                        key=lambda r: r['jd_float'])
 
 
 def sanitize_source_id(name):
@@ -649,6 +725,14 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
         excluded = sorted(quality_excluded + inconsistent,
                           key=lambda r: r['jd_float'])
 
+        # Manual per-source detection threshold - applied AFTER the
+        # visit-consistency check so a flare-rise visit straddling the
+        # threshold keeps its detection instead of being discarded as a
+        # mixed detection+limit visit.
+        threshold = read_detection_threshold(source_dir)
+        detections, upperlimits = apply_detection_threshold(
+            detections, upperlimits, threshold)
+
         # The trailing field-name column is extracted from the image
         # basename; the plot readers parse only the leading numeric columns
         # and ignore trailing tokens, so it does not disturb them.
@@ -725,7 +809,8 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
                            excluded, png_basename, recent_png_basename,
                            cameras, vast_dir,
                            page_message=(cfg.get('MONITORING_PAGE_MESSAGE')
-                                         or '').strip())
+                                         or '').strip(),
+                           threshold=threshold)
     finally:
         lock_fh.close()
 
@@ -799,7 +884,7 @@ def _render_recent_plot(vast_dir, source_dir, entry, detections,
 def _write_source_page(source_dir, entry, ledger_rows, detections,
                        upperlimits, excluded, png_basename,
                        recent_png_basename, cameras,
-                       vast_dir, page_message=''):
+                       vast_dir, page_message='', threshold=None):
     name = entry['name']
     title = 'Monitored source {}'.format(name)
     parts = ['<html><head><title>{}</title>\n{}\n</head><body>\n'.format(
@@ -815,6 +900,18 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                      html_escape(entry['ra']), html_escape(entry['dec']),
                      html_escape(' '.join(cameras) or 'none yet'),
                      len(detections), len(upperlimits), excluded_note))
+    if threshold is not None:
+        parts.append(
+            '<p class="secondary"><b>Manual detection threshold:</b>'
+            ' measurements fainter than mag {:.2f} are published as upper'
+            ' limits at the measured magnitude, because the photometric'
+            ' aperture is contaminated by light from an unrelated nearby'
+            ' source. Below that threshold a measurement only bounds the'
+            ' target brightness from above; only when the target outshines'
+            ' the contaminant does a measurement count as a detection'
+            ' (status <span class="code">{}</span> in the table below marks'
+            ' the demoted measurements).</p>\n'.format(
+                threshold, html_escape(STATUS_BELOW_THRESHOLD)))
     if detections or upperlimits:
         all_jd = [r['jd_float'] for r in detections + upperlimits]
         jd_min = min(all_jd)

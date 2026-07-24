@@ -990,6 +990,73 @@ def test_page_message_rendering_and_sanitization():
         shutil.rmtree(sandbox, ignore_errors=True)
 
 
+def test_detection_threshold_file_roundtrip():
+    import tempfile, shutil
+    sandbox = tempfile.mkdtemp()
+    try:
+        # nothing set yet
+        assert nml.read_detection_threshold(sandbox) is None
+        assert nml.write_detection_threshold(sandbox, 13.0) \
+            == 'threshold set to 13.00'
+        assert nml.read_detection_threshold(sandbox) == 13.0
+        assert nml.write_detection_threshold(sandbox, None) \
+            == 'threshold cleared'
+        assert nml.read_detection_threshold(sandbox) is None
+        assert nml.write_detection_threshold(sandbox, None) \
+            == 'no threshold was set'
+        # unparseable content is ignored (treated as no threshold)
+        with open(os.path.join(
+                sandbox, nml.DETECTION_THRESHOLD_BASENAME), 'w') as fh:
+            fh.write('not a number\n')
+        assert nml.read_detection_threshold(sandbox) is None
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+def test_resolve_source_selector_short_names():
+    import monitoring_update as mu
+    entries = [
+        {'source_id': 'AT_2026xyz_-_Nova_in_Cyg_2026',
+         'name': 'AT 2026xyz - Nova in Cyg 2026'},
+        {'source_id': 'AU_CVn_=_1308+326_-_blazar',
+         'name': 'AU CVn = 1308+326 - blazar'},
+        {'source_id': 'T_CrB', 'name': 'T CrB'},
+    ]
+    # short AAVSO name
+    entry, problem = mu.resolve_source_selector(entries, 'AT 2026xyz')
+    assert problem is None and entry['source_id'].startswith('AT_2026xyz')
+    entry, problem = mu.resolve_source_selector(entries, ' AU CVn ')
+    assert problem is None and entry['source_id'].startswith('AU_CVn')
+    # full name and source_id still work
+    entry, problem = mu.resolve_source_selector(
+        entries, 'AT 2026xyz - Nova in Cyg 2026')
+    assert problem is None
+    entry, problem = mu.resolve_source_selector(entries, 'T_CrB')
+    assert problem is None and entry['name'] == 'T CrB'
+    # no match
+    entry, problem = mu.resolve_source_selector(entries, 'No Such Star')
+    assert entry is None and 'no monitoring list entry' in problem
+
+
+def test_apply_detection_threshold():
+    def det(jd, mag):
+        return {'jd_float': jd, 'mag_float': mag, 'status': 'detection'}
+    def ul(jd, mag):
+        return {'jd_float': jd, 'mag_float': mag, 'status': 'upperlimit'}
+    detections = [det(100.0, 12.5), det(101.0, 14.2), det(102.0, 13.0)]
+    upperlimits = [ul(103.0, 15.5)]
+    # None threshold: everything unchanged
+    d2, u2 = nml.apply_detection_threshold(detections, upperlimits, None)
+    assert d2 is detections and u2 is upperlimits
+    # threshold 13.0: the 14.2 detection is demoted (13.0 itself stays)
+    d2, u2 = nml.apply_detection_threshold(list(detections),
+                                           list(upperlimits), 13.0)
+    assert [r['mag_float'] for r in d2] == [12.5, 13.0]
+    assert [r['mag_float'] for r in u2] == [14.2, 15.5]  # sorted by JD
+    demoted = [r for r in u2 if r['mag_float'] == 14.2][0]
+    assert demoted['status'] == nml.STATUS_BELOW_THRESHOLD
+
+
 def test_aavso_star_name_stripping():
     assert nml.aavso_star_name('AT 2026rdg - Nova in Aql 2026') \
         == 'AT 2026rdg'
