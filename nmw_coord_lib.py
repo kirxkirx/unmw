@@ -13,6 +13,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import fcntl
 import html
+import math
 import os
 import re
 import string
@@ -263,6 +264,102 @@ def acquire_concurrency_slot(prefix='coord_search', max_concurrent=MAX_CONCURREN
 
 # ---------- sky2xy scan ----------
 
+# Angular-separation margin for the geometric coverage verification below:
+# a position genuinely on the frame is at most half-diagonal away from the
+# frame center, so anything beyond half_diag * 1.05 + 0.1 deg is rejected.
+GEOMETRY_CHECK_MARGIN_FACTOR = 1.05
+GEOMETRY_CHECK_MARGIN_DEG = 0.1
+XY2SKY_TIMEOUT_SECONDS = 15
+
+
+def _angular_distance_deg(ra1, dec1, ra2, dec2):
+    """Great-circle distance between two (RA, Dec) positions in degrees."""
+    ra1r, dec1r, ra2r, dec2r = (math.radians(v) for v in (ra1, dec1, ra2, dec2))
+    s = (math.sin((dec2r - dec1r) / 2.0) ** 2
+         + math.cos(dec1r) * math.cos(dec2r)
+         * math.sin((ra2r - ra1r) / 2.0) ** 2)
+    return math.degrees(2.0 * math.asin(min(1.0, math.sqrt(s))))
+
+
+def _hms_to_deg(ra_str, dec_str):
+    """Parse 'HH:MM:SS.SS' / '+DD:MM:SS.S' (or decimal degrees) to degrees."""
+    def _parse(value, is_ra):
+        value = value.strip()
+        if ':' not in value:
+            return float(value)
+        parts = [float(p) for p in value.lstrip('+-').split(':')]
+        while len(parts) < 3:
+            parts.append(0.0)
+        magnitude = parts[0] + parts[1] / 60.0 + parts[2] / 3600.0
+        if is_ra:
+            return magnitude * 15.0
+        return -magnitude if value.startswith('-') else magnitude
+    return _parse(ra_str, True), _parse(dec_str, False)
+
+
+def _image_covers_position(fits_path, target_ra_deg, target_dec_deg, vast_dir):
+    """Geometric coverage verification for one candidate image.
+
+    The sky2xy on-frame test alone cannot be trusted: the high-order SIP
+    INVERSE polynomials (AP_/BP_) written by the VaST plate-solution refit,
+    when evaluated for a sky position far outside the frame, can numerically
+    fold that position back onto valid-looking pixel coordinates (both
+    WCSTools sky2xy and Astrometry.net wcs-rd2xy are affected). The forward
+    pixel->sky direction is safe, so verify coverage physically: the target
+    must be within the frame half-diagonal of the frame center, both derived
+    from the image's own WCS via one forward xy2sky call.
+
+    Returns True (covers), False (does not cover), or None (could not
+    verify - caller decides; a None here means the WCS tools failed, not
+    that the position is off frame).
+    """
+    try:
+        result = subprocess.run(
+            ['util/listhead', fits_path],
+            cwd=vast_dir, capture_output=True, text=True,
+            timeout=XY2SKY_TIMEOUT_SECONDS,
+        )
+        naxis = {}
+        for key in ('NAXIS1', 'NAXIS2'):
+            m = re.search(r'^%s\s*=\s*(\d+)' % key, result.stdout, re.MULTILINE)
+            if m:
+                naxis[key] = int(m.group(1))
+        if 'NAXIS1' not in naxis or 'NAXIS2' not in naxis:
+            return None
+        center_x = naxis['NAXIS1'] / 2.0
+        center_y = naxis['NAXIS2'] / 2.0
+        # One xy2sky call maps both the frame center and a corner;
+        # -d requests decimal-degree output.
+        result = subprocess.run(
+            ['lib/bin/xy2sky', '-d', fits_path,
+             str(center_x), str(center_y), '1', '1'],
+            cwd=vast_dir, capture_output=True, text=True,
+            timeout=XY2SKY_TIMEOUT_SECONDS,
+        )
+        positions = []
+        for line in result.stdout.splitlines():
+            tokens = line.split()
+            if len(tokens) >= 2:
+                try:
+                    positions.append((float(tokens[0]), float(tokens[1])))
+                except ValueError:
+                    continue
+        if len(positions) < 2:
+            return None
+        (center_ra, center_dec), (corner_ra, corner_dec) = positions[:2]
+        half_diag_deg = _angular_distance_deg(center_ra, center_dec,
+                                              corner_ra, corner_dec)
+        if half_diag_deg <= 0.0:
+            return None
+        target_distance_deg = _angular_distance_deg(
+            center_ra, center_dec, target_ra_deg, target_dec_deg)
+        return (target_distance_deg
+                <= half_diag_deg * GEOMETRY_CHECK_MARGIN_FACTOR
+                + GEOMETRY_CHECK_MARGIN_DEG)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
 # Single bash subprocess does the whole scan. ref_dir / ra / dec come in
 # via the environment so they cannot be reinterpreted as shell tokens.
 _BASH_SCAN_LOOP = r'''
@@ -308,6 +405,11 @@ def run_sky2xy_scan(ref_dir, ra, dec, vast_dir, max_results=MAX_RESULTS_TO_PROCE
         else:
             stdout = partial
 
+    try:
+        target_ra_deg, target_dec_deg = _hms_to_deg(ra, dec)
+    except ValueError:
+        target_ra_deg = target_dec_deg = None
+
     matches = []
     for line in stdout.splitlines():
         if '\t' not in line:
@@ -321,6 +423,17 @@ def run_sky2xy_scan(ref_dir, ra, dec, vast_dir, max_results=MAX_RESULTS_TO_PROCE
             y = float(tokens[-1])
         except ValueError:
             continue
+        # Geometric coverage verification BEFORE the match is accepted, so
+        # images rejected here never count against max_results. sky2xy above
+        # is only a fast pre-screen: its inverse-SIP evaluation can fold
+        # far-away sky positions onto valid-looking pixels (see
+        # _image_covers_position). A None verdict (verification tooling
+        # failed) keeps the match to preserve the old behavior.
+        if target_ra_deg is not None:
+            covers = _image_covers_position(
+                path, target_ra_deg, target_dec_deg, vast_dir)
+            if covers is False:
+                continue
         matches.append((path, x, y))
         if len(matches) >= max_results:
             break
