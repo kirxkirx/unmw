@@ -208,4 +208,14 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "unmw successfully updated"
+
+# Refresh the per-host static web interface pages in htdocs.
+# generate_htdocs.sh is a no-op (exit 0) unless HTDOCS_DIR is set in
+# local_config.sh, so hosts that copy move_to_htdocs/ manually are
+# unaffected. Non-fatal: the code update itself already succeeded.
+# The -x check also covers updating from a version predating the script.
+if [ -x ./generate_htdocs.sh ]; then
+    ./generate_htdocs.sh || echo "WARNING: generate_htdocs.sh failed - the web interface pages in htdocs may be stale" >&2
+fi
+
 exit $EXIT_SUCCESS

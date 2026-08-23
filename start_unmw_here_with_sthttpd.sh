@@ -202,6 +202,13 @@ echo "Created cgi-bin/unmw/ directory with CGI symlinks"
 
 # Set up web interface directory
 if [ -d move_to_htdocs ]; then
+ # In a production htdocs install the 'uploads' data symlink sits next to
+ # the interface pages (README step 5); recreate that layout here so the
+ # relative 'uploads/' links on the pages work when move_to_htdocs/ is
+ # served directly
+ if [ ! -e move_to_htdocs/uploads ]; then
+  ln -s ../uploads move_to_htdocs/uploads
+ fi
  echo "Web interface files already available in move_to_htdocs/"
 else
  echo "WARNING: move_to_htdocs directory not found. Upload interface may not work."

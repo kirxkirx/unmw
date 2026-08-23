@@ -1,0 +1,67 @@
+<html>
+<head>
+<title>NMW manual image upload</title>
+<style type="text/css">
+body { color: #000;
+ background: #fff;
+ font-family: arial, helvetica, sans-serif;
+ font-size: 12pt;
+ line-height: 16pt;
+ margin-top: 3mm;
+ margin-bottom: 3mm;
+ margin-left: 10mm;
+ margin-right: 10mm;
+}
+
+p {text-align: justify; line-height: 16pt}
+.code {text-align: left; font-family: courier; background: #ccc; color:
+#000}
+table.main {border-spacing: 5pt}
+td { padding-left: 20pt; padding-right: 20pt; padding-bottom: 3pt }
+
+a:link {color: #55f; text-decoration: none}
+a:visited {color: #33f; text-decoration: none}
+a:active {color: #55f; text-decoration: none}
+a:hover {color: #55f; text-decoration: underline}
+
+.section { max-width: 720px; margin: 0 auto; padding-top: 6pt; }
+hr.break { max-width: 720px; margin: 18pt auto; }
+.footer { max-width: 720px; margin: 0 auto; text-align: center;
+ font-size: 90%; color: #444; }
+</style>
+</head>
+
+<center>
+<h2>Manually upload RAR or ZIP archive with NMW images for processing</h2>
+</center>
+
+<!-- Upload form -->
+<div class="section">
+<form enctype="multipart/form-data" action="../cgi-bin/unmw/upload.py" method="post">
+<table style="margin: 0 auto; border-spacing: 5pt;">
+<tr>
+  <td style="text-align: right; padding: 0 10pt;">File to upload:</td>
+  <td style="padding: 0;">
+    <input type="file" name="file" size=32>
+    <input type="submit" value="Upload">
+  </td>
+</tr>
+</table>
+</form>
+
+<p>Normally the survey images are uploaded automatically by
+<a href="https://github.com/kirxkirx/astrocam-go">astrocam-go</a>
+running on the telescope control computer. An archive of images may also
+be uploaded manually through this page if needed for testing.</p>
+
+<p>It will take a long time to upload and process the data. Please be
+patient and hope for the best.</p>
+</div>
+
+<hr class="break">
+
+<div class="footer">
+<p><a href="index.html">Back to the main page</a></p>
+</div>
+
+</html>

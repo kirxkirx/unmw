@@ -128,9 +128,29 @@ not allow symlinks) to the data directory
 cd /var/www/scan.sai.msu.ru/cgi-bin/unmw
 ln -s /home/NMW_web_upload uploads
 ````
- 4. copy the content of 'move_to_htdocs' folder to your htdocs
+ 4. create the htdocs directory for the web interface pages and install them
+with `generate_htdocs.sh` (it adapts the main page to this host's
+configuration: the archival photometry link is hidden when
+`IMAGE_ARCHIVE_DIR` is not set, and the manual upload page link is hidden -
+and the upload page itself is not installed - unless
+`SHOW_MANUAL_UPLOAD_LINK=yes`; set `HTDOCS_DIR` in 'local_config.sh' -
+see step 6 - and `git_unmw_automated_update.sh` will refresh the pages after
+every code update)
 ````
-cp -r move_to_htdocs /var/www/scan.sai.msu.ru/htdocs/unmw
+mkdir /var/www/scan.sai.msu.ru/htdocs/unmw
+./generate_htdocs.sh /var/www/scan.sai.msu.ru/htdocs/unmw
+````
+re-run `./generate_htdocs.sh` after changing 'local_config.sh' (in
+particular after step 6 below - at this point 'local_config.sh' does not
+exist yet, so the page is generated with the archival photometry link
+hidden); note that the 'processing results' link on the main page starts
+working after the first uploaded archive is processed and
+`combine_reports.sh` (step 7) creates the results index.
+Alternatively, just copy the content of the 'move_to_htdocs' folder to your
+htdocs (all links are shown, and the pages have to be re-copied by hand after
+every code update)
+````
+cp move_to_htdocs/* /var/www/scan.sai.msu.ru/htdocs/unmw/
 ````
  5. create a symlink (or use `mount --bind`) to the data directory in htdocs
 ````
@@ -159,6 +179,71 @@ pass. It intentionally **discards** any local changes to tracked files before
 pulling (logging what it discarded): the production tree is meant to track
 upstream only, so all fixes belong upstream, not in local edits. Untracked
 files such as `local_config.sh` are left untouched.
+
+# Restricting access with a password
+
+The recommended way to protect the web interface is HTTP Basic
+Authentication configured in Apache. Nothing in the unmw code itself needs
+to change: the automated uploader
+([astrocam-go](https://github.com/kirxkirx/astrocam-go)) already sends
+Basic Auth credentials with both its status-check `GET` and its upload
+`POST` when `SAI_USERNAME`/`SAI_PASSWORD` are set in its `config.env`, and
+a browser simply prompts the human visitor for the password.
+
+Create the password file **outside** any web-served directory:
+````
+htpasswd -c /var/www/.htpasswd_unmw uploader
+````
+(repeat `htpasswd /var/www/.htpasswd_unmw anotheruser` without `-c` to add
+more users).
+
+Do **not** put the `Auth*` directives into the `.htaccess` file of this
+checkout: it is a tracked file, so `git_unmw_automated_update.sh` would
+discard the local edit on the next update. Put them in the Apache server
+configuration instead (e.g. a snippet in `conf.d/`), then check and reload:
+`apachectl configtest && apachectl graceful`.
+
+Two useful setups (adapt the URL paths to your `ScriptAlias`/htdocs layout):
+
+**Password-protect only the image upload** - the results, reference-image
+search and the photometry tools stay public, but only someone with the
+password (the telescope control computers and team members doing a rare
+manual upload) can submit images:
+````
+<Location "/cgi-bin/unmw/upload.py">
+    AuthType Basic
+    AuthName "NMW image upload"
+    AuthUserFile /var/www/.htpasswd_unmw
+    Require valid-user
+</Location>
+````
+
+**Password-protect everything** (including the results pages and the
+archival photometry) - the whole interface becomes team-only; every
+visitor and the uploading telescopes need the password:
+````
+<Location "/unmw">
+    AuthType Basic
+    AuthName "NMW transient search"
+    AuthUserFile /var/www/.htpasswd_unmw
+    Require valid-user
+</Location>
+<Location "/cgi-bin/unmw">
+    AuthType Basic
+    AuthName "NMW transient search"
+    AuthUserFile /var/www/.htpasswd_unmw
+    Require valid-user
+</Location>
+````
+`<Location>` blocks match the request URL, so they also cover the results
+served through the `uploads` symlink. The server-side scripts do not fetch
+their own pages over HTTP, so full protection does not break the processing
+pipeline - just remember to set `SAI_USERNAME`/`SAI_PASSWORD` on every
+uploading telescope before enabling it.
+
+The lightweight `start_unmw_here_with_sthttpd.sh` development server does
+not support authentication - this section applies to production Apache
+installations only.
 
 # An overly-detailed and ugly example installation on a fresh AlmaLinux 9
 ````
