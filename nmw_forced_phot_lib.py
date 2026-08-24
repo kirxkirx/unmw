@@ -573,10 +573,29 @@ def _phase1_solve_one(work_dir, local_config_path, fits_path):
                                            (r1.stderr or '')[-2000:]),
                 cache_status)
     # Step 2: plate-solve + UCAC5+APASS query.
+    # On deployments that calibrate magnitudes with the local Tycho-2
+    # catalog (FORCED_PHOTOMETRY_CALIBRATION_METHOD=tycho2) the APASS
+    # columns of the .ucac5 output catalog are never read, so pass
+    # --no_photometric_catalog and skip the slow remote APASS VizieR
+    # query (minutes per image, with retries). The decision is made
+    # inside the wrapper shell AFTER local_config.sh is sourced, so the
+    # config file remains the single source of truth.
+    def _bash_wrap_solve(script_path):
+        if local_config_path and os.path.isfile(local_config_path):
+            return ['bash', '-c',
+                    '. "$1" 1>&2; '
+                    'if [ "$FORCED_PHOTOMETRY_CALIBRATION_METHOD" = "tycho2" ]'
+                    ';then exec "$2" --no_photometric_catalog "$3"; fi; '
+                    'exec "$2" "$3"',
+                    'bash', local_config_path, script_path, compute_path]
+        if os.environ.get(
+                'FORCED_PHOTOMETRY_CALIBRATION_METHOD') == 'tycho2':
+            return [script_path, '--no_photometric_catalog', compute_path]
+        return [script_path, compute_path]
     script = os.path.join(work_dir, 'util', 'solve_plate_with_UCAC5')
     try:
         result = _run_capture_session(
-            _bash_wrap(script), cwd=work_dir, env=env,
+            _bash_wrap_solve(script), cwd=work_dir, env=env,
             timeout=FORCED_PHOT_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired as exc:
         return (fits_path, compute_path, None,
