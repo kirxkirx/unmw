@@ -3,23 +3,23 @@
    dates read cleanly; the main page (index.html) is the one page that
    overrides it to the serif look in its own style block. */
 body { max-width: 620px; margin: 0 auto; padding: 30px 18px 48px;
- background: #fffdf8; color: #222;
+ background: #fffdf8; color: #1a1a1a;
  font-family: arial, helvetica, sans-serif;
- font-size: 16px; line-height: 1.55; }
-h1 { text-align: center; font-size: 28px; font-weight: normal;
+ font-size: 17px; line-height: 1.55; }
+h1 { text-align: center; font-size: 29px; font-weight: normal;
  margin: 6px 0 8px; }
-.subtitle { text-align: center; color: #666; font-size: 15px;
+.subtitle { text-align: center; color: #666; font-size: 16px;
  margin: 0 0 34px; font-style: italic; }
-h2 { font-size: 19px; font-weight: bold; margin: 26px 0 4px;
+h2 { font-size: 20px; font-weight: bold; margin: 26px 0 4px;
  padding-left: 10px; border-left: 4px solid #b5451b; }
-p { margin: 10px 0 0; color: #333; }
+p { margin: 10px 0 0; }
 a:link, a:visited { color: #1a4d8f; text-decoration: none; }
 a:hover, a:active { color: #b5451b; text-decoration: underline; }
 .code { font-family: "Courier New", Courier, monospace; font-size: 15px;
- background: #f2ecdd; color: #222; padding: 0 3px; }
+ background: #f2ecdd; color: #1a1a1a; padding: 0 3px; }
 .formats { margin-left: 8pt; }
 .working { margin-left: 1em; color: #888; visibility: hidden; }
 .secondary { color: #666; }
 .footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #ddd;
- text-align: center; font-size: 14px; color: #666; }
+ text-align: center; font-size: 15px; color: #666; }
 .footer p { margin: 0; }

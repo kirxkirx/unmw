@@ -70,15 +70,16 @@ def field_name_from_fits(path):
 _PAGE_CSS = """<style type="text/css">
 body { color: #000; background: #fff;
  font-family: arial, helvetica, sans-serif;
- font-size: 12pt; line-height: 16pt;
+ font-size: 17px; line-height: 1.5;
  margin: 3mm 10mm 3mm 10mm; }
 h2 { padding-left: 10px; border-left: 4px solid #b5451b; }
 .code { font-family: courier, monospace; background: #eee; color: #000;
  padding: 0 3px; }
+pre { font-size: 15px; line-height: 1.45; overflow-x: auto; }
 table.main { border-spacing: 5pt; border-collapse: collapse; }
 table.main th, table.main td { padding: 4pt 10pt; border: 1px solid #ccc;
  text-align: left; vertical-align: top; }
-.notice { background: #ffd; padding: 6pt; margin-bottom: 10pt; }
+.notice { background: #fff6cc; padding: 6pt; margin-bottom: 10pt; }
 a:link, a:visited, a:active { color: #1a4d8f; text-decoration: none; }
 a:hover { color: #b5451b; text-decoration: underline; }
 </style>"""
