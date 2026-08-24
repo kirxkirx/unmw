@@ -1,103 +1,63 @@
+<!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NMW transient search</title>
 <style type="text/css">
-body { color: #000;
- background: #fff;
- font-family: arial, helvetica, sans-serif;
- font-size: 12pt;
- line-height: 16pt;
- margin-top: 3mm;
- margin-bottom: 3mm;
- margin-left: 10mm;
- margin-right: 10mm;
-}
-
-p {text-align: justify; line-height: 16pt}
-.code {text-align: left; font-family: courier; background: #ccc; color:
-#000}
-table.main {border-spacing: 5pt}
-td { padding-left: 20pt; padding-right: 20pt; padding-bottom: 3pt }
-
-a:link {color: #55f; text-decoration: none}
-a:visited {color: #33f; text-decoration: none}
-a:active {color: #55f; text-decoration: none}
-a:hover {color: #55f; text-decoration: underline}
-
-.section { max-width: 720px; margin: 0 auto; padding-top: 6pt; }
-hr.break { max-width: 720px; margin: 18pt auto; }
-.footer { max-width: 720px; margin: 0 auto; text-align: center;
- font-size: 90%; color: #444; }
+body { max-width: 620px; margin: 0 auto; padding: 30px 18px 48px;
+ background: #fffdf8; color: #222;
+ font-family: Georgia, "Times New Roman", serif;
+ font-size: 17px; line-height: 1.55; }
+h1 { text-align: center; font-size: 28px; font-weight: normal;
+ margin: 6px 0 8px; }
+.subtitle { text-align: center; color: #666; font-size: 15px;
+ margin: 0 0 34px; font-style: italic; }
+h2 { font-size: 19px; font-weight: bold; margin: 26px 0 4px;
+ padding-left: 10px; border-left: 4px solid #b5451b; }
+p { margin: 4px 0 0 14px; color: #333; }
+a:link, a:visited { color: #1a4d8f; text-decoration: none; }
+a:hover, a:active { color: #b5451b; text-decoration: underline; }
+.footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #ddd;
+ text-align: center; font-size: 14px; color: #666; }
+.footer p { margin: 0; }
 </style>
 </head>
+<body>
 
-<!-- Processing results and transient candidates -->
-<center>
-<h2>Processing results</h2>
-</center>
+<h1>NMW transient search</h1>
+<p class="subtitle">New Milky Way survey data access</p>
 
-<div class="section">
-<p style="text-align: center;">
-<a href="uploads/">Image processing results and transient candidates</a> -
-per-night pages listing the candidate transients found in each processed
-field.</p>
-</div>
+<h2><a href="uploads/">Transient candidate lists and processing logs</a></h2>
+<p>Per-night pages listing the candidate transients found in each
+processed field, together with the processing logs.</p>
 
-<hr class="break">
+<h2><a href="uploads/monitoring/index.html">Monitored sources</a></h2>
+<p>Lightcurves of the sources in the monitoring list, updated after every
+processed image of their fields.</p>
 
-<!-- Reference images -->
-<center>
-<h2>Reference images</h2>
-</center>
-
-<div class="section">
-<p style="text-align: center;">
-<a href="coord_search.html">Browse all reference images, or find which
-fields cover a particular sky position</a>.</p>
-</div>
-
-<hr class="break">
-
-<!-- Forced-photometry lightcurve -->
-<center>
-<h2>Forced-photometry lightcurve</h2>
-</center>
-
-<div class="section">
-<p style="text-align: center;">
-<a href="coord_forced_photometry.html">Get forced-photometry measurements at a
-sky position across all images from the last week</a>.</p>
-</div>
-
-<div class="section">
-<p style="text-align: center;">
-<a href="uploads/monitoring/index.html">Monitored sources</a> - lightcurves of
-the sources in the monitoring list, updated after every processed image of
-their fields.</p>
-</div>
+<h2><a href="coord_forced_photometry.html">Forced photometry on recent
+images</a></h2>
+<p>Measure the brightness at any sky position across all images taken
+during the last week. The recent images are used as they come: some
+frames may be affected by clouds.</p>
 
 <!-- ARCHIVE_PHOTOMETRY_SECTION_BEGIN
      generate_htdocs.sh removes everything between these two marker comments
      when IMAGE_ARCHIVE_DIR is not configured in local_config.sh -->
-<hr class="break">
-
-<!-- Archival forced photometry -->
-<center>
-<h2>Archival forced photometry</h2>
-</center>
-
-<div class="section">
-<p style="text-align: center;">
-<a href="archive_forced_photometry.html">Get forced-photometry measurements at
-a sky position across the long-term image archive</a>.</p>
-</div>
+<h2><a href="archive_forced_photometry.html">Forced photometry on the
+archived images</a></h2>
+<p>Measure the brightness at any sky position across the long-term image
+archive. The archive is expected to include only good-quality frames.</p>
 <!-- ARCHIVE_PHOTOMETRY_SECTION_END -->
+
+<h2><a href="coord_search.html">Reference images</a></h2>
+<p>Browse all reference images, or find which fields cover a particular
+sky position.</p>
 
 <!-- MANUAL_UPLOAD_SECTION_BEGIN
      generate_htdocs.sh removes everything between these two marker comments
      unless SHOW_MANUAL_UPLOAD_LINK=yes is set in local_config.sh -->
-<hr class="break">
-
 <div class="footer">
 <p><a href="upload.html">Manually upload an archive of images for
 processing</a> (rarely needed - normally the survey images are uploaded
@@ -105,4 +65,5 @@ automatically by the telescope control computer).</p>
 </div>
 <!-- MANUAL_UPLOAD_SECTION_END -->
 
+</body>
 </html>
