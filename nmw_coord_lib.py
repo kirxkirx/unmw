@@ -62,21 +62,23 @@ def field_name_from_fits(path):
     return base.split('_', 1)[0]
 
 
-# Keep the fonts and colors below in sync with move_to_htdocs/unmw.css -
-# the CGI-generated pages should match the look of the static pages
+# The CGI-generated pages are data pages (names, coordinates, dates,
+# magnitude tables), so unlike the static pages styled by
+# move_to_htdocs/unmw.css they deliberately use a sans-serif font with
+# lining digits and black-on-white contrast. Only the link colors and the
+# heading accent bar are shared with the static pages.
 _PAGE_CSS = """<style type="text/css">
-body { color: #222; background: #fffdf8;
- font-family: Georgia, "Times New Roman", serif;
- font-size: 12pt; line-height: 1.5;
+body { color: #000; background: #fff;
+ font-family: arial, helvetica, sans-serif;
+ font-size: 12pt; line-height: 16pt;
  margin: 3mm 10mm 3mm 10mm; }
-h2 { font-size: 15pt; font-weight: bold;
- padding-left: 10px; border-left: 4px solid #b5451b; }
-.code { font-family: "Courier New", Courier, monospace; font-size: 90%;
- background: #f2ecdd; color: #222; padding: 0 3px; }
+h2 { padding-left: 10px; border-left: 4px solid #b5451b; }
+.code { font-family: courier, monospace; background: #eee; color: #000;
+ padding: 0 3px; }
 table.main { border-spacing: 5pt; border-collapse: collapse; }
-table.main th, table.main td { padding: 4pt 10pt; border: 1px solid #ddd6c4;
+table.main th, table.main td { padding: 4pt 10pt; border: 1px solid #ccc;
  text-align: left; vertical-align: top; }
-.notice { background: #fdf6d8; padding: 6pt; margin-bottom: 10pt; }
+.notice { background: #ffd; padding: 6pt; margin-bottom: 10pt; }
 a:link, a:visited, a:active { color: #1a4d8f; text-decoration: none; }
 a:hover { color: #b5451b; text-decoration: underline; }
 </style>"""

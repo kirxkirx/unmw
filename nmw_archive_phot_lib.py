@@ -620,7 +620,7 @@ def _sweep_dead_running_jobs_locked(log=None):
 
 RESULTS_PAGE_LOCAL_CSS = ("<style type='text/css'>"
                           "tr.skipped td { color: #888; font-size: 90%; "
-                          "background: #f5f0e4; }"
+                          "background: #f8f8f8; }"
                           " p.secondary { color: #666; font-style: italic; }"
                           "</style>")
 

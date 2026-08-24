@@ -358,7 +358,7 @@ def main():
         # the moment they hit the browser, with no later restyle flash.
         print("<style type='text/css'>"
               "tr.skipped td { color: #888; font-size: 90%; "
-              "background: #f5f0e4; }"
+              "background: #f8f8f8; }"
               " p.secondary { color: #666; font-style: italic; }"
               "</style>")
         print("</head><body>")
