@@ -135,7 +135,15 @@ def read_factory_text(cfg):
 
 def sky2xy_on_image(vast_dir, fits_path, ra, dec):
     """One sky2xy call: (x, y) pixel coordinates or None when the position
-    is off the image or the call fails."""
+    is off the image or the call fails.
+
+    The raw sky2xy verdict is verified with the geometric coverage check
+    (nmw_coord_lib._image_covers_position): the inverse SIP distortion
+    polynomial, evaluated for a position far outside the frame, can fold
+    that position onto valid-looking pixel coordinates - GK Per got fake
+    monitoring upper limits from Lac-01 frames 50 deg away because the
+    --prepare coverage test here trusted sky2xy alone. A None verdict from
+    the verification (tooling failure) keeps the match (fail open)."""
     sky2xy = os.path.join(vast_dir, 'lib', 'bin', 'sky2xy')
     try:
         result = subprocess.run([sky2xy, fits_path, ra, dec],
@@ -149,9 +157,17 @@ def sky2xy_on_image(vast_dir, fits_path, ra, dec):
     if len(tokens) < 2:
         return None
     try:
-        return float(tokens[-2]), float(tokens[-1])
+        x, y = float(tokens[-2]), float(tokens[-1])
     except ValueError:
         return None
+    try:
+        ra_deg, dec_deg = ncl._hms_to_deg(ra, dec)
+    except (ValueError, TypeError):
+        return (x, y)
+    if ncl._image_covers_position(fits_path, ra_deg, dec_deg,
+                                  vast_dir) is False:
+        return None
+    return (x, y)
 
 
 def list_entries_or_exit():
