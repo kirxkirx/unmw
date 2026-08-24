@@ -1,10 +1,11 @@
 /* Shared style for the NMW transient search static pages.
-   Keep this in sync with the look of index.html - all the static pages
-   link this file so fonts and colors match across the interface. */
+   The base font is a sans-serif with lining digits so coordinates and
+   dates read cleanly; the main page (index.html) is the one page that
+   overrides it to the serif look in its own style block. */
 body { max-width: 620px; margin: 0 auto; padding: 30px 18px 48px;
  background: #fffdf8; color: #222;
- font-family: Georgia, "Times New Roman", serif;
- font-size: 17px; line-height: 1.55; }
+ font-family: arial, helvetica, sans-serif;
+ font-size: 16px; line-height: 1.55; }
 h1 { text-align: center; font-size: 28px; font-weight: normal;
  margin: 6px 0 8px; }
 .subtitle { text-align: center; color: #666; font-size: 15px;
