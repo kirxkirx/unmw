@@ -3,6 +3,9 @@
 # Install the static web interface pages from move_to_htdocs/ into the
 # htdocs directory they are served from, adapting the main page to this
 # host's configuration:
+#  - the survey name in the page title and heading is taken from
+#    SURVEY_NAME_TO_DISPLAY in local_config.sh (e.g. NMW-TexasTech),
+#    defaulting to NMW
 #  - the archival forced photometry link is removed from index.html when
 #    IMAGE_ARCHIVE_DIR is not set in local_config.sh (the feature is
 #    disabled on such hosts, see archive_forced_photometry.py)
@@ -165,23 +168,25 @@ for SOURCE_FILE in move_to_htdocs/* ;do
  fi
 done
 
-# Generate index.html for this host.
-if [ "$FILTER_ARCHIVE_SECTION" -eq 0 ] && [ "$FILTER_UPLOAD_SECTION" -eq 0 ];then
- if ! cp move_to_htdocs/index.html "$TARGET_DIR/index.html.tmp.$$" ;then
-  echo "ERROR copying move_to_htdocs/index.html to $TARGET_DIR" >&2
-  exit 1
- fi
-else
- if ! awk -v filterarchive="$FILTER_ARCHIVE_SECTION" -v filterupload="$FILTER_UPLOAD_SECTION" '
+# Generate index.html for this host: filter the optional sections decided
+# above and put the survey name of this deployment (SURVEY_NAME_TO_DISPLAY
+# in local_config.sh, e.g. NMW-TexasTech; default NMW) into the page title
+# and heading. The name is substituted with plain string operations only
+# where the template says "NMW transient search", so no character of the
+# configured name is ever treated as a regular expression.
+SURVEY_NAME="${SURVEY_NAME_TO_DISPLAY:-NMW}"
+if ! awk -v filterarchive="$FILTER_ARCHIVE_SECTION" -v filterupload="$FILTER_UPLOAD_SECTION" -v survey="$SURVEY_NAME" '
+BEGIN { needle = "NMW transient search" }
 /ARCHIVE_PHOTOMETRY_SECTION_BEGIN/{if(filterarchive)skip=1}
 /MANUAL_UPLOAD_SECTION_BEGIN/{if(filterupload)skip=1}
+{ i = index($0, needle)
+  if (i > 0) $0 = substr($0, 1, i-1) survey substr($0, i+3) }
 !skip{print}
 /ARCHIVE_PHOTOMETRY_SECTION_END/{if(filterarchive)skip=0}
 /MANUAL_UPLOAD_SECTION_END/{if(filterupload)skip=0}
 ' move_to_htdocs/index.html > "$TARGET_DIR/index.html.tmp.$$" ;then
-  echo "ERROR generating index.html in $TARGET_DIR" >&2
-  exit 1
- fi
+ echo "ERROR generating index.html in $TARGET_DIR" >&2
+ exit 1
 fi
 if ! mv "$TARGET_DIR/index.html.tmp.$$" "$TARGET_DIR/index.html" ;then
  echo "ERROR renaming $TARGET_DIR/index.html.tmp.$$" >&2
@@ -189,5 +194,6 @@ if ! mv "$TARGET_DIR/index.html.tmp.$$" "$TARGET_DIR/index.html" ;then
 fi
 
 echo "Web interface pages installed to $TARGET_DIR
+  survey name on the landing page: $SURVEY_NAME
   archival photometry link: $ARCHIVE_LINK_STATE
   manual upload link: $UPLOAD_LINK_STATE"

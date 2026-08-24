@@ -62,18 +62,23 @@ def field_name_from_fits(path):
     return base.split('_', 1)[0]
 
 
+# Keep the fonts and colors below in sync with move_to_htdocs/unmw.css -
+# the CGI-generated pages should match the look of the static pages
 _PAGE_CSS = """<style type="text/css">
-body { color: #000; background: #fff;
- font-family: arial, helvetica, sans-serif;
- font-size: 12pt; line-height: 16pt;
+body { color: #222; background: #fffdf8;
+ font-family: Georgia, "Times New Roman", serif;
+ font-size: 12pt; line-height: 1.5;
  margin: 3mm 10mm 3mm 10mm; }
-.code { font-family: courier; background: #ccc; color: #000; }
+h2 { font-size: 15pt; font-weight: bold;
+ padding-left: 10px; border-left: 4px solid #b5451b; }
+.code { font-family: "Courier New", Courier, monospace; font-size: 90%;
+ background: #f2ecdd; color: #222; padding: 0 3px; }
 table.main { border-spacing: 5pt; border-collapse: collapse; }
-table.main th, table.main td { padding: 4pt 10pt; border: 1px solid #ccc;
+table.main th, table.main td { padding: 4pt 10pt; border: 1px solid #ddd6c4;
  text-align: left; vertical-align: top; }
-.notice { background: #ffd; padding: 6pt; margin-bottom: 10pt; }
-a:link, a:visited, a:active { color: #55f; text-decoration: none; }
-a:hover { text-decoration: underline; }
+.notice { background: #fdf6d8; padding: 6pt; margin-bottom: 10pt; }
+a:link, a:visited, a:active { color: #1a4d8f; text-decoration: none; }
+a:hover { color: #b5451b; text-decoration: underline; }
 </style>"""
 
 

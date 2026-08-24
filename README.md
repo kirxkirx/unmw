@@ -130,9 +130,10 @@ ln -s /home/NMW_web_upload uploads
 ````
  4. create the htdocs directory for the web interface pages and install them
 with `generate_htdocs.sh` (it adapts the main page to this host's
-configuration: the archival photometry link is hidden when
-`IMAGE_ARCHIVE_DIR` is not set, and the manual upload page link is hidden -
-and the upload page itself is not installed - unless
+configuration: the page title shows the survey name from
+`SURVEY_NAME_TO_DISPLAY` - NMW by default, the archival photometry link is
+hidden when `IMAGE_ARCHIVE_DIR` is not set, and the manual upload page link
+is hidden - and the upload page itself is not installed - unless
 `SHOW_MANUAL_UPLOAD_LINK=yes`; set `HTDOCS_DIR` in 'local_config.sh' -
 see step 6 - and `git_unmw_automated_update.sh` will refresh the pages after
 every code update)

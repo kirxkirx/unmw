@@ -1,0 +1,24 @@
+/* Shared style for the NMW transient search static pages.
+   Keep this in sync with the look of index.html - all the static pages
+   link this file so fonts and colors match across the interface. */
+body { max-width: 620px; margin: 0 auto; padding: 30px 18px 48px;
+ background: #fffdf8; color: #222;
+ font-family: Georgia, "Times New Roman", serif;
+ font-size: 17px; line-height: 1.55; }
+h1 { text-align: center; font-size: 28px; font-weight: normal;
+ margin: 6px 0 8px; }
+.subtitle { text-align: center; color: #666; font-size: 15px;
+ margin: 0 0 34px; font-style: italic; }
+h2 { font-size: 19px; font-weight: bold; margin: 26px 0 4px;
+ padding-left: 10px; border-left: 4px solid #b5451b; }
+p { margin: 10px 0 0; color: #333; }
+a:link, a:visited { color: #1a4d8f; text-decoration: none; }
+a:hover, a:active { color: #b5451b; text-decoration: underline; }
+.code { font-family: "Courier New", Courier, monospace; font-size: 15px;
+ background: #f2ecdd; color: #222; padding: 0 3px; }
+.formats { margin-left: 8pt; }
+.working { margin-left: 1em; color: #888; visibility: hidden; }
+.secondary { color: #666; }
+.footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #ddd;
+ text-align: center; font-size: 14px; color: #666; }
+.footer p { margin: 0; }

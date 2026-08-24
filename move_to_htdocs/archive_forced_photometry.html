@@ -1,47 +1,22 @@
+<!DOCTYPE html>
 <html>
 <head>
-<style type="text/css">
-body { color: #000;
- background: #fff;
- font-family: arial, helvetica, sans-serif;
- font-size: 12pt;
- line-height: 16pt;
- margin-top: 3mm;
- margin-bottom: 3mm;
- margin-left: 10mm;
- margin-right: 10mm;
-}
-
-p {text-align: justify; text-indent: 6mm; line-height: 16pt}
-.code {text-align: left; font-family: courier; background: #ccc; color:
-#000}
-table.main {border-spacing: 5pt}
-td { padding-left: 20pt; padding-right: 20pt; padding-bottom: 3pt }
-
-a:link {color: #55f; text-decoration: none}
-a:visited {color: #33f; text-decoration: none}
-a:active {color: #55f; text-decoration: none}
-a:hover {color: #55f; text-decoration: underline}
-
-.section { max-width: 720px; margin: 0 auto; padding-top: 6pt; }
-.section p { text-indent: 0; }
-.formats { margin-left: 8pt; }
-.working { margin-left: 1em; color: #888; visibility: hidden; }
-.secondary { color: #444; }
-hr.break { max-width: 720px; margin: 18pt auto; }
-</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NMW forced photometry on the archived images</title>
+<link rel="stylesheet" type="text/css" href="unmw.css">
 </head>
+<body>
 
-<center>
-<h2>Archival forced photometry at a sky position</h2>
-</center>
+<h1>Forced photometry on the archived images</h1>
+<p class="subtitle">Lightcurve at a sky position across the long-term image archive</p>
 
 <form id="archive-phot-form" action="../cgi-bin/unmw/archive_forced_photometry.py" method="post">
 
-<div class="section">
 <p>Enter J2000 sky coordinates to get forced aperture photometry at that
 position on <b>every</b> matching image in the long-term image archive
-(optionally restricted to a UT date range). Because an archive job may
+(optionally restricted to a UT date range). The archive is expected to
+include only good-quality frames. Because an archive job may
 measure hundreds of large images, it does not run while you wait: it is
 placed in a processing queue, and you follow it on a status page that
 turns into a persistent results page (lightcurve plot, per-image preview
@@ -49,7 +24,7 @@ and aperture cutout, copy-paste ASCII table) when the job finishes.
 Results stay on the server at a stable URL; very old results may
 eventually be removed during server housekeeping.</p>
 
-<table style="margin: 0 auto; border-spacing: 5pt;">
+<table style="margin: 14px auto 0; border-spacing: 5pt;">
 <tr>
   <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec.):</td>
   <td style="padding: 0;">
@@ -112,9 +87,12 @@ the position and reads the archive image dates); please be patient after
 pressing the button. You will then be taken to the job status page &mdash;
 bookmark it. <a href="../cgi-bin/unmw/archive_phot_status.py">Queue overview</a>
 </p>
-</div>
 
 </form>
+
+<div class="footer">
+<p><a href="index.html">Back to the main page</a></p>
+</div>
 
 <script type="text/javascript">
 (function () {
@@ -152,4 +130,5 @@ bookmark it. <a href="../cgi-bin/unmw/archive_phot_status.py">Queue overview</a>
 })();
 </script>
 
+</body>
 </html>

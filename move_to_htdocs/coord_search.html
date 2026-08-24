@@ -1,46 +1,20 @@
+<!DOCTYPE html>
 <html>
 <head>
-<style type="text/css">
-body { color: #000;
- background: #fff;
- font-family: arial, helvetica, sans-serif;
- font-size: 12pt;
- line-height: 16pt;
- margin-top: 3mm;
- margin-bottom: 3mm;
- margin-left: 10mm;
- margin-right: 10mm;
-}
-
-p {text-align: justify; text-indent: 6mm; line-height: 16pt}
-.code {text-align: left; font-family: courier; background: #ccc; color:
-#000}
-table.main {border-spacing: 5pt}
-td { padding-left: 20pt; padding-right: 20pt; padding-bottom: 3pt }
-
-a:link {color: #55f; text-decoration: none}
-a:visited {color: #33f; text-decoration: none}
-a:active {color: #55f; text-decoration: none}
-a:hover {color: #55f; text-decoration: underline}
-
-.section { max-width: 720px; margin: 0 auto; padding-top: 6pt; }
-.section p { text-indent: 0; }
-.formats { margin-left: 8pt; }
-.working { margin-left: 1em; color: #888; visibility: hidden; }
-.secondary { color: #444; }
-hr.break { max-width: 720px; margin: 18pt auto; }
-</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NMW reference images</title>
+<link rel="stylesheet" type="text/css" href="unmw.css">
 </head>
+<body>
 
-<center>
-<h2>Find fields covering a sky position</h2>
-</center>
+<h1>Reference images</h1>
+<p class="subtitle">Find fields covering a sky position</p>
 
 <form id="coord-search-form" action="../cgi-bin/unmw/coord_search.py" method="post">
 <input type="hidden" name="action" id="coord-action" value="search">
 
 <!-- Primary action: coordinate search -->
-<div class="section">
 <p>Enter J2000 sky coordinates to find reference images that covers
 that position. Results show, for each matching image, the pixel position
 of the target, the distance to the image centre and to the nearest edge,
@@ -48,7 +22,7 @@ and small zoom-in / zoom-out thumbnails so you can see at a glance
 whether the target falls near the centre of a field or close to its
 edge.</p>
 
-<table style="margin: 0 auto; border-spacing: 5pt;">
+<table style="margin: 14px auto 0; border-spacing: 5pt;">
 <tr>
   <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec.):</td>
   <td style="padding: 0;">
@@ -68,13 +42,9 @@ Accepted coordinate formats:
 </ul>
 The Dec. sign may be <span class="code">-</span>, <span class="code">+</span>, or omitted for positive Dec.
 </p>
-</div>
-
-<hr class="break">
 
 <!-- Secondary action: browse all reference images -->
-<div class="section" style="text-align: center;">
-<p class="secondary" style="text-align: center;">
+<p class="secondary" style="text-align: center; margin-top: 30px;">
 You can also list every reference image (field name, image size,
 scale, full-frame thumbnail) without specifying a position:
 </p>
@@ -82,9 +52,12 @@ scale, full-frame thumbnail) without specifying a position:
 <input type="submit" id="coord-list-all-button" value="Show all reference images">
 <span id="coord-working-listall" class="working">Working...</span>
 </p>
-</div>
 
 </form>
+
+<div class="footer">
+<p><a href="index.html">Back to the main page</a></p>
+</div>
 
 <script type="text/javascript">
 (function () {
@@ -132,4 +105,5 @@ scale, full-frame thumbnail) without specifying a position:
 })();
 </script>
 
+</body>
 </html>

@@ -1,42 +1,17 @@
+<!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NMW manual image upload</title>
-<style type="text/css">
-body { color: #000;
- background: #fff;
- font-family: arial, helvetica, sans-serif;
- font-size: 12pt;
- line-height: 16pt;
- margin-top: 3mm;
- margin-bottom: 3mm;
- margin-left: 10mm;
- margin-right: 10mm;
-}
-
-p {text-align: justify; line-height: 16pt}
-.code {text-align: left; font-family: courier; background: #ccc; color:
-#000}
-table.main {border-spacing: 5pt}
-td { padding-left: 20pt; padding-right: 20pt; padding-bottom: 3pt }
-
-a:link {color: #55f; text-decoration: none}
-a:visited {color: #33f; text-decoration: none}
-a:active {color: #55f; text-decoration: none}
-a:hover {color: #55f; text-decoration: underline}
-
-.section { max-width: 720px; margin: 0 auto; padding-top: 6pt; }
-hr.break { max-width: 720px; margin: 18pt auto; }
-.footer { max-width: 720px; margin: 0 auto; text-align: center;
- font-size: 90%; color: #444; }
-</style>
+<link rel="stylesheet" type="text/css" href="unmw.css">
 </head>
+<body>
 
-<center>
-<h2>Manually upload RAR or ZIP archive with NMW images for processing</h2>
-</center>
+<h1>Manual image upload</h1>
+<p class="subtitle">Upload a RAR or ZIP archive of NMW images for processing</p>
 
 <!-- Upload form -->
-<div class="section">
 <form enctype="multipart/form-data" action="../cgi-bin/unmw/upload.py" method="post">
 <table style="margin: 0 auto; border-spacing: 5pt;">
 <tr>
@@ -56,12 +31,10 @@ be uploaded manually through this page if needed for testing.</p>
 
 <p>It will take a long time to upload and process the data. Please be
 patient and hope for the best.</p>
-</div>
-
-<hr class="break">
 
 <div class="footer">
 <p><a href="index.html">Back to the main page</a></p>
 </div>
 
+</body>
 </html>

@@ -1,52 +1,27 @@
+<!DOCTYPE html>
 <html>
 <head>
-<style type="text/css">
-body { color: #000;
- background: #fff;
- font-family: arial, helvetica, sans-serif;
- font-size: 12pt;
- line-height: 16pt;
- margin-top: 3mm;
- margin-bottom: 3mm;
- margin-left: 10mm;
- margin-right: 10mm;
-}
-
-p {text-align: justify; text-indent: 6mm; line-height: 16pt}
-.code {text-align: left; font-family: courier; background: #ccc; color:
-#000}
-table.main {border-spacing: 5pt}
-td { padding-left: 20pt; padding-right: 20pt; padding-bottom: 3pt }
-
-a:link {color: #55f; text-decoration: none}
-a:visited {color: #33f; text-decoration: none}
-a:active {color: #55f; text-decoration: none}
-a:hover {color: #55f; text-decoration: underline}
-
-.section { max-width: 720px; margin: 0 auto; padding-top: 6pt; }
-.section p { text-indent: 0; }
-.formats { margin-left: 8pt; }
-.working { margin-left: 1em; color: #888; visibility: hidden; }
-.secondary { color: #444; }
-hr.break { max-width: 720px; margin: 18pt auto; }
-</style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NMW forced photometry on recent images</title>
+<link rel="stylesheet" type="text/css" href="unmw.css">
 </head>
+<body>
 
-<center>
-<h2>Forced-photometry lightcurve at a sky position</h2>
-</center>
+<h1>Forced photometry on recent images</h1>
+<p class="subtitle">Lightcurve at a sky position from the latest survey images</p>
 
 <form id="forced-phot-form" action="../cgi-bin/unmw/coord_forced_photometry.py" method="post">
 
-<div class="section">
 <p>Enter J2000 sky coordinates to get forced aperture photometry at that
 position on the most recent matching images found in the uploads directory.
 Choose how far back to look (in days) and how many images to process at
 most. Results are shown newest first, each with a full-frame preview, a
 zoom-in cutout marked with a red circle of the aperture used, and a link
-to the FITS file, plus a copy-paste ASCII table.</p>
+to the FITS file, plus a copy-paste ASCII table. The recent images are
+used as they come: some frames may be affected by clouds.</p>
 
-<table style="margin: 0 auto; border-spacing: 5pt;">
+<table style="margin: 14px auto 0; border-spacing: 5pt;">
 <tr>
   <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec.):</td>
   <td style="padding: 0;">
@@ -95,9 +70,12 @@ image count to the largest values allowed.
 Measuring many images can take a while, since each image is calibrated and
 measured in turn. Please be patient after pressing Measure.
 </p>
-</div>
 
 </form>
+
+<div class="footer">
+<p><a href="index.html">Back to the main page</a></p>
+</div>
 
 <script type="text/javascript">
 (function () {
@@ -149,4 +127,5 @@ measured in turn. Please be patient after pressing Measure.
 })();
 </script>
 
+</body>
 </html>
