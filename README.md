@@ -556,15 +556,18 @@ install local copies of [UCAC5](https://cdsarc.cds.unistra.fr/viz-bin/Cat?I/340)
 
   ````apache
   <Directory "/var/www/example.net/cgi-bin">
-      AllowOverride Limit Options=ExecCGI
+      AllowOverride AuthConfig Options=ExecCGI
       Options ExecCGI FollowSymLinks
       SetHandler cgi-script
       Require all granted
   </Directory>
   ````
 
-  `Limit` is what permits the `Require` directives, `Options=ExecCGI` the
-  `Options` line. Never put `<Directory>`, `<DirectoryMatch>` or
+  `AuthConfig` is what permits the `Require` directives - they belong to that
+  override class, **not** to `Limit`, which covers only the obsolete Apache 2.2
+  `Order`/`Allow`/`Deny` - and `Options=ExecCGI` permits the `Options` line.
+  Granting `Limit` instead of `AuthConfig` makes every `Require` here illegal
+  and Apache answers 500 to every request in the tree. Never put `<Directory>`, `<DirectoryMatch>` or
   `AllowOverride` into `.htaccess` itself - they are legal only in
   server/vhost context and Apache answers **500 to every request** in that
   tree if it finds them there. `apachectl configtest` does not catch that,

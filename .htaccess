@@ -7,7 +7,7 @@
 # and, under SetHandler cgi-script, executed. A working vhost block is:
 #
 #   <Directory "/var/www/example.net/cgi-bin">
-#       AllowOverride Limit Options=ExecCGI
+#       AllowOverride AuthConfig Options=ExecCGI
 #       Options ExecCGI FollowSymLinks
 #       SetHandler cgi-script
 #       Require all granted
