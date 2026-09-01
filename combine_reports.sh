@@ -5,6 +5,14 @@
 
 # shellcheck disable=SC2086,SC2181,SC2002,SC2162,SC2012,SC2009,SC2126,SC1091
 
+# Not a CGI entry point: this runs from cron (see the crontab line above).
+# The .htaccess deny rules are ignored unless the vhost sets AllowOverride,
+# so this guard is the authoritative protection.
+if [ -n "${GATEWAY_INTERFACE:-}" ] || [ -n "${REQUEST_METHOD:-}" ]; then
+    printf 'Content-Type: text/plain\n\nERROR: this script must not be run as CGI\n'
+    exit 1
+fi
+
 ##################################################################
 # Debug mode: enable with --debug, -d flag or DEBUG=1 environment variable
 # Example: ./combine_reports.sh --debug

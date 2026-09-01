@@ -525,8 +525,11 @@ def main():
     try:
         safe_url, candidate_id = validate_candidate_url(raw_url, config)
     except ValueError as e:
+        # validate_candidate_url puts the offending input into its message
+        # (e.g. "Invalid path component: %s"), so this text is attacker
+        # controlled and must be escaped before it goes back into the page.
         send_html(400, "Bad Request",
-                  "<h2>Bad Request</h2><p>%s</p>" % str(e))
+                  "<h2>Bad Request</h2><p>%s</p>" % html_escape(str(e)))
         return
 
     # Step 2: Check cache

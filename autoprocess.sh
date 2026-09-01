@@ -758,8 +758,19 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
  fi
  # remove the archive file
  rm -f "$ZIP_ARCHIVE_FILENAME"
- # set restricitve permissions to all the extracted files, just in case
- chmod -R 0644 *
+ # Drop any symlink the archive may have created before touching permissions.
+ # upload.py3 rejects symlink members, but this is the last line of defence and
+ # covers the paths that do not go through it (a directly staged archive, or a
+ # zipfile/rarfile module that could not inspect the member). Info-ZIP recreates
+ # a symlink member even under "unzip -j".
+ find . -type l -exec rm -f {} + 2>/dev/null
+ # Set restrictive permissions on the extracted files, just in case.
+ # NOTE: "chmod -R 0644 *" must not be used here. The glob puts each extracted
+ # name on the command line, where chmod FOLLOWS a symlink, so a crafted archive
+ # could chmod a file or directory outside this directory - including the VaST
+ # reference copy, which would break every subsequent upload. "find -type f"
+ # never follows a symlink and never passes one to chmod.
+ find . -type f -exec chmod 0644 {} + 2>/dev/null
 fi # if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
 
 ##### At this point we have input directory with images at $ABSOLUTE_PATH_TO_IMAGES #####

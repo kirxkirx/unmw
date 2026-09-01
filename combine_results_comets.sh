@@ -1,5 +1,13 @@
 #!/usr/bin/env bash                                                                                        
 
+# Not a CGI entry point: combine_reports.sh runs this from cron.
+# The .htaccess deny rules are ignored unless the vhost sets AllowOverride,
+# so this guard is the authoritative protection.
+if [ -n "${GATEWAY_INTERFACE:-}" ] || [ -n "${REQUEST_METHOD:-}" ]; then
+    printf 'Content-Type: text/plain\n\nERROR: this script must not be run as CGI\n'
+    exit 1
+fi
+
 # change to the work directory
 SCRIPTDIR=$(dirname "$(readlink -f "$0")")
 cd "$SCRIPTDIR" || exit 1

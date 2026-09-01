@@ -6,11 +6,14 @@
 # Usage:
 #   ./git_unmw_automated_update.sh
 #
-# This script must NOT be run through CGI. It is blocked by .htaccess (Apache)
-# and by custom_http_server.py (only upload.py is treated as CGI).
+# This script must NOT be run through CGI. The guard below is what enforces
+# that. .htaccess also denies it under Apache, but only when the vhost sets
+# AllowOverride - with the default AllowOverride None those rules are silently
+# ignored - so never rely on .htaccess alone. custom_http_server.py treats only
+# upload.py as CGI.
 
 # Guard: refuse to run if invoked as CGI
-if [ -n "$GATEWAY_INTERFACE" ] || [ -n "$REQUEST_METHOD" ]; then
+if [ -n "${GATEWAY_INTERFACE:-}" ] || [ -n "${REQUEST_METHOD:-}" ]; then
     echo "Content-Type: text/plain"
     echo ""
     echo "ERROR: this script must not be run as CGI"

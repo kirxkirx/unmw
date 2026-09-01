@@ -26,10 +26,12 @@ MAX_SYSTEM_LOAD when the former is unset; no gating when neither is set),
 and re-checks briefly every few images, so long archive jobs yield to the
 live transient pipeline.
 
-Defense against being run as a CGI: .htaccess denies web access to this
-file, and additionally the worker refuses to start when GATEWAY_INTERFACE
-is present in the environment (kick_worker strips it from the environment
-of a legitimately spawned worker)."""
+Defense against being run as a CGI: the worker refuses to start when
+GATEWAY_INTERFACE is present in the environment (kick_worker strips it from
+the environment of a legitimately spawned worker). .htaccess also denies web
+access to this file, but that is only belt and braces - it is ignored unless
+the vhost sets AllowOverride, so the in-code check is what actually protects
+this file. See the "New non-CGI scripts" note in README.md."""
 
 import os
 import shutil

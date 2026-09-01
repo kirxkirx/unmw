@@ -9,6 +9,16 @@
 
 # shellcheck disable=SC2086
 
+# Not a CGI entry point: fastplot.py runs this as a subprocess after it has
+# validated the URL, enforced the per-hour rate limit and checked disk space.
+# Reached directly over the web all of that is bypassed and $1 becomes an
+# arbitrary URL that VaST will fetch. The .htaccess deny rules are ignored
+# unless the vhost sets AllowOverride, so this guard is the real protection.
+if [ -n "${GATEWAY_INTERFACE:-}" ] || [ -n "${REQUEST_METHOD:-}" ]; then
+    printf 'Content-Type: text/plain\n\nERROR: this script must not be run as CGI\n'
+    exit 1
+fi
+
 LC_ALL=C
 LANGUAGE=C
 export LANGUAGE LC_ALL
@@ -54,6 +64,31 @@ if ! echo "$CANDIDATE_ID" | grep -qE '^[a-zA-Z0-9_.-]+$'; then
  exit 1
 fi
 
+# Validate CANDIDATE_URL. fastplot.py never passes through a user-supplied
+# URL - validate_candidate_url() discards the scheme and host and rebuilds the
+# URL from URL_OF_DATA_PROCESSING_ROOT plus a component-validated relative
+# path - so anything not starting with that prefix did not come from the CGI.
+# Re-checking here keeps VaST (which fetches this URL with curl) from being
+# pointed at an arbitrary internal or external address if this script is ever
+# invoked by another route. POSIX case: portable to busybox, FreeBSD, macOS.
+if [ -z "${URL_OF_DATA_PROCESSING_ROOT:-}" ]; then
+ echo "ERROR: URL_OF_DATA_PROCESSING_ROOT is not set - cannot validate the candidate URL"
+ exit 1
+fi
+case "$CANDIDATE_URL" in
+ "${URL_OF_DATA_PROCESSING_ROOT%/}"/*) ;;
+ *)
+  echo "ERROR: candidate URL is outside ${URL_OF_DATA_PROCESSING_ROOT%/}"
+  exit 1
+  ;;
+esac
+case "$CANDIDATE_URL" in
+ *[!A-Za-z0-9:/._#~-]*)
+  echo "ERROR: candidate URL contains unexpected characters"
+  exit 1
+  ;;
+esac
+
 # --- Resolve Paths ---
 
 # Resolve VAST_REFERENCE_COPY to absolute path
@@ -88,8 +123,12 @@ mkdir -p "$FASTPLOT_OUTPUT_DIR"
 
 LOCK_FILE="$FASTPLOT_OUTPUT_DIR/.fastplot.lock"
 
-# Open the lock file on fd 200
-exec 200>"$LOCK_FILE"
+# Open the lock file on fd 200.
+# ">" truncates on open, which happens BEFORE flock is attempted - so a second
+# invocation would erase the running job's identity marker out of the lock file
+# even though it then fails to acquire the lock. ">>" opens for append without
+# truncating and is equally valid for flock.
+exec 200>>"$LOCK_FILE"
 
 LOCK_ACQUIRED=0
 

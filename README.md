@@ -522,7 +522,58 @@ install local copies of [UCAC5](https://cdsarc.cds.unistra.fr/viz-bin/Cat?I/340)
   line, keep the phrases `The object was`, `found in`, `not found` out of it -
   they are parser anchors.
 
-- **New non-CGI Python modules** added to the repo root execute as CGI unless
-  denied. Add importable libraries, workers and test files to the deny list in
-  `.htaccess` (following the existing `FilesMatch` blocks) so a stranger cannot
-  request them over the web.
+- **New non-CGI scripts** added to the repo root execute as CGI unless denied.
+  Two things are needed, and the second is the one that actually protects you:
+
+  1. Add the file to the deny list in `.htaccess`, following the existing
+     `FilesMatch` blocks.
+  2. Add a `GATEWAY_INTERFACE` guard to the file itself, at the top, before
+     any third-party import and before any work. Shell:
+
+     ````sh
+     if [ -n "${GATEWAY_INTERFACE:-}" ] || [ -n "${REQUEST_METHOD:-}" ]; then
+         printf 'Content-Type: text/plain\n\nERROR: this script must not be run as CGI\n'
+         exit 1
+     fi
+     ````
+
+     Python:
+
+     ````python
+     if os.environ.get('GATEWAY_INTERFACE') or os.environ.get('REQUEST_METHOD'):
+         sys.stdout.write('Content-Type: text/plain\n\n'
+                          'ERROR: this script must not be run as CGI\n')
+         sys.exit(1)
+     ````
+
+  Step 1 alone is **not** sufficient. `.htaccess` is read only if the vhost
+  grants the authority; with the Apache default `AllowOverride None` the file
+  is ignored entirely, every `Require all denied` in it is silently inert, and
+  `SetHandler cgi-script` still executes the script. Whether that authority is
+  granted is server configuration this repository does not control and cannot
+  verify, so the in-script guard is the authoritative defence and `.htaccess`
+  is belt and braces. To grant the authority:
+
+  ````apache
+  <Directory "/var/www/example.net/cgi-bin">
+      AllowOverride Limit Options=ExecCGI
+      Options ExecCGI FollowSymLinks
+      SetHandler cgi-script
+      Require all granted
+  </Directory>
+  ````
+
+  `Limit` is what permits the `Require` directives, `Options=ExecCGI` the
+  `Options` line. Never put `<Directory>`, `<DirectoryMatch>` or
+  `AllowOverride` into `.htaccess` itself - they are legal only in
+  server/vhost context and Apache answers **500 to every request** in that
+  tree if it finds them there. `apachectl configtest` does not catch that,
+  because `.htaccess` is parsed per request, so verify with a real HTTP
+  request after any change:
+
+  ````sh
+  # expect 404, not 500 - proves .htaccess parses
+  curl -s -o /dev/null -w '%{http_code}\n' http://HOST/cgi-bin/unmw/no_such_file
+  # expect 403 - proves the deny rules are actually in force
+  curl -s -o /dev/null -w '%{http_code}\n' http://HOST/cgi-bin/unmw/combine_reports.sh
+  ````

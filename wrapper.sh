@@ -3,6 +3,15 @@
 # If something is wrong, this script exits with code 1
 # and upload.py is expected to catch that code and take care of removing the uploaded archive file
 
+# Not a CGI entry point: upload.py runs this as a subprocess after it has
+# validated the archive. Reached directly over the web it would process an
+# arbitrary path with none of that validation. The .htaccess deny rules are
+# ignored unless the vhost sets AllowOverride, so this guard is the real one.
+if [ -n "${GATEWAY_INTERFACE:-}" ] || [ -n "${REQUEST_METHOD:-}" ]; then
+    printf 'Content-Type: text/plain\n\nERROR: this script must not be run as CGI\n'
+    exit 1
+fi
+
 if [ -z "$1" ]; then
     echo "Usage: $0 uploaded_image_archive_to_be_deleted_after_processing.zip"
     exit 1
@@ -113,15 +122,21 @@ if [ -s local_config.sh ]; then
 fi
 
 # Create a log file in the upload directory
-LOGFILE="$(dirname $INPUT_FILE)/upload.log"
+LOGFILE="$(dirname "$INPUT_FILE")/upload.log"
 {
     echo "=== Wrapper started at $(date) ==="
     echo "PWD: $PWD"
     echo "USER: $USER"
     echo "INPUT_FILE: $1"
     echo "PATH: $PATH"
-    echo "Environment:"
-    env | sort
+    # NOTE: do NOT dump the environment here. local_config.sh is sourced above,
+    # so the environment carries deployment secrets (webhook and relay URLs,
+    # tokens), and this log lives inside the web-served uploads tree where it is
+    # retrievable over HTTP. Log only the variables actually needed to debug an
+    # ingest, and add to this list deliberately rather than dumping everything.
+    echo "DATA_PROCESSING_ROOT: ${DATA_PROCESSING_ROOT:-unset}"
+    echo "IMAGE_DATA_ROOT: ${IMAGE_DATA_ROOT:-unset}"
+    echo "VAST_REFERENCE_COPY: ${VAST_REFERENCE_COPY:-unset}"
     echo "=== Starting autoprocess.sh ==="
 } >> "$LOGFILE" 2>&1
 

@@ -44,6 +44,15 @@ ALLOWED_EXTENSIONS = {'.zip', '.rar'}
 ALLOWED_IMAGE_EXTENSIONS = {'.fit', '.fits', '.fts'}
 MIN_IMAGE_FILES = 2
 
+# Decompression-bomb limits. MAX_FILE_SIZE bounds only the COMPRESSED upload,
+# so without these a small archive can expand until the data volume is full.
+# A night's upload is a few hundred 20-second frames; 4000 members and 32 GB
+# leave a wide margin over that while still bounding the damage. Real FITS
+# frames compress by roughly 2-4x, so a 200:1 ratio is far outside normal.
+MAX_ARCHIVE_MEMBERS = 4000
+MAX_UNCOMPRESSED_BYTES = 32 * 1024 * 1024 * 1024  # 32GB
+MAX_COMPRESSION_RATIO = 200
+
 # Disk space thresholds in KB
 # These defaults can be overridden by WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB
 # and WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB environment variables or
@@ -206,29 +215,96 @@ def validate_archive_type(filepath: str) -> Tuple[bool, str]:
     return True, ""
 
 
+def rar_member_names_via_binary(filepath: str):
+    """Bare member listing from the rar/unrar binary, for the case where the
+    Python rarfile module is not installed (it is not, in the production venv).
+    Without this the .rar branch would have to either skip validation entirely
+    or reject every RAR upload, and the uploading client (astrocam-go) emits
+    both .zip and .rar. Returns a list of names, or None if no usable binary.
+    'lb' is the bare-list mode: one member name per line, nothing else."""
+    for binary in ('rar', 'unrar', '/opt/bin/rar', '/opt/bin/unrar'):
+        try:
+            proc = subprocess.run([binary, 'lb', filepath],
+                                  stdout=subprocess.PIPE,
+                                  stderr=subprocess.DEVNULL,
+                                  timeout=120)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if proc.returncode != 0:
+            # A non-zero exit is a real verdict from a working binary (corrupt
+            # archive, unsafe link member): treat it as "no usable listing"
+            # so the caller fails closed rather than trusting a partial list.
+            return None
+        text = proc.stdout.decode('utf-8', 'replace')
+        return [line.strip() for line in text.splitlines() if line.strip()]
+    return None
+
+
 def check_archive_contents(filepath: str) -> Tuple[bool, str]:
     """
     Validate archive contents without extracting.
     Directories are allowed; only file extensions are checked.
+
+    Beyond names this enforces the decompression-bomb limits and rejects
+    symlink members, which a name-only check cannot see: Info-ZIP recreates a
+    symlink member even under 'unzip -j', and a later 'chmod' or 'find' that
+    follows it would act outside the upload directory.
     """
     ext = os.path.splitext(filepath)[1].lower()
     image_files = []
+    total_uncompressed = 0
+    total_compressed = 0
+    infolist = None
+    filelist = None
 
-    # If neither library is available, perform basic size and MIME checks only
     if ext == '.zip' and not HAVE_ZIPFILE:
-        return True, "Warning: zipfile module not available, skipping detailed archive validation"
-    elif ext == '.rar' and not HAVE_RARFILE:
-        return True, "Warning: rarfile module not available, skipping detailed archive validation"
+        return False, "Cannot validate ZIP archive: the zipfile module is unavailable"
 
     try:
         if ext == '.zip' and HAVE_ZIPFILE:
             with zipfile.ZipFile(filepath) as zf:
-                filelist = zf.namelist()
+                infolist = zf.infolist()
         elif ext == '.rar' and HAVE_RARFILE:
             with rarfile.RarFile(filepath) as rf:
-                filelist = rf.namelist()
+                infolist = rf.infolist()
+        elif ext == '.rar':
+            filelist = rar_member_names_via_binary(filepath)
+            if filelist is None:
+                return False, ("Cannot validate RAR archive: neither the rarfile "
+                               "module nor a working rar/unrar binary is available")
         else:
             return False, f"Unsupported archive type: {ext}"
+
+        if infolist is not None:
+            if len(infolist) > MAX_ARCHIVE_MEMBERS:
+                return False, (f"Too many files in archive: {len(infolist)} "
+                               f"(maximum {MAX_ARCHIVE_MEMBERS})")
+            filelist = []
+            for info in infolist:
+                name = info.filename
+                if name.endswith('/') or getattr(info, 'is_dir', lambda: False)():
+                    continue
+                # Symlink members carry file type 0o120000 in the high 16 bits
+                # of external_attr (Unix mode). RAR members expose is_symlink().
+                mode = (getattr(info, 'external_attr', 0) >> 16) & 0o170000
+                is_link = getattr(info, 'is_symlink', None)
+                if mode == 0o120000 or (callable(is_link) and is_link()):
+                    return False, f"Symlink in archive is not allowed: {name}"
+                total_uncompressed += getattr(info, 'file_size', 0) or 0
+                total_compressed += getattr(info, 'compress_size', 0) or 0
+                filelist.append(name)
+
+            if total_uncompressed > MAX_UNCOMPRESSED_BYTES:
+                return False, (f"Archive expands to {total_uncompressed} bytes, "
+                               f"over the {MAX_UNCOMPRESSED_BYTES} byte limit")
+            if (total_compressed > 0
+                    and total_uncompressed / total_compressed > MAX_COMPRESSION_RATIO):
+                return False, (f"Suspicious compression ratio "
+                               f"{total_uncompressed // max(total_compressed, 1)}:1 "
+                               f"(maximum {MAX_COMPRESSION_RATIO}:1)")
+        elif len(filelist) > MAX_ARCHIVE_MEMBERS:
+            return False, (f"Too many files in archive: {len(filelist)} "
+                           f"(maximum {MAX_ARCHIVE_MEMBERS})")
 
         # Check each entry in the archive
         for fname in filelist:
@@ -250,9 +326,9 @@ def check_archive_contents(filepath: str) -> Tuple[bool, str]:
         return True, ""
 
     except Exception as e:
-        if ext == '.zip' and isinstance(e, zipfile.BadZipFile):
+        if ext == '.zip' and HAVE_ZIPFILE and isinstance(e, zipfile.BadZipFile):
             return False, f"Invalid ZIP format: {str(e)}"
-        elif ext == '.rar' and isinstance(e, rarfile.BadRarFile):
+        elif ext == '.rar' and HAVE_RARFILE and isinstance(e, rarfile.BadRarFile):
             return False, f"Invalid RAR format: {str(e)}"
         return False, f"Error checking archive: {str(e)}"
 
@@ -335,8 +411,17 @@ def secure_upload_handler(form: cgi.FieldStorage, upload_dir: str) -> Tuple[bool
 
 def main():
 
-    # Enable CGI error reporting
-    cgitb.enable()
+    # CGI error reporting. display=0 keeps the traceback - which carries source
+    # lines, frame locals and the whole CGI environment, including any secret
+    # sourced from local_config.sh - out of the HTTP response; logdir keeps it
+    # on disk for debugging. The log directory is deliberately NOT under the
+    # web-served uploads tree.
+    cgitb_logdir = os.environ.get('UNMW_CGITB_LOGDIR', '/tmp')
+    try:
+        cgitb.enable(display=0, logdir=cgitb_logdir)
+    except Exception:
+        # Never let error reporting itself break the upload handler.
+        cgitb.enable(display=0)
 
     upload_dir = 'uploads'
     request_method = os.environ.get('REQUEST_METHOD', 'POST')

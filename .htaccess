@@ -1,4 +1,32 @@
-# These are special instructions for Apache web server
+# These are special instructions for Apache web server.
+#
+# IMPORTANT: none of the rules below take effect unless the enclosing vhost
+# grants this directory the authority to override. With the Apache default
+# (AllowOverride None) every Require here is SILENTLY IGNORED - the file is
+# not read at all - so a script the rules appear to protect is still served
+# and, under SetHandler cgi-script, executed. A working vhost block is:
+#
+#   <Directory "/var/www/example.net/cgi-bin">
+#       AllowOverride Limit Options=ExecCGI
+#       Options ExecCGI FollowSymLinks
+#       SetHandler cgi-script
+#       Require all granted
+#   </Directory>
+#
+# "Limit" is what permits the Require directives below; "Options=ExecCGI" is
+# what permits the Options line further down. Granting more than that is not
+# needed here.
+#
+# Do NOT put <Directory>, <DirectoryMatch> or AllowOverride in this file:
+# they are legal only in server/vhost context, and Apache answers 500 for
+# every request in this tree if it finds them here. Restricting CGI
+# execution in subdirectories belongs in the vhost, not here.
+#
+# Because all of the above depends on server configuration this project does
+# not control, the rules here are only the second line of defence. Every
+# script that is not a CGI entry point ALSO refuses to run as a CGI on its
+# own - see the GATEWAY_INTERFACE guard at the top of those files. That
+# guard is the authoritative protection; this file is belt and braces.
 
 # Allow CGI execution in the current directory
 Options +ExecCGI
@@ -29,8 +57,3 @@ Options +ExecCGI
     Require all denied
 </FilesMatch>
 
-# Block CGI execution in all subdirectories
-<DirectoryMatch "^.*/.+/">
-    Options -ExecCGI
-    AllowOverride None
-</DirectoryMatch>

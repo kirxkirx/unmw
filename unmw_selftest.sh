@@ -7,6 +7,44 @@ if [[ -n "$REQUEST_METHOD" ]]; then
 fi
 
 ##################################################################
+# Every script that is not a CGI entry point must refuse to run when the
+# CGI environment variables are present. This is the authoritative defence:
+# the .htaccess deny rules are ignored unless the vhost sets AllowOverride,
+# so a missing guard means the script is a live unauthenticated endpoint.
+# Checked here rather than over HTTP so it holds on any web server.
+##################################################################
+echo "Checking that non-CGI scripts refuse to run as CGI..."
+
+# autoprocess.sh is deliberately absent: it does not refuse but unsets the CGI
+# markers instead, because wrapper.sh (which is guarded) invokes it legitimately
+# from within a request. Its protection is wrapper.sh's guard plus that unset.
+NON_CGI_SCRIPTS="archive_phot_prune.sh wrapper.sh combine_reports.sh combine_results_comets.sh fastplot_wrapper.sh git_unmw_automated_update.sh generate_htdocs.sh filter_report.py archive_phot_worker.py monitoring_update.py"
+CGI_GUARD_FAILURES=""
+for SCRIPT in $NON_CGI_SCRIPTS; do
+ if [ ! -f "$SCRIPT" ]; then
+  continue
+ fi
+ if ! grep -q 'GATEWAY_INTERFACE' "$SCRIPT"; then
+  CGI_GUARD_FAILURES="$CGI_GUARD_FAILURES $SCRIPT(no-guard)"
+  continue
+ fi
+ # The guard must actually fire, not merely be mentioned in a comment.
+ case "$SCRIPT" in
+  *.py) GUARD_OUTPUT=$(GATEWAY_INTERFACE="CGI/1.1" REQUEST_METHOD="GET" python3 "$SCRIPT" 2>&1 | head -3) ;;
+  *)    GUARD_OUTPUT=$(GATEWAY_INTERFACE="CGI/1.1" REQUEST_METHOD="GET" ./"$SCRIPT" 2>&1 | head -3) ;;
+ esac
+ if ! echo "$GUARD_OUTPUT" | grep -q 'must not be run as CGI\|not a CGI\|refuses to run as a CGI\|cannot be run via a web request'; then
+  CGI_GUARD_FAILURES="$CGI_GUARD_FAILURES $SCRIPT(guard-did-not-fire)"
+ fi
+done
+if [ -n "$CGI_GUARD_FAILURES" ]; then
+ echo "$0 test error: these non-CGI scripts do not refuse a CGI invocation:$CGI_GUARD_FAILURES"
+ echo "Add the GATEWAY_INTERFACE guard - see the 'New non-CGI scripts' note in README.md"
+ exit 1
+fi
+echo "All non-CGI scripts correctly refuse a CGI invocation."
+
+##################################################################
 # Check for required external programs before starting the test
 ##################################################################
 echo "Checking for required external programs..."

@@ -27,6 +27,17 @@
 
 set -u
 
+# This script is NOT a CGI entry point and must never be reachable over the
+# web: it deletes data irreversibly, and Apache passes a query string that
+# contains no '=' straight through as command-line arguments (RFC 3875), so a
+# bare GET would supply the <days> argument it needs. The .htaccess rules are
+# ignored unless the vhost sets AllowOverride, so this guard - not .htaccess -
+# is the authoritative protection. Note the ${VAR:-} form: set -u is in effect.
+if [ -n "${GATEWAY_INTERFACE:-}" ] || [ -n "${REQUEST_METHOD:-}" ]; then
+    printf 'Content-Type: text/plain\n\nERROR: this script must not be run as CGI\n'
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)" || exit 1
 # In production uploads/ is a SYMLINK to the data root; resolve it to the
 # physical path (pwd -P) rather than passing the symlink to find, which

@@ -11,6 +11,17 @@ import sys
 from datetime import datetime, timedelta, timezone
 from os.path import splitext
 
+# Not a CGI entry point: combine_reports.sh runs this from cron. Over the web
+# it would rewrite an arbitrary report path as the web-server user. The
+# .htaccess deny rule for this file is ignored unless the vhost sets
+# AllowOverride, so this guard is the authoritative protection. It is checked
+# before the third-party imports below so that a missing module cannot turn
+# the refusal into a 500 that reveals a traceback instead.
+if os.environ.get('GATEWAY_INTERFACE') or os.environ.get('REQUEST_METHOD'):
+    sys.stdout.write('Content-Type: text/plain\n\n'
+                     'ERROR: this script must not be run as CGI\n')
+    sys.exit(1)
+
 from bs4 import BeautifulSoup
 
 # CONSTANTS
