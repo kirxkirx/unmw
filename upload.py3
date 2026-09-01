@@ -297,8 +297,7 @@ def check_archive_contents(filepath: str) -> Tuple[bool, str]:
             if total_uncompressed > MAX_UNCOMPRESSED_BYTES:
                 return False, (f"Archive expands to {total_uncompressed} bytes, "
                                f"over the {MAX_UNCOMPRESSED_BYTES} byte limit")
-            if (total_compressed > 0
-                    and total_uncompressed / total_compressed > MAX_COMPRESSION_RATIO):
+            if total_compressed > 0 and total_uncompressed / total_compressed > MAX_COMPRESSION_RATIO:
                 return False, (f"Suspicious compression ratio "
                                f"{total_uncompressed // max(total_compressed, 1)}:1 "
                                f"(maximum {MAX_COMPRESSION_RATIO}:1)")
