@@ -627,7 +627,16 @@ def main():
         # The arguments are already validated (candidate_id is [a-zA-Z0-9_.-]+,
         # safe_url is reconstructed from server-side config), so shell
         # interpolation is safe here.
-        cmd = ('nohup "%s" "%s" "%s" > "%s" 2>&1 &'
+        # "unset" strips the CGI request markers from the child's environment,
+        # the same way kick_worker() does for archive_phot_worker.py. This is a
+        # legitimate, already-validated invocation from inside a request, but
+        # fastplot_wrapper.sh refuses to run when it sees GATEWAY_INTERFACE -
+        # and os.system inherits our environment, so without this the guard
+        # would fire on every fastplot job. "unset" is a POSIX shell builtin,
+        # so this stays portable (busybox, FreeBSD, macOS).
+        cmd = ('unset GATEWAY_INTERFACE REQUEST_METHOD QUERY_STRING '
+               'CONTENT_LENGTH CONTENT_TYPE; '
+               'nohup "%s" "%s" "%s" > "%s" 2>&1 &'
                % (wrapper_path, safe_url, candidate_id, log_path))
         os.system(cmd)
     except Exception as e:

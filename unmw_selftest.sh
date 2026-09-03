@@ -44,6 +44,26 @@ if [ -n "$CGI_GUARD_FAILURES" ]; then
 fi
 echo "All non-CGI scripts correctly refuse a CGI invocation."
 
+# The other half of the same contract: a CGI that LEGITIMATELY runs one of the
+# guarded scripts must strip the CGI markers from the child environment first,
+# because a subprocess inherits them and would otherwise trip the guard on every
+# real request. Getting this wrong breaks uploads in production while every
+# other test still passes, so assert the stripping is present at each call site.
+echo "Checking that CGI callers strip the CGI markers before running guarded scripts..."
+CGI_STRIP_FAILURES=""
+if ! grep -q "child_env" upload.py3 || ! grep -q "GATEWAY_INTERFACE" upload.py3; then
+ CGI_STRIP_FAILURES="$CGI_STRIP_FAILURES upload.py3(->wrapper.sh)"
+fi
+if ! grep -q "unset GATEWAY_INTERFACE" fastplot.py; then
+ CGI_STRIP_FAILURES="$CGI_STRIP_FAILURES fastplot.py(->fastplot_wrapper.sh)"
+fi
+if [ -n "$CGI_STRIP_FAILURES" ]; then
+ echo "$0 test error: these CGI scripts launch a guarded script without stripping"
+ echo "the CGI environment first, which makes the guard fire on legitimate use:$CGI_STRIP_FAILURES"
+ exit 1
+fi
+echo "All CGI callers strip the CGI markers before launching guarded scripts."
+
 ##################################################################
 # Check for required external programs before starting the test
 ##################################################################

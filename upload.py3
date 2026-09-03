@@ -543,8 +543,19 @@ def main():
             # command injection. subprocess.call returns the wrapper's real exit
             # code (0 success, 1 failure) -- unlike os.system, which returned a
             # wait-status where 'exit 1' shows up as 256.
+            # Strip the CGI request markers from the child's environment, the
+            # same way kick_worker() does for archive_phot_worker.py. This is a
+            # legitimate, already-validated invocation from inside a request, but
+            # wrapper.sh refuses to run when it sees GATEWAY_INTERFACE - and a
+            # subprocess inherits our environment, so without this the guard
+            # would fire on every upload.
+            child_env = os.environ.copy()
+            for cgi_var in ('GATEWAY_INTERFACE', 'REQUEST_METHOD', 'QUERY_STRING',
+                            'CONTENT_LENGTH', 'CONTENT_TYPE'):
+                child_env.pop(cgi_var, None)
             try:
-                exit_status = subprocess.call(['./wrapper.sh', saved_filepath])
+                exit_status = subprocess.call(['./wrapper.sh', saved_filepath],
+                                              env=child_env)
             except Exception as e:
                 print(f"<html><body>UNMW_STATUS:ERROR Error running wrapper.sh command: {e}<br>Current working directory: {cwd}</body></html>")
                 exit_status = 1
