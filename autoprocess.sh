@@ -1003,8 +1003,9 @@ Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
   fi
  fi # grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
  # Source monitoring: quality-check and ingest the factory's monitoring
- # measurements, on successful runs only (nonempty report and zero exit
- # code). The frame-quality (cloud) check needs the frame and
+ # measurements, on successful runs only (nonempty report, zero exit
+ # code and no processing ERROR in the report, see the run-status guard
+ # below). The frame-quality (cloud) check needs the frame and
  # reference-frame star catalogs that live in the VaST working copy, and
  # the ingest reads the raw measurements file from the same copy, so BOTH
  # run synchronously here, before the working copy is deleted further
@@ -1013,12 +1014,25 @@ Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
  # slightly later script completion.
  if [ $SCRIPT_EXIT_CODE -eq 0 ] && [ -n "$MONITORING_POSITIONS_FILE" ] && [ -s transient_report/monitoring_raw_measurements.txt ];then
   MONITORING_RAW_ABS=$(readlink -f transient_report/monitoring_raw_measurements.txt)
-  # The cloud check rewrites the status of measurements from
-  # cloud-affected frames to 'cloudy'; it always exits 0 and leaves the
-  # raw file untouched on any trouble, so it can never block the ingest
-  python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --frame-quality "$MONITORING_RAW_ABS" "$PWD" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
-  python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --ingest "$MONITORING_RAW_ABS" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
-  echo "Source monitoring: ingest completed for $MONITORING_RAW_ABS" | tee -a "$AUTOPROCESS_LOG"
+  # Run-status guard: measurements from a run that raised any processing
+  # ERROR are not ingested. The test is the one the nightly summary page
+  # uses to mark a run red (any line containing ERROR in the report), with
+  # no distinction between fatal and non-fatal conditions; it also covers
+  # ERRORs raised after the factory's own monitoring block (which applies
+  # the same rule to its field before measuring). The raw file stays in
+  # the results directory as a record of what was measured.
+  if grep --quiet 'ERROR' transient_report/index.html ;then
+   MONITORING_RUN_ERROR_LINE=$(grep --max-count=1 'ERROR' transient_report/index.html | sed 's/<[^>]*>//g')
+   echo "Source monitoring: NOT ingesting $MONITORING_RAW_ABS - the transient search raised a processing error: $MONITORING_RUN_ERROR_LINE" | tee -a "$AUTOPROCESS_LOG"
+   echo "monitoring: $(date '+%Y-%m-%d %H:%M:%S') --ingest: NOT ingesting $MONITORING_RAW_ABS - the transient search raised a processing error: $MONITORING_RUN_ERROR_LINE" >> "$IMAGE_DATA_ROOT/monitoring_update.log"
+  else
+   # The cloud check rewrites the status of measurements from
+   # cloud-affected frames to 'cloudy'; it always exits 0 and leaves the
+   # raw file untouched on any trouble, so it can never block the ingest
+   python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --frame-quality "$MONITORING_RAW_ABS" "$PWD" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
+   python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --ingest "$MONITORING_RAW_ABS" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
+   echo "Source monitoring: ingest completed for $MONITORING_RAW_ABS" | tee -a "$AUTOPROCESS_LOG"
+  fi
  fi
 fi # if [ ! -f transient_report/index.html ];then
 ##

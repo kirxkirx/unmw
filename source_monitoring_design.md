@@ -33,6 +33,10 @@ and the measurement ledger are all plain ASCII.
    for every source's name and coordinates; the registry never duplicates
    them.
 3. Updates run from `autoprocess.sh`, on successful (report OK) runs only.
+   A run whose report contains any processing ERROR line (the nightly
+   summary's own red-row test, no fatal/non-fatal distinction) is not
+   ingested, and the factory itself does not measure the monitored
+   positions on a field that raised an ERROR earlier in the same run.
 4. Multi-camera sources produce ONE combined lightcurve; the camera name is
    the fourth column of the ASCII lightcurve file and appears in the AAVSO
    records.
@@ -353,7 +357,9 @@ Added latency to the upload processing: ~5-15 s total when sources are
 in-field, zero otherwise.
 
 **(c) Post-factory ingest**, from the `autoprocess.sh` SUCCESS branch only
-(where `transient_report/index.html` is confirmed), detached so transient
+(where `transient_report/index.html` is confirmed and contains no ERROR
+line; runs that raised a processing ERROR keep their raw measurement file
+in the results directory but are never ingested), detached so transient
 alerts are never delayed:
 
 ```sh
