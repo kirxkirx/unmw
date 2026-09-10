@@ -398,7 +398,8 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
             if compute_path is not None:
                 fp = run_forced_photometry_c(
                     work_dir, local_config_path, img, compute_path,
-                    entry['ra'], entry['dec'], band, debug_log=skip_log)
+                    entry['ra'], entry['dec'], band, debug_log=skip_log,
+                    off_image_as_edge=True)
             if fp is None:
                 # A None result means the measurement failed for a reason we
                 # cannot classify here: a failed plate solve, a forced-photometry
@@ -408,8 +409,11 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
                 # ever retry it, so one remote-service blip during a backfill
                 # would truncate the lightcurve forever. Leaving the image out
                 # of the ledger lets the next --reconcile / --rescan retry it.
-                # (Genuinely off-frame positions come back as a normal 'edge'
-                # dict and are recorded through the else branch below.)
+                # (Positions that sky2xy puts off this particular frame come
+                # back as an 'edge' dict thanks to off_image_as_edge=True and
+                # are recorded through the else branch below as a terminal
+                # edge row, like the factory does; without that mapping such
+                # images were retried on every rescan.)
                 log('{}: {}/{} not measured (will retry on next rescan): '
                     '{}'.format(source_id, idx, len(todo),
                                 os.path.basename(img)))

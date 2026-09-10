@@ -1071,5 +1071,74 @@ def test_aavso_star_name_stripping():
     assert nml.aavso_star_name('QSO B1420+326') == 'QSO B1420+326'
 
 
+# ---------------------------------------------------------------------------
+# run_forced_photometry_c: off-frame targets in the monitoring backfill
+# ---------------------------------------------------------------------------
+import nmw_forced_phot_lib as nfp
+
+
+class _FakeCompletedRun:
+    def __init__(self, returncode, stdout='', stderr=''):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+class TestRunForcedPhotometryOffImage:
+    """forced_photometry.sh exits 1 when sky2xy puts the target outside the
+    frame. The monitoring backfill must record that as a terminal 'edge'
+    row (like the factory does) instead of retrying the image on every
+    rescan; the web/archive callers keep getting None because they need
+    pixel positions for thumbnails."""
+
+    IMAGE = ('/data/img_x/wcs_fd_Ser-07-Q2b1x1_2026-02-12_05-22-31_20.00sec'
+             '_-14.90C_LIGHT_0019.fits')
+    OFF_IMAGE_STDERR = (
+        'Step 4: Converting RA/Dec to pixel coordinates...\n'
+        'ERROR: target coordinates are off the image\n'
+        '  sky2xy output: 18:31:15.620000 -05:34:31.900000 J2000 -> '
+        '9739.977 1478.242 (off image)\n')
+
+    def _call(self, monkeypatch, tmp_path, stderr, off_image_as_edge):
+        monkeypatch.setattr(
+            nfp, '_run_capture_session',
+            lambda cmd, cwd=None, env=None, timeout=None:
+            _FakeCompletedRun(1, '', stderr))
+        skip_log = str(tmp_path / 'measurement_skipped.log')
+        fp = nfp.run_forced_photometry_c(
+            str(tmp_path), None, self.IMAGE, self.IMAGE,
+            '18:31:15.62', '-05:34:31.9', 'V', debug_log=skip_log,
+            off_image_as_edge=off_image_as_edge)
+        return fp, skip_log
+
+    def test_off_image_becomes_edge_for_the_backfill(self, monkeypatch,
+                                                     tmp_path):
+        fp, skip_log = self._call(monkeypatch, tmp_path,
+                                  self.OFF_IMAGE_STDERR, True)
+        assert fp is not None
+        assert fp['status'] == 'edge'
+        assert fp['mag'] == '99.0000'
+        assert fp['err'] == '99.0000'
+        assert fp['jd'] is None
+        assert fp['basename'] == os.path.basename(self.IMAGE)
+        assert fp['x'] is None
+        assert fp['y'] is None
+        assert fp['aperture'] is None
+        with open(skip_log) as fh:
+            assert 'recorded as edge' in fh.read()
+
+    def test_off_image_stays_none_without_opt_in(self, monkeypatch, tmp_path):
+        fp, _ = self._call(monkeypatch, tmp_path, self.OFF_IMAGE_STDERR, False)
+        assert fp is None
+
+    def test_other_failures_stay_none_with_opt_in(self, monkeypatch, tmp_path):
+        fp, skip_log = self._call(monkeypatch, tmp_path,
+                                  'ERROR: sky2xy failed\n  Output: junk\n',
+                                  True)
+        assert fp is None
+        with open(skip_log) as fh:
+            assert 'forced_photometry.sh exited 1' in fh.read()
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

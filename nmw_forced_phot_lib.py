@@ -53,6 +53,11 @@ DEFAULT_ZOOMIN_PIXELS = 40              # half-width of the zoom-in (source px);
 DEFAULT_BAND = 'V'
 # Filters util/forced_photometry.sh accepts (mirrors its own validation).
 VALID_BANDS = ('B', 'V', 'R', 'Rc', 'I', 'Ic', 'r', 'i', 'g')
+# forced_photometry.sh prints this on stderr (and exits 1) when sky2xy puts
+# the target outside the frame or the sky-to-pixel round-trip check fails.
+# The monitoring backfill maps such exits to an 'edge' result (see
+# run_forced_photometry_c) instead of retrying the image on every rescan.
+OFF_IMAGE_STDERR_MARKER = 'target coordinates are off the image'
 # Safe-shape regex for ra/dec strings handed to subprocesses. Identical
 # character class to nmw_coord_lib.COORDS_REGEX (digits, colon, +/-, period)
 # minus whitespace and tab, since by the time a value reaches a subprocess
@@ -723,7 +728,8 @@ def _log_skip(debug_log, fits_path, reason, returncode, stderr):
 
 
 def run_forced_photometry_c(work_dir, local_config_path, fits_path, compute_path,
-                            ra, dec, band, debug_log=None):
+                            ra, dec, band, debug_log=None,
+                            off_image_as_edge=False):
     """Run the C-only forced photometry on one image inside the working copy.
 
     work_dir is a per-request rsync copy of the VaST tree (see
@@ -749,6 +755,14 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, compute_path
 
     Returns a dict with keys jd, mag, err, status, basename, aperture, x, y,
     or None if the target is off the frame / the tool failed.
+
+    off_image_as_edge: when True, a non-zero exit whose stderr carries
+    OFF_IMAGE_STDERR_MARKER (sky2xy put the target outside this frame, or
+    the sky-to-pixel round trip failed) is returned as an 'edge' result
+    (mag/err 99.0000, jd None, no pixel position, no aperture) instead of
+    None, so the caller can record a terminal ledger row exactly as the
+    factory's monitoring block does for off-frame positions. Callers that
+    need x/y/aperture for thumbnails must leave it False.
     """
     # Defense-in-depth re-validation right before exec. Upstream
     # parse_coordinates (in nmw_coord_lib) and the VALID_BANDS check in main()
@@ -843,7 +857,26 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, compute_path
         except OSError:
             pass
     if result.returncode != 0:
-        # Non-zero exit includes the target-off-image case -> skip this image.
+        if off_image_as_edge and OFF_IMAGE_STDERR_MARKER in (result.stderr or ''):
+            # The position is not on this frame: a statement about the
+            # image, not a transient failure, so hand back an 'edge' result
+            # (the status the factory records for off-frame positions)
+            # instead of None, which would make every rescan retry the image.
+            _log_skip(debug_log, fits_path,
+                      'target off the image - recorded as edge',
+                      result.returncode, result.stderr)
+            return {
+                'jd': None,
+                'mag': '99.0000',
+                'err': '99.0000',
+                'status': 'edge',
+                'basename': os.path.basename(fits_path),
+                'aperture': None,
+                'x': None,
+                'y': None,
+            }
+        # Any other non-zero exit (solver, calibration, tool failure) -> skip
+        # this image; the caller decides whether to retry it later.
         _log_skip(debug_log, fits_path,
                   'forced_photometry.sh exited %d' % result.returncode,
                   result.returncode, result.stderr)
