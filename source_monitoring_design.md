@@ -43,7 +43,10 @@ and the measurement ledger are all plain ASCII.
 5. Upper limits are included (ASCII upper-limits file, plotted, and reported
    in the AAVSO file as fainter-than records per the AAVSO documentation);
    `edge` / `saturated` / `bad_region` measurements are excluded from all
-   published products.
+   published products. `edge` covers positions off the frame, positions
+   whose sky annulus does not fit, and positions closer than
+   `MONITORING_EDGE_MARGIN_PIX` (default 100) pixels to a frame edge, in
+   both the nightly factory measurements and the backfill.
 6. No nightly averaging: every image yields its own point.
 7. Archive backfill happens only on the source's first update run.
 8. One AAVSO OBSCODE for everything, overridable via `local_config.sh`

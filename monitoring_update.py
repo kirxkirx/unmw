@@ -110,6 +110,25 @@ def _rescan_worker_cap(cfg=None):
     return 4
 
 
+def _edge_margin_pix(cfg=None):
+    """Minimum distance (pixels) from a frame edge for a monitored position
+    to be measured by the backfill/rescan modes; closer positions get a
+    terminal 'edge' ledger row (util/forced_photometry applies the rule
+    through FORCED_PHOTOMETRY_EDGE_MARGIN_PIX). Resolution order as for
+    _rescan_worker_cap: the MONITORING_EDGE_MARGIN_PIX environment variable,
+    then the same-name local_config.sh setting, then 100 - the default the
+    transient factory uses for the per-upload measurements."""
+    for raw in (os.environ.get('MONITORING_EDGE_MARGIN_PIX'),
+                (cfg or {}).get('MONITORING_EDGE_MARGIN_PIX')):
+        try:
+            margin = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if margin >= 0.0:
+            return margin
+    return 100.0
+
+
 def load_context():
     """chdir to the script directory (local_config.sh lives there, and the
     'uploads' symlink is relative to it) and read the configuration."""
@@ -119,7 +138,8 @@ def load_context():
         'IMAGE_DATA_ROOT', 'VAST_REFERENCE_COPY', 'IMAGE_ARCHIVE_DIR',
         'IMAGE_QUARANTINE_DIR', 'REFERENCE_IMAGES',
         'URL_OF_DATA_PROCESSING_ROOT', 'AAVSO_OBSCODE',
-        'MONITORING_RESCAN_WORKERS', 'MONITORING_PAGE_MESSAGE')
+        'MONITORING_RESCAN_WORKERS', 'MONITORING_PAGE_MESSAGE',
+        'MONITORING_EDGE_MARGIN_PIX')
     uploads_dir = (cfg.get('IMAGE_DATA_ROOT') or '').strip() or 'uploads'
     local_config_path = os.path.join(script_dir, 'local_config.sh')
     return script_dir, cfg, uploads_dir, local_config_path
@@ -381,6 +401,9 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
         _, _, _, compute_path_map, _ = _phase1_parallel_solve_plate(
             work_dir, local_config_path, todo, workers, skip_log)
         work_dir_default_sex = os.path.join(work_dir, 'default.sex')
+        edge_margin_pix = _edge_margin_pix(cfg)
+        log('{}: positions closer than {:g} pix to a frame edge are recorded '
+            'as edge'.format(source_id, edge_margin_pix))
         pending_rows = []
         for idx, img in enumerate(todo, start=1):
             band = derive_band(factory_text, img, '')
@@ -399,7 +422,7 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
                 fp = run_forced_photometry_c(
                     work_dir, local_config_path, img, compute_path,
                     entry['ra'], entry['dec'], band, debug_log=skip_log,
-                    off_image_as_edge=True)
+                    off_image_as_edge=True, edge_margin_pix=edge_margin_pix)
             if fp is None:
                 # A None result means the measurement failed for a reason we
                 # cannot classify here: a failed plate solve, a forced-photometry

@@ -1139,6 +1139,24 @@ class TestRunForcedPhotometryOffImage:
         with open(skip_log) as fh:
             assert 'forced_photometry.sh exited 1' in fh.read()
 
+    def test_edge_margin_reaches_the_tool_through_the_environment(
+            self, monkeypatch, tmp_path):
+        seen = {}
+
+        def fake_run(cmd, cwd=None, env=None, timeout=None):
+            seen['env'] = dict(env or {})
+            return _FakeCompletedRun(1, '', 'ERROR: sky2xy failed\n')
+        monkeypatch.setattr(nfp, '_run_capture_session', fake_run)
+        monkeypatch.delenv('FORCED_PHOTOMETRY_EDGE_MARGIN_PIX', raising=False)
+        nfp.run_forced_photometry_c(
+            str(tmp_path), None, self.IMAGE, self.IMAGE,
+            '18:31:15.62', '-05:34:31.9', 'V', edge_margin_pix=100)
+        assert seen['env'].get('FORCED_PHOTOMETRY_EDGE_MARGIN_PIX') == '100'
+        nfp.run_forced_photometry_c(
+            str(tmp_path), None, self.IMAGE, self.IMAGE,
+            '18:31:15.62', '-05:34:31.9', 'V')
+        assert 'FORCED_PHOTOMETRY_EDGE_MARGIN_PIX' not in seen['env']
+
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

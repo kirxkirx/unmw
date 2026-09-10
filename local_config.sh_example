@@ -161,6 +161,14 @@ export UNMW_LOCAL_CONFIG_SOURCED=yes
 # processing is running.
 export MONITORING_RESCAN_WORKERS=12
 
+# Minimum distance (pixels) from any frame edge for a monitored source to be
+# measured; closer positions are recorded as 'edge' (never published, never
+# re-measured). Applied by the backfill/rescan modes; the nightly factory
+# measurements use the same default (MONITORING_EDGE_MARGIN_PIX in the VaST
+# environment). The same-name environment variable overrides this value.
+# Falls back to 100 when neither is set.
+#export MONITORING_EDGE_MARGIN_PIX=100
+
 # Magnitude calibration catalog for the forced photometry tools (the
 # coordinate/archival forced photometry pages and the monitoring
 # backfill/rescan measurements; VaST util/forced_photometry.sh reads this).

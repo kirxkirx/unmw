@@ -729,7 +729,7 @@ def _log_skip(debug_log, fits_path, reason, returncode, stderr):
 
 def run_forced_photometry_c(work_dir, local_config_path, fits_path, compute_path,
                             ra, dec, band, debug_log=None,
-                            off_image_as_edge=False):
+                            off_image_as_edge=False, edge_margin_pix=None):
     """Run the C-only forced photometry on one image inside the working copy.
 
     work_dir is a per-request rsync copy of the VaST tree (see
@@ -763,6 +763,11 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, compute_path
     None, so the caller can record a terminal ledger row exactly as the
     factory's monitoring block does for off-frame positions. Callers that
     need x/y/aperture for thumbnails must leave it False.
+
+    edge_margin_pix: when set, positions closer than this many pixels to a
+    frame edge come back with status 'edge' (util/forced_photometry applies
+    the rule through its FORCED_PHOTOMETRY_EDGE_MARGIN_PIX environment
+    variable; None keeps the tool's default of the annulus having to fit).
     """
     # Defense-in-depth re-validation right before exec. Upstream
     # parse_coordinates (in nmw_coord_lib) and the VALID_BANDS check in main()
@@ -810,6 +815,9 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, compute_path
     env['FORCED_PHOT_RA'] = ra_safe
     env['FORCED_PHOT_DEC'] = dec_safe
     env['FORCED_PHOT_BAND'] = band
+    if edge_margin_pix is not None:
+        env['FORCED_PHOTOMETRY_EDGE_MARGIN_PIX'] = '{:g}'.format(
+            float(edge_margin_pix))
     if local_config_path and os.path.isfile(local_config_path):
         # Source local_config.sh (its stdout sent to stderr so it cannot pollute
         # the forced-photometry result on stdout), then exec the script.
