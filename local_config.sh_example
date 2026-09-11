@@ -112,6 +112,36 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # Default hard limit is 5 GB = 5 * 1024 * 1024 KB
 #export WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB=5242880
 
+# How many candidates a single-field report may contain and still be included
+# in the combined report built by combine_reports.sh. A field over any of these
+# limits is dropped from the combined report COMPLETELY - it is not truncated -
+# so set them generously. Raise them when the detection settings are made more
+# sensitive. The defaults shown are the built-in ones.
+#
+# Number of candidates with no identification allowed in one field. This is the
+# strictest gate: it applies no matter how few candidates the field has in total.
+#export MAX_UNIDENTIFIED_CANDIDATES_FOR_COMBINED_LIST=40
+# Total number of candidates allowed in one field when most of them are already
+# identified (known variable stars, asteroids etc.)
+#export MAX_CANDIDATES_FOR_COMBINED_LIST_IF_MOST_ARE_KNOWN=200
+# Total number of candidates allowed in one field otherwise
+#export MAX_CANDIDATES_FOR_COMBINED_LIST_DEFAULT=120
+# Number of unidentified candidates up to which the higher total limit applies
+#export MAX_UNIDENTIFIED_CANDIDATES_FOR_RELAXED_LIMIT=19
+
+# The high-priority fields: crowded Galactic Center region fields where a real
+# transient is most likely to hide among the many known variable stars.
+# Exported here, this one list drives BOTH scripts: combine_reports.sh always
+# includes these fields in the combined report whatever their candidate count,
+# and VaST's util/transients/transient_factory_test31.sh both lifts its own
+# candidate-number limits for them and runs an extra, more sensitive SExtractor
+# pass on them (which roughly doubles the processing time of such a field, so
+# keep the list short). autoprocess.sh sources this file before running the
+# VaST factory, so the factory inherits the value.
+# Field names are matched EXACTLY - no patterns, no substrings. The default is
+# the list shown below.
+#export HIGH_PRIORITY_FIELDS="Sco6 Oph-08-Q1b1x1 Oph-08-Q2b1x1 Sco-04-Q1b1x1 Sco-04-Q2b1x1 Sgr-04-Q1b1x1 Sgr-04-Q2b1x1 242"
+
 # Notification hooks (all optional; no notifications are sent when unset).
 # autoprocess.sh and combine_reports.sh use these to alert the team about
 # bright candidates, errors and stuck cameras.
@@ -119,7 +149,9 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # CURL_USERNAME_URL_TO_EMAIL_TEAM / CURL_USERNAME_URL_TO_EMAIL_KIRX are the
 # URLs of a form-to-email relay; the scripts POST name/message/submit fields
 # to them with curl. _TEAM is used for general team alerts, _KIRX for
-# bright-candidate and large-HTML-file alerts.
+# bright-candidate alerts and for the operator alerts raised when a field has
+# to be left out of the combined report (oversized HTML, unparsable candidate
+# list, too many candidates, report body that cannot be extracted).
 #export CURL_USERNAME_URL_TO_EMAIL_TEAM="https://example.com/cgi-bin/formmail"
 #export CURL_USERNAME_URL_TO_EMAIL_KIRX="https://example.com/cgi-bin/formmail"
 #

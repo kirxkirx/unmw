@@ -87,6 +87,77 @@ if [ -z "$URL_OF_DATA_PROCESSING_ROOT" ];then
  URL_OF_DATA_PROCESSING_ROOT="http://vast.sai.msu.ru/unmw/uploads"
 fi
 
+# How many candidates a single-field report may contain and still be included in
+# the combined report. A field over the limit is dropped from the combined report
+# COMPLETELY - it is not truncated - so these limits should be set generously.
+# All four may be exported in local_config.sh to tune a particular host.
+#
+# Raised from 20/100/60/9 in 2026-09 together with the more sensitive
+# NMW-TexasTech detection settings (SExtractor DETECT_THRESH 2.0 and
+# MIN_SNR_TRANSIENT_DETECTION 4.5) that roughly double the number of candidates
+# on a crowded field. Measured on 600 production fields (2026-09-08..10): five
+# fields were dropped with the old limits, twelve would be with doubled counts,
+# five again with these values.
+#
+# The number of candidates with no identification allowed in one field.
+# This is the strictest of the three gates - it applies no matter how few
+# candidates the field has in total.
+if [ -z "$MAX_UNIDENTIFIED_CANDIDATES_FOR_COMBINED_LIST" ];then
+ MAX_UNIDENTIFIED_CANDIDATES_FOR_COMBINED_LIST=40
+fi
+# The total number of candidates allowed in one field when most of them are
+# already identified (known variable stars, asteroids etc.)
+if [ -z "$MAX_CANDIDATES_FOR_COMBINED_LIST_IF_MOST_ARE_KNOWN" ];then
+ MAX_CANDIDATES_FOR_COMBINED_LIST_IF_MOST_ARE_KNOWN=200
+fi
+# The total number of candidates allowed in one field otherwise
+if [ -z "$MAX_CANDIDATES_FOR_COMBINED_LIST_DEFAULT" ];then
+ MAX_CANDIDATES_FOR_COMBINED_LIST_DEFAULT=120
+fi
+# Number of unidentified candidates up to which the higher total limit applies.
+# Keep this in step with MAX_UNIDENTIFIED_CANDIDATES_FOR_RELAXED_LIMIT in VaST's
+# util/transients/transient_factory_test31.sh
+if [ -z "$MAX_UNIDENTIFIED_CANDIDATES_FOR_RELAXED_LIMIT" ];then
+ MAX_UNIDENTIFIED_CANDIDATES_FOR_RELAXED_LIMIT=19
+fi
+
+# The high-priority fields: crowded Galactic Center region fields where a real
+# transient is most likely to hide among the many known variable stars. They are
+# always included in the combined report, however many candidates they have.
+# The same list drives two things on the VaST side (HIGH_PRIORITY_FIELDS in
+# util/transients/transient_factory_test31.sh): the same lifting of the
+# candidate-number limits, and an extra, more sensitive SExtractor pass.
+# Exporting HIGH_PRIORITY_FIELDS from local_config.sh sets it for both scripts -
+# autoprocess.sh sources local_config.sh before running the VaST factory, and
+# this script sources it above. The built-in default below must stay in step
+# with the one in the VaST script for standalone runs.
+# Field names are matched EXACTLY - no patterns, no substrings.
+if [ -z "$HIGH_PRIORITY_FIELDS" ];then
+ HIGH_PRIORITY_FIELDS="Sco6 Oph-08-Q1b1x1 Oph-08-Q2b1x1 Sco-04-Q1b1x1 Sco-04-Q2b1x1 Sgr-04-Q1b1x1 Sgr-04-Q2b1x1 242"
+fi
+
+function is_high_priority_field {
+ # Check if the field name provided as the first argument is one of the
+ # high-priority fields listed in HIGH_PRIORITY_FIELDS above.
+ # Returns 0 (true) if it is, 1 (false) otherwise.
+ local field_to_check
+ local known_high_priority_field
+
+ field_to_check="$1"
+
+ if [ -z "$field_to_check" ];then
+  return 1
+ fi
+
+ for known_high_priority_field in $HIGH_PRIORITY_FIELDS ;do
+  if [ "$field_to_check" = "$known_high_priority_field" ];then
+   return 0
+  fi
+ done
+
+ return 1
+}
+
 
 # This script creates a lock file at $DATA_PROCESSING_ROOT/combine_reports.lock and writes its own process ID into that file.
 # If another instance of the script runs, it checks the lock file, and if it exists,
@@ -626,39 +697,80 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
   NUMBER_OF_UNIDENTIFIED_CANDIDATES="99999"
  fi
  
- # Always include crowded Galactic Center region fields
+ # Always include the high-priority crowded Galactic Center region fields
  IS_GALACTIC_CENTER_CANDIDATE_LIMIT_EXEMPT_FIELD="no"
- case "$FIELD" in
-  Sco6|Oph-08-Q1b1x1|Oph-08-Q2b1x1|Sco-04-Q1b1x1|Sco-04-Q2b1x1|Sgr-04-Q1b1x1|Sgr-04-Q2b1x1|242) IS_GALACTIC_CENTER_CANDIDATE_LIMIT_EXEMPT_FIELD="yes" ;;
- esac
- # Use a higher total candidate limit if most candidates are already identified
- if [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -le 9 ];then
-  MAX_CANDIDATES_FOR_COMBINED_LIST=100
- else
-  MAX_CANDIDATES_FOR_COMBINED_LIST=60
+ if is_high_priority_field "$FIELD" ;then
+  IS_GALACTIC_CENTER_CANDIDATE_LIMIT_EXEMPT_FIELD="yes"
  fi
- if { [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt $MAX_CANDIDATES_FOR_COMBINED_LIST ] && [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -lt 20 ]; } || [ "$IS_GALACTIC_CENTER_CANDIDATE_LIMIT_EXEMPT_FIELD" = "yes" ]; then
+ # Use a higher total candidate limit if most candidates are already identified
+ if [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -le $MAX_UNIDENTIFIED_CANDIDATES_FOR_RELAXED_LIMIT ];then
+  MAX_CANDIDATES_FOR_COMBINED_LIST=$MAX_CANDIDATES_FOR_COMBINED_LIST_IF_MOST_ARE_KNOWN
+ else
+  MAX_CANDIDATES_FOR_COMBINED_LIST=$MAX_CANDIDATES_FOR_COMBINED_LIST_DEFAULT
+ fi
+ if { [ $NUMBER_OF_CANDIDATE_TRANSIENTS -lt $MAX_CANDIDATES_FOR_COMBINED_LIST ] && [ $NUMBER_OF_UNIDENTIFIED_CANDIDATES -lt $MAX_UNIDENTIFIED_CANDIDATES_FOR_COMBINED_LIST ]; } || [ "$IS_GALACTIC_CENTER_CANDIDATE_LIMIT_EXEMPT_FIELD" = "yes" ]; then
+  # Copy the body of the individual-field report - everything between the
+  # 'Processing fields' and 'Processing complete!' markers - into the combined
+  # report. This used to be done with 'grep -A100000 | grep -B100000', which
+  # silently produced an EMPTY result if the report body was longer than the
+  # 100000-line window (about 530 candidates at the measured 189 lines per
+  # candidate) while still marking the field OK on the summary page. awk has no
+  # such window, and the emptiness check below turns a failed extraction into a
+  # visible ERROR instead of a green row with no candidates.
   # The second sed rewrites the "$FIELD field processing log" self-link emitted by
   # VaST's make_report_in_HTML.sh (href='./') so that on the combined page each
   # candidate links back to the originating field's results directory rather than
   # the directory holding the combined HTML. Matched on the class marker by contract.
-  grep --max-count=1 -A100000 'Processing fields' "$INPUT_DIR/index.html" | grep -B100000 'Processing complete!' | grep -v -e 'Processing fields' -e 'Processing complete' | sed "s:src=\":src=\"$INPUT_DIR/:g" | sed "s:class='field-processing-log-link' href='\./':class='field-processing-log-link' href='$INPUT_DIR/':g" >> "$OUTPUT_COMBINED_HTML_NAME"
-  INCLUDE_REPORT_IN_COMBINED_LIST="OK"
- elif [ "$NUMBER_OF_UNIDENTIFIED_CANDIDATES" = "99999" ];then 
+  COMBINED_REPORT_BODY_TMP="combine_reports_body_$$.tmp"
+  awk '/Processing fields/{combined_report_body=1} combined_report_body{print} /Processing complete!/{if(combined_report_body) exit}' "$INPUT_DIR/index.html" | grep -v -e 'Processing fields' -e 'Processing complete' | sed "s:src=\":src=\"$INPUT_DIR/:g" | sed "s:class='field-processing-log-link' href='\./':class='field-processing-log-link' href='$INPUT_DIR/':g" > "$COMBINED_REPORT_BODY_TMP"
+  if [ -s "$COMBINED_REPORT_BODY_TMP" ];then
+   cat "$COMBINED_REPORT_BODY_TMP" >> "$OUTPUT_COMBINED_HTML_NAME"
+   INCLUDE_REPORT_IN_COMBINED_LIST="OK"
+  else
+   echo "ERROR: cannot extract the report body from $INPUT_DIR/index.html"
+   HOST=$(hostname)
+   HOST="@$HOST"
+   NAME="$USER$HOST"
+   SCRIPTNAME=$(basename $0)
+   MSG="Cannot extract the report body from $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/index.html
+-- the 'Processing fields' and 'Processing complete!' markers were not both found.
+The field is left out of the combined list $OUTPUT_COMBINED_HTML_NAME."
+   if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+    curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR: cannot extract report body] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+   fi
+   INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"
+  fi
+  rm -f "$COMBINED_REPORT_BODY_TMP"
+ elif [ "$NUMBER_OF_UNIDENTIFIED_CANDIDATES" = "99999" ];then
   echo "ERROR: parsing $INPUT_DIR/index.html"
   HOST=$(hostname)
   HOST="@$HOST"
   NAME="$USER$HOST"
   SCRIPTNAME=$(basename $0)
-  MSG="ERROR parsing candidates list in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
-  INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"  
+  MSG="ERROR parsing candidates list in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/
+-- the 'Found N unidentified candidates ...' line could not be found in index.html.
+The field is left out of the combined list $OUTPUT_COMBINED_HTML_NAME."
+  # A field dropped from the combined report is invisible apart from a red row on
+  # the summary page, so tell the operator about it.
+  if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+   curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR: cannot parse candidates list] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+  fi
+  INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"
  else
   echo "ERROR: too many candidates in $INPUT_DIR/index.html"
   HOST=$(hostname)
   HOST="@$HOST"
   NAME="$USER$HOST"
   SCRIPTNAME=$(basename $0)
-  MSG="Too many candidates ($NUMBER_OF_UNIDENTIFIED_CANDIDATES with no ID, $NUMBER_OF_CANDIDATE_TRANSIENTS total) in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/"
+  MSG="Too many candidates ($NUMBER_OF_UNIDENTIFIED_CANDIDATES with no ID, $NUMBER_OF_CANDIDATE_TRANSIENTS total) in $URL_OF_DATA_PROCESSING_ROOT/$INPUT_DIR/
+The limits are $MAX_UNIDENTIFIED_CANDIDATES_FOR_COMBINED_LIST unidentified and $MAX_CANDIDATES_FOR_COMBINED_LIST total candidates.
+The field is left out of the combined list $OUTPUT_COMBINED_HTML_NAME COMPLETELY -- none of
+its candidates appear there. Please have a look at the individual-field report."
+  # A field dropped from the combined report is invisible apart from a red row on
+  # the summary page, so tell the operator about it.
+  if [ -n "$CURL_USERNAME_URL_TO_EMAIL_KIRX" ];then
+   curl --silent $CURL_USERNAME_URL_TO_EMAIL_KIRX --data-urlencode "name=[NMW ERROR: too many candidates] $NAME running $SCRIPTNAME" --data-urlencode "message=$MSG" --data-urlencode 'submit=submit'
+  fi
   INCLUDE_REPORT_IN_COMBINED_LIST="ERROR"
  fi
  echo "$INPUT_DIR/index.html" >> combine_reports.log
