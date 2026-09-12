@@ -723,7 +723,13 @@ Reports on the individual fields may be found at $URL_OF_DATA_PROCESSING_ROOT/au
   # the directory holding the combined HTML. Matched on the class marker by contract.
   COMBINED_REPORT_BODY_TMP="combine_reports_body_$$.tmp"
   awk '/Processing fields/{combined_report_body=1} combined_report_body{print} /Processing complete!/{if(combined_report_body) exit}' "$INPUT_DIR/index.html" | grep -v -e 'Processing fields' -e 'Processing complete' | sed "s:src=\":src=\"$INPUT_DIR/:g" | sed "s:class='field-processing-log-link' href='\./':class='field-processing-log-link' href='$INPUT_DIR/':g" > "$COMBINED_REPORT_BODY_TMP"
-  if [ -s "$COMBINED_REPORT_BODY_TMP" ];then
+  # An EMPTY extraction is NORMAL and must not be reported as a failure: about half
+  # of all fields find no candidates at all, and then 'Processing complete!' follows
+  # 'Processing fields' immediately with nothing in between. Test that the MARKERS
+  # are present instead of testing the size of the output. (With the awk extractor
+  # above there is no line window to overrun, so a missing marker is the only way
+  # the extraction can genuinely fail.)
+  if grep --quiet 'Processing fields' "$INPUT_DIR/index.html" && grep --quiet 'Processing complete!' "$INPUT_DIR/index.html" ;then
    cat "$COMBINED_REPORT_BODY_TMP" >> "$OUTPUT_COMBINED_HTML_NAME"
    INCLUDE_REPORT_IN_COMBINED_LIST="OK"
   else
