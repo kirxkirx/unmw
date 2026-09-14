@@ -83,6 +83,26 @@ REASON_CLOUDY = 'cloudy_frame'
 MANUAL_STATUS = 'manual'
 REASON_MANUAL = 'manual_exclusion'
 
+# Displayed reason for the EXCLUDED_STATUSES that are REPORTED on the source
+# page and in EXCLUDED_MEASUREMENTS_BASENAME. These rows carry no usable
+# magnitude, but they are listed rather than dropped: the frame did cover the
+# position and the measurement was refused or failed, so leaving them out
+# makes a rejected measurement look like an image that was never taken.
+#
+# 'edge' is deliberately NOT in this table. It means the position falls off
+# the frame, or its aperture and sky annulus reach past the border, i.e. the
+# image genuinely does not cover the source - there "no data" is the correct
+# impression, and reporting it would bury the informative rows (edge is by
+# far the most common of these statuses on partially covering fields).
+REASON_FOR_EXCLUDED_STATUS = {
+    'bad_region': 'bad_ccd_region',
+    'saturated': 'saturated',
+    'nan_pixel': 'blank_pixels_in_aperture',
+    'calib_fail': 'magnitude_calibration_failed',
+    'fail': 'measurement_failed',
+    'tool_fail': 'measurement_failed',
+}
+
 # Name and coordinate validation for monitoring_list.txt lines
 NAME_CHARSET_RE = re.compile(r'^[A-Za-z0-9+.()= _-]+$')
 SOURCE_ID_RE = re.compile(r'^[A-Za-z0-9+.()=_-]+$')
@@ -463,13 +483,30 @@ def classify_ledger_rows(rows):
     """Split ledger rows into (detections, upperlimits, quality_excluded),
     each JD-sorted and with parsed jd/mag floats attached. Rows with the
     'cloudy' status (condemned by the per-frame cloud check at ingest time)
-    go to quality_excluded; everything else that is neither a detection nor
-    an upper limit is excluded from the published products entirely."""
+    go to quality_excluded, and so do the rows whose status says the
+    measurement itself could not be made (EXCLUDED_STATUSES: the position
+    fell on a masked CCD region, off the frame edge, on a saturated star
+    and so on). The latter carry no magnitude - mag_float is None - but
+    they are reported rather than dropped, so that a rejected image is
+    never mistaken for an image that was never taken."""
     detections = []
     upperlimits = []
     quality_excluded = []
     for row in rows:
         if row['status'] in EXCLUDED_STATUSES:
+            if row['status'] not in REASON_FOR_EXCLUDED_STATUS:
+                continue
+            jd = _float_or_none(row['jd'])
+            if jd is None:
+                continue
+            parsed = dict(row)
+            parsed['jd_float'] = jd
+            mag = _float_or_none(row['mag'].lstrip('<'))
+            parsed['mag_float'] = mag if mag is not None and mag <= 90.0 \
+                else None
+            parsed['err_float'] = None
+            parsed['reason'] = REASON_FOR_EXCLUDED_STATUS[row['status']]
+            quality_excluded.append(parsed)
             continue
         jd = _float_or_none(row['jd'])
         mag = _float_or_none(row['mag'].lstrip('<'))
@@ -757,11 +794,23 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
 
         inc_lines = ['# JD(UTC) mag err camera reason image_basename',
                      '# measurements excluded from lightcurve.dat, the plot'
-                     ' and the AAVSO file by the quality checks']
+                     ' and the AAVSO file',
+                     '# mag/err 99.0000 mean the measurement could not be'
+                     ' made on that image (see the reason column)']
         for row in excluded:
             err = row.get('err_float')
+            mag = row.get('mag_float')
+            if mag is None:
+                # The measurement could not be made at all (masked region,
+                # frame edge, saturation): no magnitude exists, so the
+                # magnitude and error columns carry the 99.0000 no-value
+                # marker used throughout the ledger.
+                inc_lines.append('{:.5f} 99.0000 99.0000 {} {} {}'.format(
+                    row['jd_float'], row['camera'], row['reason'],
+                    row['basename']))
+                continue
             inc_lines.append('{:.5f} {:.4f} {:.4f} {} {} {}'.format(
-                row['jd_float'], row['mag_float'],
+                row['jd_float'], mag,
                 err if err is not None and err < 90.0 else 0.001,
                 row['camera'], row['reason'], row['basename']))
         inc_path = os.path.join(source_dir, EXCLUDED_MEASUREMENTS_BASENAME)
@@ -892,8 +941,8 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
     parts.append('<h2>{}</h2>\n'.format(html_escape(title)))
     excluded_note = ''
     if excluded:
-        excluded_note = (' &middot; {} excluded by the quality'
-                         ' checks'.format(len(excluded)))
+        excluded_note = (' &middot; {} excluded from the'
+                         ' lightcurve'.format(len(excluded)))
     parts.append('<p>Position: <span class="code">{} {}</span>'
                  ' &middot; cameras: {} &middot; {} detections,'
                  ' {} upper limits{}</p>\n'.format(
@@ -982,7 +1031,7 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
         parts.append('</pre>\n')
     if excluded:
         parts.append(
-            '<h3>Measurements excluded by the quality checks</h3>\n'
+            '<h3>Measurements excluded from the lightcurve</h3>\n'
             '<p class="secondary">These measurements are excluded from the'
             ' lightcurve, the plot and the AAVSO file.'
             ' Reason <span class="code">{rv}</span>: frames of the same'
@@ -993,20 +1042,43 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
             ' Reason <span class="code">{rc}</span>: the frame failed the'
             ' cloud check - its field stars disagree with the reference'
             ' frame in a way uniform transparency loss cannot explain.'
+            ' The remaining reasons mean the measurement could not be made'
+            ' on that image at all, so no magnitude is shown:'
+            ' <span class="code">{rb}</span> - the position falls on a'
+            ' masked part of the detector (bad_region.lst of that camera);'
+            ' <span class="code">{rs}</span> - the star is there but too'
+            ' bright to measure; <span class="code">{rn}</span>,'
+            ' <span class="code">{rk}</span> and'
+            ' <span class="code">{rf}</span> - the aperture contained blank'
+            ' pixels, the frame could not be calibrated, or the measuring'
+            ' tool failed. These images WERE taken and WERE measured: they'
+            ' are listed here so that a rejected measurement is never'
+            ' mistaken for a gap in the coverage.'
             ' The excluded rows are kept in'
             ' <a href="{f}">{f}</a>.</p>\n<pre>\n'.format(
                 rv=REASON_VISIT, rc=REASON_CLOUDY,
+                rb=REASON_FOR_EXCLUDED_STATUS['bad_region'],
+                rs=REASON_FOR_EXCLUDED_STATUS['saturated'],
+                rn=REASON_FOR_EXCLUDED_STATUS['nan_pixel'],
+                rk=REASON_FOR_EXCLUDED_STATUS['calib_fail'],
+                rf=REASON_FOR_EXCLUDED_STATUS['fail'],
                 f=EXCLUDED_MEASUREMENTS_BASENAME))
-        table_fmt = '{:<16} {:<17} {:<7} {:<8} {:<18} {:<11} {}\n'
+        table_fmt = '{:<16} {:<17} {:<7} {:<8} {:<28} {:<11} {}\n'
         parts.append(table_fmt.format(
             'Date (UTC)', 'JD(UTC)', 'mag', 'err', 'reason', 'camera',
             'image'))
         for row in sorted(excluded, key=lambda r: r['jd_float'],
                           reverse=True):
+            # A row with no magnitude shows a dash rather than the 99.0000
+            # no-value marker, which would read as a real measurement.
+            if row.get('mag_float') is None:
+                mag_text, err_text = '-', '-'
+            else:
+                mag_text, err_text = row['mag'], row['err']
             parts.append(table_fmt.format(
                 html_escape(jd_to_atel_date(vast_dir, row['jd'])),
-                html_escape(row['jd']), html_escape(row['mag']),
-                html_escape(row['err']), html_escape(row['reason']),
+                html_escape(row['jd']), html_escape(mag_text),
+                html_escape(err_text), html_escape(row['reason']),
                 html_escape(row['camera']), html_escape(row['basename'])))
         parts.append('</pre>\n')
     parts.append('</body></html>\n')
