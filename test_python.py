@@ -1160,3 +1160,55 @@ class TestRunForcedPhotometryOffImage:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+# ---------------------------------------------------------------------------
+# Monitoring list page: coordinate rounding for display (nmw_monitoring_lib)
+# ---------------------------------------------------------------------------
+
+def test_round_sexagesimal_ra_two_decimals():
+    assert nml.display_ra('12:34:56.789') == '12:34:56.79'
+    assert nml.display_ra('12:34:56') == '12:34:56.00'
+    assert nml.display_ra('5:03:07.1') == '05:03:07.10'
+    # half-up, not banker's rounding
+    assert nml.display_ra('01:02:03.125') == '01:02:03.13'
+
+
+def test_round_sexagesimal_ra_carry_chain():
+    assert nml.display_ra('12:34:59.995') == '12:35:00.00'
+    assert nml.display_ra('12:59:59.996') == '13:00:00.00'
+    # 24h wrap, as in VaST lib/deg2hms
+    assert nml.display_ra('23:59:59.999') == '00:00:00.00'
+    # just below the threshold does not carry
+    assert nml.display_ra('12:34:59.994') == '12:34:59.99'
+
+
+def test_round_sexagesimal_dec_one_decimal():
+    assert nml.display_dec('-12:34:56.78') == '-12:34:56.8'
+    assert nml.display_dec('12:34:56.75') == '+12:34:56.8'
+    assert nml.display_dec('+0:00:00') == '+00:00:00.0'
+    assert nml.display_dec('+12:34:59.96') == '+12:35:00.0'
+    assert nml.display_dec('-45:59:59.95') == '-46:00:00.0'
+    assert nml.display_dec('89:59:59.97') == '+90:00:00.0'
+
+
+def test_round_sexagesimal_unparsable_passthrough():
+    assert nml.display_ra('garbage') == 'garbage'
+    assert nml.display_dec('12:34') == '12:34'
+
+
+def test_central_index_shows_rounded_coordinates_with_full_tooltip():
+    import shutil
+    sandbox = tempfile.mkdtemp()
+    try:
+        entry = {'ra': '12:34:56.789', 'dec': '-12:34:56.78',
+                 'name': 'Test Star', 'source_id': 'Test_Star', 'line_no': 1}
+        root = nml.monitoring_root(sandbox)
+        os.makedirs(nml.source_dir_path(sandbox, 'Test_Star'))
+        nml.rebuild_central_index(sandbox, [entry], None)
+        with open(os.path.join(root, 'index.html')) as fh:
+            page = fh.read()
+        assert '<td class="code" title="12:34:56.789">12:34:56.79</td>' in page
+        assert '<td class="code" title="-12:34:56.78">-12:34:56.8</td>' in page
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)

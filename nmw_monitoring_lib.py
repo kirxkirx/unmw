@@ -14,6 +14,7 @@ Design: source_monitoring_design.md. Key points:
   excluded from every published product.
 """
 
+import decimal
 import fcntl
 import os
 import re
@@ -248,6 +249,51 @@ def _dec_in_range(dec):
     if int(degrees) == 90 and (int(minutes) or float(seconds)):
         return False
     return True
+
+
+def round_sexagesimal(value, decimals, is_ra):
+    """Round a validated 'HH:MM:SS.SSS' / '[+-]DD:MM:SS.SS' string to
+    `decimals` places of seconds for display, keeping the sexagesimal
+    form. Mirrors VaST lib/deg2hms: half-up rounding on the seconds field
+    with the carry chain seconds -> minutes -> hours/degrees, the 24h wrap
+    for RA, and an explicit sign for Dec. The seconds field is rounded as a
+    decimal string, so no float round trip touches the value. Returns the
+    input unchanged when it does not parse (the list page must never fail
+    on a cosmetic step)."""
+    text = value.strip()
+    sign = ''
+    if not is_ra:
+        sign = '-' if text.startswith('-') else '+'
+    try:
+        first, minutes, seconds = text.lstrip('+-').split(':')
+        first = int(first)
+        minutes = int(minutes)
+        seconds = decimal.Decimal(seconds).quantize(
+            decimal.Decimal(1).scaleb(-decimals),
+            rounding=decimal.ROUND_HALF_UP)
+    except (ValueError, decimal.InvalidOperation):
+        return value
+    if seconds >= 60:
+        seconds -= 60
+        minutes += 1
+    if minutes >= 60:
+        minutes -= 60
+        first += 1
+    if is_ra and first >= 24:
+        first -= 24
+    return '{}{:02d}:{:02d}:{:0{width}.{decimals}f}'.format(
+        sign, first, minutes, seconds,
+        width=3 + decimals if decimals else 2, decimals=decimals)
+
+
+def display_ra(ra):
+    """RA as HH:MM:SS.SS for the human-readable source list."""
+    return round_sexagesimal(ra, 2, True)
+
+
+def display_dec(dec):
+    """Dec as +DD:MM:SS.S for the human-readable source list."""
+    return round_sexagesimal(dec, 1, False)
 
 
 def parse_monitoring_list(path):
@@ -1120,15 +1166,20 @@ def rebuild_central_index(uploads_dir, entries, vast_dir):
             else:
                 last_jd = 'no data'
                 last_date = 'no data'
+            # Rounded coordinates keep the table tidy; the full-precision
+            # list values stay in the tooltip and on the per-source page.
             parts.append('<tr><td><a href="{}/index.html">{}</a></td>'
-                         '<td class="code">{}</td><td class="code">{}</td>'
+                         '<td class="code" title="{}">{}</td>'
+                         '<td class="code" title="{}">{}</td>'
                          '<td>{}</td><td>{}</td><td class="code">{}</td>'
                          '<td class="code">{}</td>'
                          '</tr>\n'.format(
                              html_escape(entry['source_id']),
                              html_escape(entry['name']),
                              html_escape(entry['ra']),
+                             html_escape(display_ra(entry['ra'])),
                              html_escape(entry['dec']),
+                             html_escape(display_dec(entry['dec'])),
                              len(detections), len(upperlimits),
                              html_escape(last_date), last_jd))
         parts.append('</table>\n')
