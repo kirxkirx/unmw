@@ -214,6 +214,40 @@ def _camera_block_body(factory_text, camera):
     return factory_text[body_start:cm.start()]
 
 
+def bad_region_file_for_camera(factory_text, camera, calibration_dir,
+                               work_dir):
+    """The bad-region list the transient factory installs as bad_region.lst
+    for a camera: the last uncommented BAD_REGION_FILE="..." assignment in
+    the camera's settings block of transient_factory_test31.sh, with
+    $NMW_CALIBRATION and $CAMERA_SETTINGS expanded. A relative path is taken
+    relative to work_dir, the VaST working copy - the factory resolves it
+    against its own working copy the same way ("../STL_bad_region.lst").
+    Returns None when the camera block sets no list, or the value holds a
+    variable that cannot be expanded here."""
+    body = _camera_block_body(factory_text, camera)
+    if not body:
+        return None
+    value = None
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith('#'):
+            continue
+        m = re.match(r'BAD_REGION_FILE="([^"]*)"', stripped)
+        if m:
+            value = m.group(1)
+    if not value:
+        return None
+    for name, replacement in (('NMW_CALIBRATION', calibration_dir or ''),
+                              ('CAMERA_SETTINGS', camera)):
+        value = value.replace('${' + name + '}', replacement)
+        value = value.replace('$' + name, replacement)
+    if '$' in value:
+        return None
+    if not os.path.isabs(value):
+        value = os.path.normpath(os.path.join(work_dir, value))
+    return value
+
+
 def band_for_camera(factory_text, camera):
     """Derive the calibration band letter for a CAMERA_SETTINGS value.
 

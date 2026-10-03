@@ -17,8 +17,9 @@ Modes (see source_monitoring_design.md):
       the raw file; the ingest then records them in the ledger (so the
       frames are never re-measured) but they are excluded from the
       published products. Never blocks the ingest: any trouble is logged
-      and the raw file is left untouched. New uploads only - archived
-      images are vetted clean and the backfill/rescan paths skip this.
+      and the raw file is left untouched. New uploads only: the manual
+      modes never run the check, they reuse the verdicts it left in the
+      ledgers (see below).
   --ingest <raw_measurements_file>
       Post-factory ingest called synchronously by autoprocess.sh on
       SUCCESSFUL runs: append the factory's hand-off rows to the
@@ -47,7 +48,13 @@ Modes (see source_monitoring_design.md):
   autoprocess.sh, or the run's report for older images): the images of a
   rejected run get run_error ledger rows without being measured (no row
   when the position is not on the image), the images of a run still in
-  progress are left for the next rescan.
+  progress are left for the next rescan. They also honour the verdict of
+  the ingest's cloud check, kept in the ledgers: a frame with a 'cloudy'
+  row in any source's ledger is measured and a detection or upper limit on
+  it is recorded as 'cloudy' (the values kept), as the ingest does. The
+  images are processed camera by camera with the bad-region list the
+  transient factory uses for the camera (BAD_REGION_FILE of the camera
+  block) in place for the plate-solve pass and the measurement.
   --rebuild-pages
       Re-render all products (HTML pages, plots, ASCII + AAVSO files) for
       every activated source from their existing ledgers, without measuring
@@ -384,43 +391,79 @@ def mode_ingest(raw_path, rejected=False):
 
 # ---------- measurement machinery for the manual modes ----------
 
-def record_rejected_run_images(cfg, entry, rejected, uploads_dir,
-                               factory_text):
-    """Record images of rejected transient-search runs in the ledger of one
-    source without measuring them: a run_error row when the position is on
-    the image. A position that sky2xy puts off the image gets no row at all
-    rather than a permanent 'edge' one - the plate solution of a rejected
-    run may be what failed, while a run_error row is replaced when a later
-    reprocessing of the upload succeeds - and the image is simply checked
-    again by the next rescan. sky2xy reports every position "off image" on
-    an fpack-compressed file, so such a copy is recorded without the test.
-    rejected holds (image_path, verdict, reason, origin) tuples. Returns the
-    number of rows written."""
+def record_without_measuring(cfg, entry, images, uploads_dir, factory_text,
+                             status):
+    """Record images in the ledger of one source without measuring them -
+    the images of rejected transient-search runs (status run_error). A row
+    is written only when the position is on the image; a position that
+    sky2xy puts off the image gets no row at all rather than a permanent
+    'edge' one - the plate solution of a rejected run may be what failed,
+    while a run_error row is replaced when a later reprocessing of the
+    upload succeeds - and the image is simply checked again by the next
+    rescan. sky2xy reports every position "off image" on an fpack-compressed
+    file, so such a copy is recorded without the test. images holds
+    (image_path, why) pairs, why being the explanation for the log. Returns
+    the number of rows written."""
     from nmw_forced_phot_lib import (camera_settings_for_path,
                                      get_jd_and_atel_date)
     vast_dir = (cfg.get('VAST_REFERENCE_COPY') or '').strip()
     source_id = entry['source_id']
     rows = []
-    for img, verdict, reason, origin in rejected:
+    for img, why in images:
         if not img.endswith('.fz') and sky2xy_on_image(
                 vast_dir, img, entry['ra'], entry['dec']) is None:
-            log('{}: {} not recorded - the position is not on this image of '
-                'a rejected transient search run ({})'.format(
-                    source_id, os.path.basename(img), verdict))
+            log('{}: {} not recorded - the position is not on the image '
+                '({})'.format(source_id, os.path.basename(img), why))
             continue
         jd, _atel = get_jd_and_atel_date(vast_dir, img)
         camera = camera_settings_for_path(factory_text, img) or 'unknown'
         rows.append({'basename': os.path.basename(img),
                      'jd': '{}'.format(jd if jd else 'na'),
-                     'mag': '99.0000', 'err': '99.0000',
-                     'status': nml.RUN_ERROR_STATUS, 'camera': camera})
-        log('{}: {} recorded as {} without measuring - the transient search '
-            'run of its upload was rejected ({}: {}; from {})'.format(
-                source_id, os.path.basename(img), nml.RUN_ERROR_STATUS,
-                verdict, (reason or 'no reason given')[:200], origin))
+                     'mag': '99.0000', 'err': '99.0000', 'status': status,
+                     'camera': camera})
+        log('{}: {} recorded as {} without measuring - {}'.format(
+            source_id, os.path.basename(img), status, why))
     if not rows:
         return 0
     return nml.append_ledger_rows(uploads_dir, source_id, rows)
+
+
+def install_bad_region_list(work_dir, factory_text, camera, default_text):
+    """Put the bad-region list the transient factory uses for this camera
+    into the working copy as bad_region.lst, or the working copy's own
+    default list when the camera has none. The plate-solve/catalog pass
+    (solve_plate_with_UCAC5, the aperture estimate) and util/forced_photometry
+    (positions in a listed region come back as 'bad_region') read it there.
+    Written through a temporary file and an atomic rename, so a failure
+    never leaves another camera's list - or a truncated one - in place.
+    Returns True on success."""
+    from nmw_forced_phot_lib import bad_region_file_for_camera
+    source = bad_region_file_for_camera(
+        factory_text, camera, nml.resolve_nmw_calibration_dir(), work_dir)
+    target = os.path.join(work_dir, 'bad_region.lst')
+    tmp = '{}.tmp{}'.format(target, os.getpid())
+    try:
+        if source and os.path.isfile(source):
+            shutil.copyfile(source, tmp)
+        else:
+            with open(tmp, 'w') as fh:
+                fh.write(default_text)
+        os.replace(tmp, target)
+    except OSError as exc:
+        log('WARNING: cannot install the bad region list for camera {} '
+            '({})'.format(camera, exc))
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
+    if source and os.path.isfile(source):
+        log('camera {}: bad regions from {}'.format(camera, source))
+    else:
+        log('camera {}: no bad region list of its own ({}) - using the '
+            'default bad_region.lst of the VaST copy'.format(
+                camera, source or 'not set in the factory'))
+    return True
 
 
 def measure_images_for_source(cfg, local_config_path, entry, images,
@@ -433,9 +476,15 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
     honoured (verdicts: an nml.RunVerdictResolver, shared by the sources of
     one manual run): the images of a rejected run are recorded as run_error
     without being measured, and the images of a run still in progress are
-    left for the next rescan. Images already in the ledger are skipped
-    whatever their status - a run_error row is replaced only by the ingest
-    of a successful reprocessing run."""
+    left for the next rescan. So is the verdict of the ingest's cloud check,
+    kept in the ledgers: a frame with a 'cloudy' row in any source's ledger
+    is measured, and a detection or upper limit on it is recorded with the
+    status 'cloudy' (the measured values kept), exactly as the ingest
+    records its own rows. Images already in the ledger are skipped whatever
+    their status - a run_error row is replaced only by the ingest of a
+    successful reprocessing run. The images are processed camera by camera,
+    each camera's bad-region list in place for both the plate-solve pass and
+    the measurement, as in the factory."""
     from nmw_forced_phot_lib import (
         setup_vast_working_copy, _phase1_parallel_solve_plate,
         run_forced_photometry_c, derive_band, derive_sextractor_config,
@@ -464,17 +513,23 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
             copies[key] = []
             keys_in_order.append(key)
         copies[key].append(img)
+    cloudy_frames = nml.frames_judged_cloudy(uploads_dir, log)
     todo = []
     rejected = []
+    condemned_keys = set()
     n_in_progress = 0
     for key in keys_in_order:
         verdict, reason, origin, path = verdicts.verdict_for_copies(
             copies[key])
+        # the on-image test of record_without_measuring needs a copy that
+        # sky2xy can read
+        plain_copies = [p for p in copies[key] if not p.endswith('.fz')]
         if verdict in nml.REJECTING_RUN_VERDICTS:
-            # the on-image test needs a copy sky2xy can read
-            plain_copies = [p for p in copies[key] if not p.endswith('.fz')]
-            rejected.append((plain_copies[0] if plain_copies else path,
-                             verdict, reason, origin))
+            rejected.append((
+                plain_copies[0] if plain_copies else path,
+                'the transient search run of its upload was rejected ({}: {}; '
+                'from {})'.format(verdict, (reason or 'no reason given')[:200],
+                                  origin)))
         elif verdict == nml.RUN_VERDICT_PENDING:
             n_in_progress += 1
             log('{}: {} skipped - the transient search run of its upload is '
@@ -482,15 +537,19 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
                     source_id, os.path.basename(path), origin))
         else:
             todo.append(copies[key][0])
-    log('{}: {} image(s) to measure, {} of rejected transient-search runs to '
-        'record without measuring, {} of runs in progress skipped ({} '
-        'already in the ledger or duplicate)'.format(
-            source_id, len(todo), len(rejected), n_in_progress,
-            len(images) - len(keys_in_order)))
+            if nml.image_core_name(key) in cloudy_frames:
+                condemned_keys.add(key)
+    log('{}: {} image(s) to measure ({} of them condemned by the cloud check '
+        'of the ingest: recorded as cloudy), {} of rejected transient-search '
+        'runs to record without measuring, {} of runs in progress skipped '
+        '({} already in the ledger or duplicate)'.format(
+            source_id, len(todo), len(condemned_keys), len(rejected),
+            n_in_progress, len(images) - len(keys_in_order)))
     n_appended = 0
     if rejected:
-        n_appended += record_rejected_run_images(cfg, entry, rejected,
-                                                 uploads_dir, factory_text)
+        n_appended += record_without_measuring(
+            cfg, entry, rejected, uploads_dir, factory_text,
+            nml.RUN_ERROR_STATUS)
     if not todo:
         return n_appended
     work_dir = setup_vast_working_copy(vast_dir, 'uploads',
@@ -500,71 +559,108 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
         return n_appended
     try:
         skip_log = os.path.join(source_dir, 'measurement_skipped.log')
-        workers = min(len(todo) or 1, os.cpu_count() or 4,
-                      _rescan_worker_cap(cfg))
-        log('{}: plate-solve/catalog pass with {} worker(s)'.format(
-            source_id, workers))
-        _, _, _, compute_path_map, _ = _phase1_parallel_solve_plate(
-            work_dir, local_config_path, todo, workers, skip_log)
         work_dir_default_sex = os.path.join(work_dir, 'default.sex')
+        # The working copy's own bad_region.lst (the VaST default) is what a
+        # camera without a list of its own gets
+        try:
+            with open(os.path.join(work_dir, 'bad_region.lst'),
+                      errors='replace') as fh:
+                default_bad_region_text = fh.read()
+        except OSError:
+            default_bad_region_text = ''
         edge_margin_pix = _edge_margin_pix(cfg)
         log('{}: positions closer than {:g} pix to a frame edge are recorded '
             'as edge'.format(source_id, edge_margin_pix))
-        pending_rows = []
-        for idx, img in enumerate(todo, start=1):
-            band = derive_band(factory_text, img, '')
-            sex_config_name = derive_sextractor_config(factory_text, img)
-            if sex_config_name:
-                src_sex = os.path.join(work_dir, sex_config_name)
-                if os.path.isfile(src_sex):
-                    try:
-                        shutil.copy2(src_sex, work_dir_default_sex)
-                    except OSError:
-                        pass
+        # Camera by camera, so that each camera's bad-region list is in place
+        # for the plate-solve/catalog pass of its images as well as for their
+        # measurement (the pass runs in parallel in one working copy)
+        groups = []
+        group_of_camera = {}
+        for img in todo:
             camera = camera_settings_for_path(factory_text, img) or 'unknown'
-            compute_path = compute_path_map.get(img)
-            fp = None
-            if compute_path is not None:
-                fp = run_forced_photometry_c(
-                    work_dir, local_config_path, img, compute_path,
-                    entry['ra'], entry['dec'], band, debug_log=skip_log,
-                    off_image_as_edge=True, edge_margin_pix=edge_margin_pix)
-            if fp is None:
-                # A None result means the measurement failed for a reason we
-                # cannot classify here: a failed plate solve, a forced-photometry
-                # error, or - importantly - a transient UCAC5/APASS/VizieR
-                # network failure or timeout. Do NOT write a permanent ledger
-                # row: a 'fail' row would be dedup-permanent and no rescan would
-                # ever retry it, so one remote-service blip during a backfill
-                # would truncate the lightcurve forever. Leaving the image out
-                # of the ledger lets the next --reconcile / --rescan retry it.
-                # (Positions that sky2xy puts off this particular frame come
-                # back as an 'edge' dict thanks to off_image_as_edge=True and
-                # are recorded through the else branch below as a terminal
-                # edge row, like the factory does; without that mapping such
-                # images were retried on every rescan.)
-                log('{}: {}/{} not measured (will retry on next rescan): '
-                    '{}'.format(source_id, idx, len(todo),
-                                os.path.basename(img)))
-            else:
+            if camera not in group_of_camera:
+                group_of_camera[camera] = len(groups)
+                groups.append((camera, []))
+            groups[group_of_camera[camera]][1].append(img)
+        idx = 0
+        pending_rows = []
+        for camera, group in groups:
+            if not install_bad_region_list(work_dir, factory_text, camera,
+                                           default_bad_region_text):
+                idx += len(group)
+                log('{}: {} image(s) of camera {} not measured (will retry on '
+                    'next rescan): the bad region list could not be '
+                    'installed'.format(source_id, len(group), camera))
+                continue
+            workers = min(len(group), os.cpu_count() or 4,
+                          _rescan_worker_cap(cfg))
+            log('{}: camera {}: plate-solve/catalog pass over {} image(s) with '
+                '{} worker(s)'.format(source_id, camera, len(group), workers))
+            _, _, _, compute_path_map, _ = _phase1_parallel_solve_plate(
+                work_dir, local_config_path, group, workers, skip_log)
+            for img in group:
+                idx += 1
+                band = derive_band(factory_text, img, '')
+                sex_config_name = derive_sextractor_config(factory_text, img)
+                if sex_config_name:
+                    src_sex = os.path.join(work_dir, sex_config_name)
+                    if os.path.isfile(src_sex):
+                        try:
+                            shutil.copy2(src_sex, work_dir_default_sex)
+                        except OSError:
+                            pass
+                compute_path = compute_path_map.get(img)
+                fp = None
+                if compute_path is not None:
+                    fp = run_forced_photometry_c(
+                        work_dir, local_config_path, img, compute_path,
+                        entry['ra'], entry['dec'], band, debug_log=skip_log,
+                        off_image_as_edge=True,
+                        edge_margin_pix=edge_margin_pix)
+                if fp is None:
+                    # A None result means the measurement failed for a reason
+                    # we cannot classify here: a failed plate solve, a
+                    # forced-photometry error, or - importantly - a transient
+                    # UCAC5/APASS/VizieR network failure or timeout. Do NOT
+                    # write a permanent ledger row: a 'fail' row would be
+                    # dedup-permanent and no rescan would ever retry it, so
+                    # one remote-service blip during a backfill would truncate
+                    # the lightcurve forever. Leaving the image out of the
+                    # ledger lets the next --reconcile / --rescan retry it.
+                    # (Positions that sky2xy puts off this particular frame
+                    # come back as an 'edge' dict thanks to
+                    # off_image_as_edge=True and are recorded through the else
+                    # branch below as a terminal edge row, like the factory
+                    # does; without that mapping such images were retried on
+                    # every rescan.)
+                    log('{}: {}/{} not measured (will retry on next rescan): '
+                        '{}'.format(source_id, idx, len(todo),
+                                    os.path.basename(img)))
+                    continue
                 jd = fp.get('jd')
                 if not jd:
                     jd, _atel = get_jd_and_atel_date(vast_dir, img)
+                status = '{}'.format(fp.get('status', 'fail'))
+                key = nml.ledger_key(os.path.basename(img))
+                if key in condemned_keys and status in nml.CLOUD_RESTATUSED_STATUSES:
+                    # the ingest's cloud verdict on this frame, applied the
+                    # way the ingest applies it to its own rows
+                    status = nml.CLOUDY_STATUS
                 pending_rows.append(
                     {'basename': os.path.basename(img),
                      'jd': '{}'.format(jd if jd else 'na'),
                      'mag': '{}'.format(fp.get('mag', '99.0000')),
                      'err': '{}'.format(fp.get('err', '99.0000')),
-                     'status': '{}'.format(fp.get('status', 'fail')),
+                     'status': status,
                      'camera': camera})
                 log('{}: {}/{} {} {} {} {}'.format(
                     source_id, idx, len(todo), os.path.basename(img),
                     pending_rows[-1]['mag'], pending_rows[-1]['err'],
                     pending_rows[-1]['status']))
-            if len(pending_rows) >= 10:
-                n_appended += nml.append_ledger_rows(uploads_dir, source_id,
-                                                     pending_rows)
-                pending_rows = []
+                if len(pending_rows) >= 10:
+                    n_appended += nml.append_ledger_rows(
+                        uploads_dir, source_id, pending_rows)
+                    pending_rows = []
         if pending_rows:
             n_appended += nml.append_ledger_rows(uploads_dir, source_id,
                                                  pending_rows)

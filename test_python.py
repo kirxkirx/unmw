@@ -13,6 +13,7 @@ import tempfile
 import zipfile
 import re
 import pytest
+import shutil
 
 # Import functions from filter_report.py
 from filter_report import is_asteroid, is_variable_star, is_ast_or_vs, filter_report
@@ -1676,3 +1677,236 @@ def test_archive_copy_not_matched_to_a_run_that_used_it_as_reference(tmp_path):
                 'Per-02-Q1b1x1 second-epoch /w/img_y/Per-02-Q1b1x1_other.fits\n')
     assert nml.RunVerdictResolver(root).verdict_for_image(
         copy_in_archive)[0] == 'ok'
+
+
+# ---------------------------------------------------------------------------
+# The ingest's cloud verdicts reused by the manual modes, and the camera's
+# bad-region list in the manual measurement path
+# ---------------------------------------------------------------------------
+
+def test_cloudy_status_matches_the_frame_quality_lib():
+    assert nml.CLOUDY_STATUS == nfq.CLOUDY_STATUS
+
+
+def test_frames_judged_cloudy_reads_every_ledger(tmp_path):
+    uploads = str(tmp_path)
+    _write_file(os.path.join(nml.source_dir_path(uploads, 'A'),
+                             nml.LEDGER_BASENAME),
+                '# image_basename JD mag err status camera\n'
+                'wcs_fd_X.fits 2461000.5 12.0000 0.0200 cloudy C1\n'
+                'wcs_fd_Y.fits 2461000.6 12.0000 0.0200 detection C1\n'
+                'wcs_fd_Z.fits.fz 2461000.7 15.0000 99.0000 cloudy C1\n')
+    # a row re-qualified by hand for B does not undo A's verdict on X, and
+    # a 'manual' exclusion is not a cloud verdict
+    _write_file(os.path.join(nml.source_dir_path(uploads, 'B'),
+                             nml.LEDGER_BASENAME),
+                'wcs_fd_X.fits 2461000.5 13.0000 0.0300 detection C1\n'
+                'wcs_fd_W.fits 2461000.8 13.0000 0.0300 manual C1\n')
+    assert nml.frames_judged_cloudy(uploads) == {'X.fits', 'Z.fits'}
+    assert nml.frames_judged_cloudy(str(tmp_path / 'nowhere')) == set()
+
+
+def test_unmeasured_cloudy_rows_are_listed_as_excluded():
+    rows = [{'basename': 'a.fits', 'jd': '2461000.5', 'mag': '99.0000',
+             'err': '99.0000', 'status': 'cloudy', 'camera': 'C1'},
+            {'basename': 'b.fits', 'jd': '2461000.6', 'mag': '12.3000',
+             'err': '0.0400', 'status': 'cloudy', 'camera': 'C1'}]
+    det, lim, excluded = nml.classify_ledger_rows(rows)
+    assert not det and not lim
+    by_name = {r['basename']: r for r in excluded}
+    assert by_name['a.fits']['reason'] == nml.REASON_CLOUDY
+    assert by_name['a.fits']['mag_float'] is None
+    assert by_name['b.fits']['mag_float'] == 12.3
+    assert by_name['b.fits']['err_float'] == 0.04
+
+
+def test_manual_measurement_reuses_the_ingest_cloud_verdicts(tmp_path,
+                                                             monkeypatch):
+    import monitoring_update as mu
+    root = str(tmp_path / 'workdir')
+    os.makedirs(nml.source_dir_path(root, 'SRC'))
+    # the ingest condemned these frames while measuring another source
+    _write_file(os.path.join(nml.source_dir_path(root, 'OTHER'),
+                             nml.LEDGER_BASENAME),
+                ''.join('wcs_fd_{}.fits 2461000.5 12.0 0.02 cloudy C1\n'.format(n)
+                        for n in ('cloudydet', 'cloudyedge',
+                                  'cloudyrejected', 'cloudybusy')))
+    now = 1790000000.0
+    _write_file(os.path.join(root, nml.RUN_VERDICTS_BASENAME),
+                '%d error results_A cloudyrejected.fits ERROR: x\n'
+                '%d pending results_B cloudybusy.fits\n' % (now, now - 60))
+    entry = {'source_id': 'SRC', 'name': 'SRC', 'ra': '01:00:00.00',
+             'dec': '+10:00:00.0'}
+    names = ('cloudydet', 'cloudyedge', 'cloudyrejected', 'cloudybusy',
+             'clear')
+    images = [os.path.join(root, 'img_A', 'wcs_fd_{}.fits'.format(n))
+              for n in names]
+    for image in images:
+        _write_file(image)
+    monkeypatch.setattr(mu, 'read_factory_text', lambda cfg: '')
+    monkeypatch.setattr(mu, 'sky2xy_on_image',
+                        lambda vast_dir, path, ra, dec: (100.0, 100.0))
+    monkeypatch.setattr(nfp, 'get_jd_and_atel_date',
+                        lambda vast_dir, path: ('2461000.5000', None))
+    monkeypatch.setattr(nfp, 'camera_settings_for_path',
+                        lambda text, path: 'C1')
+    monkeypatch.setattr(nfp, 'derive_band', lambda text, path, default: 'V')
+    monkeypatch.setattr(nfp, 'derive_sextractor_config',
+                        lambda text, path: None)
+    work_dir = str(tmp_path / 'work')
+
+    def fake_setup(vast_dir, parent_dir, prefix=None):
+        os.makedirs(work_dir, exist_ok=True)
+        return work_dir
+
+    def fake_solve(work, local_config_path, todo, workers, skip_log):
+        return None, None, None, {p: p for p in todo}, None
+
+    def fake_measure(work, local_config_path, img, compute_path, ra, dec,
+                     band, debug_log=None, off_image_as_edge=False,
+                     edge_margin_pix=None):
+        if 'edge' in img:
+            return {'jd': '2461000.5000', 'mag': '99.0000',
+                    'err': '99.0000', 'status': 'edge'}
+        return {'jd': '2461000.5000', 'mag': '12.3456', 'err': '0.0210',
+                'status': 'detection'}
+    monkeypatch.setattr(nfp, 'setup_vast_working_copy', fake_setup)
+    monkeypatch.setattr(nfp, '_phase1_parallel_solve_plate', fake_solve)
+    monkeypatch.setattr(nfp, 'run_forced_photometry_c', fake_measure)
+    mu.measure_images_for_source(
+        {}, None, entry, images, root,
+        verdicts=nml.RunVerdictResolver(root, now=now))
+    # the condemned frame is measured and its detection recorded as cloudy
+    # with the values; an edge result keeps its status; the rejected run wins
+    # over the cloud verdict; the run in progress is left alone
+    assert _ledger_by_basename(root, 'SRC') == {
+        'wcs_fd_cloudydet.fits': ('cloudy', '12.3456', '0.0210'),
+        'wcs_fd_cloudyedge.fits': ('edge', '99.0000', '99.0000'),
+        'wcs_fd_cloudyrejected.fits': ('run_error', '99.0000', '99.0000'),
+        'wcs_fd_clear.fits': ('detection', '12.3456', '0.0210')}
+
+
+def test_frames_judged_cloudy_reports_an_unreadable_ledger(tmp_path):
+    uploads = str(tmp_path)
+    path = os.path.join(nml.source_dir_path(uploads, 'A'),
+                        nml.LEDGER_BASENAME)
+    _write_file(path, 'wcs_fd_X.fits 2461000.5 12.0 0.02 cloudy C1\n')
+    os.chmod(path, 0)
+    try:
+        if os.access(path, os.R_OK):
+            pytest.skip('running as a user who can read anything')
+        messages = []
+        assert nml.frames_judged_cloudy(uploads, messages.append) == set()
+        assert len(messages) == 1 and 'cannot read' in messages[0]
+    finally:
+        os.chmod(path, 0o644)
+
+
+_FACTORY_CAMERA_BLOCKS = '''
+if [ -n "$CAMERA_SETTINGS" ];then
+ if [ "$CAMERA_SETTINGS" = "CAM_ABS" ];then
+  #BAD_REGION_FILE="../old_bad_region.lst"
+  BAD_REGION_FILE="$NMW_CALIBRATION/$CAMERA_SETTINGS/CAM_bad_region.lst"
+ fi
+ if [ "$CAMERA_SETTINGS" = "CAM_BRACES" ];then
+  BAD_REGION_FILE="${NMW_CALIBRATION}/${CAMERA_SETTINGS}_bad_region.lst"
+ fi
+ if [ "$CAMERA_SETTINGS" = "CAM_REL" ];then
+  BAD_REGION_FILE="../REL_bad_region.lst"
+ fi
+ if [ "$CAMERA_SETTINGS" = "CAM_UNKNOWN_VAR" ];then
+  BAD_REGION_FILE="$SOMEWHERE/x.lst"
+ fi
+ if [ "$CAMERA_SETTINGS" = "CAM_NONE" ];then
+  SEXTRACTOR_CONFIG_FILES="default.sex"
+ fi
+fi
+'''
+
+
+def test_bad_region_file_for_camera():
+    work = '/u/uploads/vast_monitoring_x'
+    assert nfp.bad_region_file_for_camera(
+        _FACTORY_CAMERA_BLOCKS, 'CAM_ABS', '/cal', work) == \
+        '/cal/CAM_ABS/CAM_bad_region.lst'
+    assert nfp.bad_region_file_for_camera(
+        _FACTORY_CAMERA_BLOCKS, 'CAM_BRACES', '/cal', work) == \
+        '/cal/CAM_BRACES_bad_region.lst'
+    assert nfp.bad_region_file_for_camera(
+        _FACTORY_CAMERA_BLOCKS, 'CAM_REL', '/cal', work) == \
+        '/u/uploads/REL_bad_region.lst'
+    for camera in ('CAM_UNKNOWN_VAR', 'CAM_NONE', 'CAM_MISSING', ''):
+        assert nfp.bad_region_file_for_camera(
+            _FACTORY_CAMERA_BLOCKS, camera, '/cal', work) is None
+
+
+def test_install_bad_region_list_per_camera(tmp_path, monkeypatch):
+    import monitoring_update as mu
+    calibration = tmp_path / 'cal'
+    _write_file(str(calibration / 'CAM_ABS' / 'CAM_bad_region.lst'),
+                '7500 0 9576 6388\n')
+    monkeypatch.setattr(nml, 'resolve_nmw_calibration_dir',
+                        lambda: str(calibration))
+    work = tmp_path / 'work'
+    work.mkdir()
+    assert mu.install_bad_region_list(str(work), _FACTORY_CAMERA_BLOCKS,
+                                      'CAM_ABS', '0 0 0 0\n')
+    assert (work / 'bad_region.lst').read_text() == '7500 0 9576 6388\n'
+    # a camera without a list of its own gets the VaST default back
+    assert mu.install_bad_region_list(str(work), _FACTORY_CAMERA_BLOCKS,
+                                      'CAM_NONE', '0 0 0 0\n')
+    assert (work / 'bad_region.lst').read_text() == '0 0 0 0\n'
+    # a failed copy reports failure and leaves no partial list behind
+    monkeypatch.setattr(shutil, 'copyfile', _raise_oserror)
+    assert not mu.install_bad_region_list(str(work), _FACTORY_CAMERA_BLOCKS,
+                                          'CAM_ABS', '0 0 0 0\n')
+    assert (work / 'bad_region.lst').read_text() == '0 0 0 0\n'
+    assert sorted(os.listdir(str(work))) == ['bad_region.lst']
+
+
+def _raise_oserror(*args, **kwargs):
+    raise OSError('simulated failure')
+
+
+def test_manual_measurement_installs_each_camera_list_before_solving(
+        tmp_path, monkeypatch):
+    import monitoring_update as mu
+    calibration = tmp_path / 'cal'
+    _write_file(str(calibration / 'CAM_ABS' / 'CAM_bad_region.lst'),
+                'CAM_ABS list\n')
+    monkeypatch.setattr(nml, 'resolve_nmw_calibration_dir',
+                        lambda: str(calibration))
+    root = str(tmp_path / 'workdir')
+    os.makedirs(nml.source_dir_path(root, 'SRC'))
+    entry = {'source_id': 'SRC', 'name': 'SRC', 'ra': '01:00:00.00',
+             'dec': '+10:00:00.0'}
+    images = [os.path.join(root, 'img_A', name) for name in (
+        'wcs_fd_a1.fits', 'wcs_fd_n1.fits', 'wcs_fd_a2.fits')]
+    for image in images:
+        _write_file(image)
+    monkeypatch.setattr(mu, 'read_factory_text',
+                        lambda cfg: _FACTORY_CAMERA_BLOCKS)
+    monkeypatch.setattr(nfp, 'camera_settings_for_path',
+                        lambda text, path: 'CAM_ABS' if '_a' in path
+                        else 'CAM_NONE')
+    monkeypatch.setattr(nfp, 'derive_band', lambda text, path, default: 'V')
+    monkeypatch.setattr(nfp, 'derive_sextractor_config',
+                        lambda text, path: None)
+    work_dir = str(tmp_path / 'work')
+    seen = []
+
+    def fake_setup(vast_dir, parent_dir, prefix=None):
+        _write_file(os.path.join(work_dir, 'bad_region.lst'), 'DEFAULT\n')
+        return work_dir
+
+    def fake_solve(work, local_config_path, todo, workers, skip_log):
+        with open(os.path.join(work, 'bad_region.lst')) as fh:
+            seen.append((sorted(os.path.basename(p) for p in todo),
+                         fh.read()))
+        return None, None, None, {}, None
+    monkeypatch.setattr(nfp, 'setup_vast_working_copy', fake_setup)
+    monkeypatch.setattr(nfp, '_phase1_parallel_solve_plate', fake_solve)
+    mu.measure_images_for_source({}, None, entry, images, root,
+                                 verdicts=nml.RunVerdictResolver(root))
+    assert seen == [(['wcs_fd_a1.fits', 'wcs_fd_a2.fits'], 'CAM_ABS list\n'),
+                    (['wcs_fd_n1.fits'], 'DEFAULT\n')]

@@ -90,6 +90,18 @@ VISIT_CONSISTENCY_ERR_SCALE = 4.0
 EXCLUDED_MEASUREMENTS_BASENAME = 'excluded_measurements.dat'
 REASON_VISIT = 'visit_inconsistent'
 REASON_CLOUDY = 'cloudy_frame'
+# Ledger status of a measurement from a frame the ingest's frame-quality
+# (cloud) check condemned; nmw_frame_quality_lib.CLOUDY_STATUS writes it. The
+# ledgers are where that verdict is kept: the manual modes treat a frame with
+# a 'cloudy' row in ANY source's ledger as condemned (frames_judged_cloudy),
+# measure it and record a detection or upper limit on it as 'cloudy' with the
+# measured values, as the ingest does. A frame stays condemned while any
+# ledger holds a 'cloudy' row for it.
+CLOUDY_STATUS = 'cloudy'
+# The statuses the cloud verdict turns into CLOUDY_STATUS (the same as
+# nmw_frame_quality_lib.RESTATUSED_STATUSES): edge, bad_region and the other
+# refusals keep their own status
+CLOUD_RESTATUSED_STATUSES = ('detection', 'upperlimit')
 # Ledger status token and displayed reason of measurements excluded by hand
 # (monitoring_update.py --exclude-measurement)
 MANUAL_STATUS = 'manual'
@@ -968,6 +980,40 @@ class RunVerdictResolver:
         return (None, '', 'no verdict', image_paths[0])
 
 
+def frames_judged_cloudy(uploads_dir, log=None):
+    """Image core names (image_core_name) of the frames the frame-quality
+    (cloud) check of the ingest condemned: every frame with a CLOUDY_STATUS
+    row in any source's ledger. The ingest records its verdict in the
+    ledgers of the sources it measured on the frame, and the manual modes
+    record it in the ledgers of the sources they measure later, so a frame
+    condemned for one source counts for all and stays condemned until
+    every 'cloudy' row of it has been edited back by hand. A ledger that
+    cannot be read is reported through log."""
+    cloudy = set()
+    root = monitoring_root(uploads_dir)
+    try:
+        source_ids = sorted(os.listdir(root))
+    except OSError:
+        return cloudy
+    for source_id in source_ids:
+        path = os.path.join(root, source_id, LEDGER_BASENAME)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, errors='replace') as fh:
+                for line in fh:
+                    parts = line.split()
+                    if len(parts) < 6 or parts[0].startswith('#'):
+                        continue
+                    if parts[4] == CLOUDY_STATUS:
+                        cloudy.add(image_core_name(parts[0]))
+        except OSError as exc:
+            if log is not None:
+                log('WARNING: cannot read {} ({}) - its cloud verdicts are '
+                    'not applied'.format(path, exc))
+    return cloudy
+
+
 def _float_or_none(text):
     try:
         return float(text)
@@ -1010,6 +1056,22 @@ def classify_ledger_rows(rows):
             continue
         jd = _float_or_none(row['jd'])
         mag = _float_or_none(row['mag'].lstrip('<'))
+        if row['status'] in (CLOUDY_STATUS, MANUAL_STATUS):
+            # Listed even without a magnitude: the manual modes record the
+            # frames the cloud check condemned without measuring them
+            if jd is None:
+                continue
+            parsed = dict(row)
+            parsed['jd_float'] = jd
+            parsed['mag_float'] = mag if mag is not None and mag <= 90.0 \
+                else None
+            parsed['err_float'] = None
+            if parsed['mag_float'] is not None:
+                parsed['err_float'] = _float_or_none(row['err'])
+            parsed['reason'] = (REASON_CLOUDY if row['status'] == CLOUDY_STATUS
+                                else REASON_MANUAL)
+            quality_excluded.append(parsed)
+            continue
         if jd is None or mag is None or mag > 90.0:
             continue
         parsed = dict(row)
@@ -1020,14 +1082,6 @@ def classify_ledger_rows(rows):
             detections.append(parsed)
         elif row['status'] == 'upperlimit':
             upperlimits.append(parsed)
-        elif row['status'] == 'cloudy':
-            parsed['err_float'] = _float_or_none(row['err'])
-            parsed['reason'] = REASON_CLOUDY
-            quality_excluded.append(parsed)
-        elif row['status'] == MANUAL_STATUS:
-            parsed['err_float'] = _float_or_none(row['err'])
-            parsed['reason'] = REASON_MANUAL
-            quality_excluded.append(parsed)
     detections.sort(key=lambda r: r['jd_float'])
     upperlimits.sort(key=lambda r: r['jd_float'])
     quality_excluded.sort(key=lambda r: r['jd_float'])
@@ -1547,7 +1601,9 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
             ' patchy clouds) and there is no way to tell which one.'
             ' Reason <span class="code">{rc}</span>: the frame failed the'
             ' cloud check - its field stars disagree with the reference'
-            ' frame in a way uniform transparency loss cannot explain.'
+            ' frame in a way uniform transparency loss cannot explain; a'
+            ' frame condemned while measuring one source is excluded for'
+            ' every source measured on it later.'
             ' The next five reasons mean the measurement could not be made'
             ' on that image at all, so no magnitude is shown:'
             ' <span class="code">{rb}</span> - the position falls on a'

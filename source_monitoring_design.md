@@ -347,6 +347,30 @@ When the same image exists in several places, a successful run of any copy
 wins, then a rejected run, then a run in progress. The manual modes never
 re-measure an image that is already in the ledger, whatever its status.
 
+The manual modes also reuse the verdict of the ingest's frame-quality
+(cloud) check (2026-10-03, user request). The ingest records that verdict in
+the ledgers of the sources it measured on the frame (status `cloudy`), so a
+frame with a `cloudy` row in ANY source's ledger counts as condemned: a
+manual run measures it and records a detection or upper limit on it as
+`cloudy`, with the measured values, exactly as the ingest does (edge,
+bad_region and the other refusals keep their status). Since the manual rows
+are `cloudy` rows too, a frame stays condemned until every `cloudy` row of
+it, in every ledger, has been edited back by hand. The check itself is never
+run in the manual path; frames the ingest never checked are measured as
+before. A rejected run takes precedence over a cloud verdict.
+
+The images of a manual run are processed camera by camera. Before the
+plate-solve/catalog pass of a camera's images, the bad-region list the
+transient factory uses for that camera - the `BAD_REGION_FILE` of the
+camera's settings block in `transient_factory_test31.sh`, with
+`$NMW_CALIBRATION` and `$CAMERA_SETTINGS` expanded - is copied into the
+working copy as `bad_region.lst` (cameras without a list get the VaST copy's
+default back), so the plate solution, the aperture estimate and the
+measurement all see it, as in the factory. Positions in a listed region come
+back as `bad_region`; for NMW-TexasTech Q2 this is the degraded strip at
+x >= 7500. When the list cannot be installed, that camera's images are left
+for the next rescan.
+
 ### 6.2 The per-upload path: measure INSIDE the factory run, ingest after
 
 No working copy is ever created on this path (user requirement): the
