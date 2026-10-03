@@ -797,6 +797,19 @@ def run_forced_photometry_c(work_dir, local_config_path, fits_path, compute_path
     script = os.path.join(work_dir, 'util', 'forced_photometry.sh')
     env = os.environ.copy()
     env['FORCED_PHOTOMETRY_ONLY_C'] = 'yes'
+    # The frame-level sanity checks of VaST's util/forced_photometry: a
+    # would-be detection or upper limit comes back with the status bad_wcs
+    # (a TAN-only plate solution of a wide field) or no_nearby_stars (no
+    # stars detected around the position - a thick cloud over it), keeping
+    # the measured values; the monitoring ledgers record but never publish
+    # such rows, and the lightcurve files of the coordinate and archive pages
+    # skip them. forced_photometry.sh points the checks at the plate solution
+    # and the star catalog it used for this image, so values inherited from
+    # this process's environment must not override them. A VaST copy that
+    # predates the checks ignores the variable.
+    env['FORCED_PHOTOMETRY_FRAME_CHECKS'] = 'yes'
+    env.pop('FORCED_PHOTOMETRY_WCS_IMAGE', None)
+    env.pop('FORCED_PHOTOMETRY_STAR_CATALOG', None)
     # Pass EVERY user-derived value (compute_path, ra, dec, band) through
     # the subprocess environment rather than argv, and reference them
     # from the bash -c shell template via "$NAME". This leaves argv
@@ -1000,8 +1013,11 @@ def _write_lightcurve_data_files(out_dir, results):
     """Write the two ASCII files lib/lightcurve_png reads.
 
     Splits the in-memory `results` rows by status:
-      - detections (status != 'upperlimit') -> lightcurve.dat (JD mag err)
-      - upper limits                        -> upperlimits.dat (JD limit_mag)
+      - detections (status 'detection')     -> lightcurve.dat (JD mag err)
+      - upper limits (status 'upperlimit')  -> upperlimits.dat (JD limit_mag)
+    Rows with any other status (edge, saturated, bad_region, calib_fail, and
+    the bad_wcs / no_nearby_stars refusals of the frame-level checks, which
+    keep the measured value) are not plotted: they stay in the table only.
 
     Both files use the same comment convention as read_lightcurve_point_raw()
     expects: lines starting with '#' are skipped.
@@ -1031,7 +1047,7 @@ def _write_lightcurve_data_files(out_dir, results):
             except ValueError:
                 continue
             ul_lines.append('{:.5f} {:.3f}\n'.format(jd_val, mag_val))
-        else:
+        elif r.get('status') == 'detection':
             try:
                 mag_val = float(r.get('mag'))
                 err_val = float(r.get('err'))

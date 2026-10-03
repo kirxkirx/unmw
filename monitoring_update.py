@@ -22,17 +22,32 @@ Modes (see source_monitoring_design.md):
   --ingest <raw_measurements_file>
       Post-factory ingest called synchronously by autoprocess.sh on
       SUCCESSFUL runs: append the factory's hand-off rows to the
-      per-source ledgers and rebuild the derived products. Pure text
-      processing + plots; no VaST working copy.
+      per-source ledgers and rebuild the derived products. A row replaces
+      the run_error row an earlier rejected run left for the same image.
+      Pure text processing + plots; no VaST working copy.
+  --ingest-rejected <raw_measurements_file>
+      The same for a run whose transient search raised a processing ERROR
+      or failed: every row except the off-frame 'edge' ones is recorded
+      with the status run_error (the measured values kept), so the images
+      are in the ledgers as processed and rejected - never published and
+      never measured by a manual mode. Existing rows are never replaced.
   --reconcile
       Manual activation + one-time backfill of new monitoring_list.txt
-      entries (archive pass + ALL uploads/img_* recent pass). Resumable:
-      sources without the backfill_done marker are re-enumerated and the
-      ledger basename dedup skips already-measured images.
+      entries (archive pass + ALL uploads/img_* recent pass + quarantine
+      pass). Resumable: sources without the backfill_done marker are
+      re-enumerated and the ledger basename dedup skips already-measured
+      images.
   --rescan-recent [<source_id>|--all]
   --rescan-archive [<source_id>|--all]
-      Manual gap fillers over the recent / archive image populations for
-      already-activated sources. No window or count caps.
+      Manual gap fillers over the recent (uploads + quarantine) / archive
+      image populations for already-activated sources. No window or count
+      caps.
+  The manual modes honour the verdict of the transient-search run that
+  processed each image (transient_search_verdicts.txt written by
+  autoprocess.sh, or the run's report for older images): the images of a
+  rejected run get run_error ledger rows without being measured (no row
+  when the position is not on the image), the images of a run still in
+  progress are left for the next rescan.
   --rebuild-pages
       Re-render all products (HTML pages, plots, ASCII + AAVSO files) for
       every activated source from their existing ledgers, without measuring
@@ -293,7 +308,16 @@ def mode_frame_quality(raw_path, work_dir):
 
 # ---------- --ingest ----------
 
-def mode_ingest(raw_path):
+def mode_ingest(raw_path, rejected=False):
+    """--ingest (rejected=False): record the rows of a successful run; a row
+    replaces the run_error row an earlier rejected run left for the same
+    image (nml.SUPERSEDABLE_STATUSES). --ingest-rejected (rejected=True):
+    the run raised a processing ERROR or failed, so every row except the
+    'edge' ones (the position is not on the frame) is recorded with
+    nml.RUN_ERROR_STATUS, keeping the measured values; the images are then
+    in the ledger as processed-and-rejected and no manual run measures them
+    again. A rejected run never replaces an existing ledger row."""
+    mode_name = '--ingest-rejected' if rejected else '--ingest'
     script_dir, cfg, uploads_dir, _ = load_context()
     if not os.path.isdir(nml.monitoring_root(uploads_dir)):
         return 0
@@ -301,7 +325,7 @@ def mode_ingest(raw_path):
         with open(raw_path) as fh:
             raw_lines = fh.read().splitlines()
     except OSError as exc:
-        log('--ingest: cannot read {}: {}'.format(raw_path, exc))
+        log('{}: cannot read {}: {}'.format(mode_name, raw_path, exc))
         return 1
     rows_by_source = {}
     for line in raw_lines:
@@ -309,11 +333,13 @@ def mode_ingest(raw_path):
         if len(parts) < 7:
             continue
         source_id, basename, jd, mag, err, status, camera = parts[:7]
+        if rejected and status != 'edge':
+            status = nml.RUN_ERROR_STATUS
         rows_by_source.setdefault(source_id, []).append(
             {'basename': basename, 'jd': jd, 'mag': mag, 'err': err,
              'status': status, 'camera': camera})
     if not rows_by_source:
-        log('--ingest: no measurement rows in {}'.format(raw_path))
+        log('{}: no measurement rows in {}'.format(mode_name, raw_path))
         return 0
     list_path, entries = list_entries_or_exit()
     # If the list is temporarily unreadable (NFS blip, env mismatch in the
@@ -322,9 +348,9 @@ def mode_ingest(raw_path):
     # central page with "no sources activated". Bail and let the next run - or
     # a manual --rescan-recent - recover the measurements.
     if list_path is None or not entries:
-        log('--ingest: monitoring_list.txt is missing or empty; not '
+        log('{}: monitoring_list.txt is missing or empty; not '
             'ingesting {} (measurements preserved in the raw file)'.format(
-                raw_path))
+                mode_name, raw_path))
         return 1
     entries_by_id = {e['source_id']: e for e in entries}
     factory_text = read_factory_text(cfg)
@@ -332,40 +358,92 @@ def mode_ingest(raw_path):
     for source_id, rows in sorted(rows_by_source.items()):
         source_dir = nml.source_dir_path(uploads_dir, source_id)
         if not os.path.isdir(source_dir):
-            log('--ingest: skipping {} rows for unknown source {}'.format(
-                len(rows), source_id))
+            log('{}: skipping {} rows for unknown source {}'.format(
+                mode_name, len(rows), source_id))
             continue
         entry = entries_by_id.get(source_id)
         if entry is None:
             # Source no longer in the list: keep it frozen (no-retirement
             # decision) - do not append
-            log('--ingest: {} is no longer in monitoring_list.txt - '
-                'not appending'.format(source_id))
+            log('{}: {} is no longer in monitoring_list.txt - '
+                'not appending'.format(mode_name, source_id))
             continue
-        n_added = nml.append_ledger_rows(uploads_dir, source_id, rows)
+        n_added = nml.append_ledger_rows(
+            uploads_dir, source_id, rows,
+            supersede_statuses=(() if rejected
+                                else nml.SUPERSEDABLE_STATUSES))
         n_total += n_added
-        log('--ingest: {}: {} new row(s), {} duplicate(s) skipped'.format(
-            source_id, n_added, len(rows) - n_added))
+        log('{}: {}: {} new row(s), {} duplicate(s) skipped'.format(
+            mode_name, source_id, n_added, len(rows) - n_added))
         nml.rebuild_source_products(uploads_dir, entry, cfg, factory_text)
     nml.rebuild_central_index(uploads_dir, entries,
                               (cfg.get('VAST_REFERENCE_COPY') or '').strip())
-    log('--ingest: done, {} row(s) appended'.format(n_total))
+    log('{}: done, {} row(s) appended'.format(mode_name, n_total))
     return 0
 
 
 # ---------- measurement machinery for the manual modes ----------
 
+def record_rejected_run_images(cfg, entry, rejected, uploads_dir,
+                               factory_text):
+    """Record images of rejected transient-search runs in the ledger of one
+    source without measuring them: a run_error row when the position is on
+    the image. A position that sky2xy puts off the image gets no row at all
+    rather than a permanent 'edge' one - the plate solution of a rejected
+    run may be what failed, while a run_error row is replaced when a later
+    reprocessing of the upload succeeds - and the image is simply checked
+    again by the next rescan. sky2xy reports every position "off image" on
+    an fpack-compressed file, so such a copy is recorded without the test.
+    rejected holds (image_path, verdict, reason, origin) tuples. Returns the
+    number of rows written."""
+    from nmw_forced_phot_lib import (camera_settings_for_path,
+                                     get_jd_and_atel_date)
+    vast_dir = (cfg.get('VAST_REFERENCE_COPY') or '').strip()
+    source_id = entry['source_id']
+    rows = []
+    for img, verdict, reason, origin in rejected:
+        if not img.endswith('.fz') and sky2xy_on_image(
+                vast_dir, img, entry['ra'], entry['dec']) is None:
+            log('{}: {} not recorded - the position is not on this image of '
+                'a rejected transient search run ({})'.format(
+                    source_id, os.path.basename(img), verdict))
+            continue
+        jd, _atel = get_jd_and_atel_date(vast_dir, img)
+        camera = camera_settings_for_path(factory_text, img) or 'unknown'
+        rows.append({'basename': os.path.basename(img),
+                     'jd': '{}'.format(jd if jd else 'na'),
+                     'mag': '99.0000', 'err': '99.0000',
+                     'status': nml.RUN_ERROR_STATUS, 'camera': camera})
+        log('{}: {} recorded as {} without measuring - the transient search '
+            'run of its upload was rejected ({}: {}; from {})'.format(
+                source_id, os.path.basename(img), nml.RUN_ERROR_STATUS,
+                verdict, (reason or 'no reason given')[:200], origin))
+    if not rows:
+        return 0
+    return nml.append_ledger_rows(uploads_dir, source_id, rows)
+
+
 def measure_images_for_source(cfg, local_config_path, entry, images,
-                              uploads_dir):
+                              uploads_dir, verdicts=None):
     """Measure one source on a list of already-solved images inside a
     disposable VaST working copy (the manual backfill/rescan path), appending
-    ledger rows in chunks so an interrupted run keeps its progress."""
+    ledger rows in chunks so an interrupted run keeps its progress.
+
+    The verdict of the transient-search run that processed each image is
+    honoured (verdicts: an nml.RunVerdictResolver, shared by the sources of
+    one manual run): the images of a rejected run are recorded as run_error
+    without being measured, and the images of a run still in progress are
+    left for the next rescan. Images already in the ledger are skipped
+    whatever their status - a run_error row is replaced only by the ingest
+    of a successful reprocessing run."""
     from nmw_forced_phot_lib import (
         setup_vast_working_copy, _phase1_parallel_solve_plate,
         run_forced_photometry_c, derive_band, derive_sextractor_config,
         camera_settings_for_path, get_jd_and_atel_date)
     vast_dir = (cfg.get('VAST_REFERENCE_COPY') or '').strip()
     factory_text = read_factory_text(cfg)
+    if verdicts is None:
+        verdicts = nml.RunVerdictResolver(uploads_dir, log=log)
     source_id = entry['source_id']
     source_dir = nml.source_dir_path(uploads_dir, source_id)
     _, already_measured = nml.read_ledger(source_dir)
@@ -373,25 +451,53 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
     # passes overlap for a recently-archived observation that is still in
     # uploads/ (archive/wcs_fd_X.fts.fz and uploads/img_*/wcs_fd_X.fts share a
     # ledger key), and without this the same image would be funpacked,
-    # plate-solved and measured twice - only the append would dedup it.
-    todo = []
-    todo_seen = set()
+    # plate-solved and measured twice - only the append would dedup it. All
+    # copies of an image are kept for the verdict: the archive copy has none,
+    # the img_* copy has the verdict of its run.
+    copies = {}
+    keys_in_order = []
     for img in images:
         key = nml.ledger_key(os.path.basename(img))
-        if key in already_measured or key in todo_seen:
+        if key in already_measured:
             continue
-        todo_seen.add(key)
-        todo.append(img)
-    log('{}: {} image(s) to measure ({} already in the ledger or '
-        'duplicate)'.format(source_id, len(todo), len(images) - len(todo)))
+        if key not in copies:
+            copies[key] = []
+            keys_in_order.append(key)
+        copies[key].append(img)
+    todo = []
+    rejected = []
+    n_in_progress = 0
+    for key in keys_in_order:
+        verdict, reason, origin, path = verdicts.verdict_for_copies(
+            copies[key])
+        if verdict in nml.REJECTING_RUN_VERDICTS:
+            # the on-image test needs a copy sky2xy can read
+            plain_copies = [p for p in copies[key] if not p.endswith('.fz')]
+            rejected.append((plain_copies[0] if plain_copies else path,
+                             verdict, reason, origin))
+        elif verdict == nml.RUN_VERDICT_PENDING:
+            n_in_progress += 1
+            log('{}: {} skipped - the transient search run of its upload is '
+                'still in progress ({})'.format(
+                    source_id, os.path.basename(path), origin))
+        else:
+            todo.append(copies[key][0])
+    log('{}: {} image(s) to measure, {} of rejected transient-search runs to '
+        'record without measuring, {} of runs in progress skipped ({} '
+        'already in the ledger or duplicate)'.format(
+            source_id, len(todo), len(rejected), n_in_progress,
+            len(images) - len(keys_in_order)))
+    n_appended = 0
+    if rejected:
+        n_appended += record_rejected_run_images(cfg, entry, rejected,
+                                                 uploads_dir, factory_text)
     if not todo:
-        return 0
+        return n_appended
     work_dir = setup_vast_working_copy(vast_dir, 'uploads',
                                        prefix='vast_monitoring_')
     if work_dir is None:
         log('{}: could not set up the VaST working copy'.format(source_id))
-        return 0
-    n_appended = 0
+        return n_appended
     try:
         skip_log = os.path.join(source_dir, 'measurement_skipped.log')
         workers = min(len(todo) or 1, os.cpu_count() or 4,
@@ -712,6 +818,9 @@ def _run_manual_mode(mode, source_selector):
             'exiting (NOT queuing)')
         return 1
     factory_text = read_factory_text(cfg)
+    # One verdict cache for all sources: the results_* index of
+    # IMAGE_DATA_ROOT is listed once
+    verdicts = nml.RunVerdictResolver(uploads_dir, log=log)
     try:
         if mode == 'reconcile':
             selected = entries
@@ -765,7 +874,8 @@ def _run_manual_mode(mode, source_selector):
             n_new = 0
             if images:
                 n_new = measure_images_for_source(cfg, local_config_path,
-                                                  entry, images, uploads_dir)
+                                                  entry, images, uploads_dir,
+                                                  verdicts)
             if mode == 'reconcile':
                 with open(marker, 'w'):
                     pass
@@ -799,6 +909,8 @@ def main(argv):
         return mode_frame_quality(argv[2], argv[3])
     if len(argv) >= 3 and argv[1] == '--ingest':
         return mode_ingest(argv[2])
+    if len(argv) >= 3 and argv[1] == '--ingest-rejected':
+        return mode_ingest(argv[2], rejected=True)
     if len(argv) >= 2 and argv[1] == '--reconcile':
         return mode_reconcile()
     if len(argv) >= 3 and argv[1] == '--rescan-recent':

@@ -34,9 +34,15 @@ and the measurement ledger are all plain ASCII.
    them.
 3. Updates run from `autoprocess.sh`, on successful (report OK) runs only.
    A run whose report contains any processing ERROR line (the nightly
-   summary's own red-row test, no fatal/non-fatal distinction) is not
-   ingested, and the factory itself does not measure the monitored
-   positions on a field that raised an ERROR earlier in the same run.
+   summary's own red-row test, no fatal/non-fatal distinction), whose report
+   is missing or incomplete, or whose factory exited with an error is
+   rejected: its measurements are never published, and the factory itself
+   does not measure the monitored positions on a field that raised an ERROR
+   earlier in the same run. (2026-10-02, user: "the manual run should
+   honour the factory's verdict") The images of a rejected run are recorded
+   in the ledgers as processed-and-rejected (status `run_error`), and the
+   verdict of every run is kept in `transient_search_verdicts.txt` (section
+   6.5), so the manual modes never measure them either.
 4. Multi-camera sources produce ONE combined lightcurve; the camera name is
    the fourth column of the ASCII lightcurve file and appears in the AAVSO
    records.
@@ -164,20 +170,40 @@ for tens of sources), which cannot go stale when the reference set changes.
 
 ```
 # image_basename JD mag err status camera
-wcs_fd_068_2024-10-30_16-24-33_002.fts 2460614.18507 12.345 0.021 detection STL-11000M
-wcs_fd_068_2024-10-30_16-25-26_003.fts 2460614.18571 >17.50 na upperlimit STL-11000M
-wcs_068_2022-8-29_19-6-38_001.fts 2459821.29xxx na na edge STL-11000M
+wcs_fd_068_2024-10-30_16-24-33_002.fts 2460614.18507 12.3450 0.0210 detection STL-11000M
+wcs_fd_068_2024-10-30_16-25-26_003.fts 2460614.18571 17.5000 99.0000 upperlimit STL-11000M
+wcs_068_2022-8-29_19-6-38_001.fts 2459821.29123 99.0000 99.0000 edge STL-11000M
 ```
 
+An upper limit carries its limiting magnitude and the error 99.0000; a row
+without a measured value carries 99.0000 99.0000.
+
 - The ledger records EVERY attempted image (including excluded statuses) so
-  an image is never re-measured: dedup key = image basename. This makes
-  archive/recent overlaps and upload reprocessing self-deduplicating.
+  an image is never re-measured: dedup key = image basename with a trailing
+  `.fz` stripped. This makes archive/recent overlaps and upload reprocessing
+  self-deduplicating. The one exception: a `run_error` row is replaced by
+  the measurement of a later reprocessing run of the image that succeeds
+  (`--ingest` only; the manual modes never re-measure it).
 - All published files (`lightcurve.dat`, `upperlimits.dat`,
   `lightcurve_aavso.txt`, plot, pages) are REBUILT from the ledger after
   every append, sorted by JD, via temp-file + atomic rename. `detection`
   rows go to `lightcurve.dat` and AAVSO magnitudes; `upperlimit` rows go to
-  `upperlimits.dat` and AAVSO fainter-thans; `edge`/`saturated`/`bad_region`
-  rows appear nowhere outside the ledger.
+  `upperlimits.dat` and AAVSO fainter-thans. Everything else is excluded
+  from the published products and, except `edge` (the image does not cover
+  the source), listed in `excluded_measurements.dat` and the page's
+  "excluded" table with a reason:
+  - `cloudy` (the frame-quality cloud check at ingest), `manual`
+    (`--exclude-measurement`) and the within-visit consistency check keep
+    the measured value;
+  - `bad_region`, `saturated`, `nan_pixel`, `calib_fail`, `fail`,
+    `tool_fail`: no measurement could be made (99.0000 99.0000);
+  - `bad_wcs` (TAN-only plate solution of a wide field) and
+    `no_nearby_stars` (no stars detected within 0.5 deg of the position):
+    the frame-level checks of VaST's `util/forced_photometry`, which both
+    measuring paths turn on (`FORCED_PHOTOMETRY_FRAME_CHECKS=yes`); the
+    measured value is kept but means nothing;
+  - `run_error`: the image belongs to a rejected transient-search run
+    (section 6.5); the factory's measured value is kept when there was one.
 - Camera token = `CAMERA_SETTINGS` value (`Stas`, `STL-11000M`, `TTUQ1b1x1`,
   ...), derived per image via `camera_settings_for_path()` with an
   INSTRUME-header fallback for archival paths that do not carry the token.
@@ -307,6 +333,20 @@ instead of queuing), and have no window, image-count or runtime caps.
   `BACKFILL_DONE` (that flag only prevents the automatic first-time backfill
   from repeating).
 
+All manual modes (and the quarantine pass of `--reconcile` and
+`--rescan-recent` over `IMAGE_QUARANTINE_DIR`) honour the verdict of the
+transient-search run that processed each image (section 6.5): an image of a
+rejected run gets a `run_error` ledger row without being plate-solved or
+measured - or no row when sky2xy puts the position off the image (the
+rejected run's plate solution is not trusted for a permanent `edge` row;
+the image is simply checked again by the next rescan; an fpack-compressed
+copy, which sky2xy cannot read, is recorded without the test); an image of a
+run still in progress is skipped and picked up by a later rescan; images of
+successful runs, and images whose run is unknown, are measured as before.
+When the same image exists in several places, a successful run of any copy
+wins, then a rejected run, then a run in progress. The manual modes never
+re-measure an image that is already in the ledger, whatever its status.
+
 ### 6.2 The per-upload path: measure INSIDE the factory run, ingest after
 
 No working copy is ever created on this path (user requirement): the
@@ -355,28 +395,38 @@ dedup them anyway):
    `monitoring_raw_measurements.txt`, one line per (source, image):
    `source_id image_basename JD mag err status camera`.
    Off-frame positions yield `edge` rows (recorded in the ledger so they are
-   never retried, published nowhere).
+   never retried, published nowhere). The forced photometry runs with
+   `FORCED_PHOTOMETRY_FRAME_CHECKS=yes`, so its rows may carry `bad_wcs` or
+   `no_nearby_stars`.
+4. On a field that raised an ERROR earlier in the run the block measures
+   nothing; it writes a `run_error` row for every monitored position on each
+   second-epoch image instead, so the images enter the ledgers as processed
+   and rejected. Positions off the field (judged on the plate-solved frame
+   or, when that is gone, on the field's reference image) get no row: the
+   rejected run's plate solution may be what failed, and a permanent `edge`
+   row could never be replaced.
 Added latency to the upload processing: ~5-15 s total when sources are
 in-field, zero otherwise.
 
-**(c) Post-factory ingest**, from the `autoprocess.sh` SUCCESS branch only
-(where `transient_report/index.html` is confirmed and contains no ERROR
-line; runs that raised a processing ERROR keep their raw measurement file
-in the results directory but are never ingested), detached so transient
-alerts are never delayed:
-
-```sh
-# autoprocess.sh, success branch, before cleanup:
-setsid python3 "$SCRIPT_DIR/monitoring_update.py" --ingest "$MONITORING_RAW_FILE" \
-    >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1 < /dev/null &
-```
+**(c) Post-factory ingest**, from `autoprocess.sh`, synchronously after the
+transient alerts and before the VaST working copy is deleted (the
+frame-quality check needs the catalogs in it). A rejected run's verdict
+(section 6.5) is recorded right after the factory; a successful run's `ok`
+only after this ingest, so that a manual rescan cannot measure the frames
+first and bypass the frame-quality check. Then:
+- verdict `ok`: `--frame-quality` (the cloud check rewrites rows of
+  cloud-affected frames to `cloudy`) and `--ingest`;
+- any other verdict: `--ingest-rejected`, which records every row except the
+  `edge` ones as `run_error`, keeping the measured values. Nothing of a
+  rejected run is published, and its images are never measured later.
 
 `--ingest` is pure text processing plus one plot render per touched source:
 check-then-append each raw line into the source's ledger under its flock
-(basename dedup - reprocessed uploads no-op here), then rebuild the derived
-files, plot, source page and the central page atomically. No VaST copy, no
-solving, no calibration; a few seconds. On a failed factory run the ingest
-is never invoked, so failed runs append nothing.
+(basename dedup - reprocessed uploads no-op here, except that a row replaces
+the `run_error` row of an earlier rejected run of the same image), then
+rebuild the derived files, plot, source page and the central page
+atomically. No VaST copy, no solving, no calibration; a few seconds.
+`--ingest-rejected` never replaces an existing row.
 
 ### 6.3 Trigger timeline - when each image population is measured
 
@@ -414,6 +464,52 @@ activated source from the existing ledgers without measuring anything - run
 it after changing the page/plot rendering. (`--reconcile` only re-renders
 sources that gained new measurements, so it is not sufficient on its own to
 push a template change to up-to-date sources.)
+
+### 6.5 Transient-search run verdicts
+
+The manual modes find images long after the run that processed them, in
+uploads, in the quarantine tree and in the long-term archive, so the run's
+verdict must outlive the processing logs and the moves of the image files.
+`autoprocess.sh` appends it to `$IMAGE_DATA_ROOT/transient_search_verdicts.txt`,
+one line per image of the upload:
+
+```
+<unix time> <verdict> <results_* directory> <image name> [<reason>]
+1790971801 error results_20260917_230531_2026-09-17_CI_Per-02-Q1b1x1_230448_TTUQ1b1x1_1712436_eIesSJ9U Per-02-Q1b1x1_2026-09-17_23-03-28_20.00sec_0.00C_LIGHTs_0111.fits ERROR: ...
+```
+
+- The image name is the uploaded file name without the `wcs_`/`fd_`/`d_`
+  prefixes and the `.fz` suffix of the copies the pipeline makes
+  (`nml.image_core_name`), so every copy of the frame finds its line. The
+  newest line of an image wins: a reprocessing run overrides the verdict of
+  the original one - except that a run that never judged the frames (a
+  `failed` one, or a `pending` one older than a day) leaves an earlier `ok`
+  or `error` verdict of the frame in force.
+- Verdicts: `pending` (written right before the factory starts - the
+  `wcs_*` frames appear in the upload directory while the run is still
+  going), `ok` (written after the run's own monitoring ingest), `error` (the
+  report holds a line containing ERROR, the first one is the reason),
+  `failed` (no report, a report without "Processing complete!", or a
+  nonzero exit code). A `pending` verdict older than a day counts as
+  `failed` (the run was killed).
+- A manual run follows the file as it grows (it reads only the appended
+  lines), so the uploads processed while it runs are honoured too.
+- The file is world-readable (the manual modes may run as another user than
+  apache); an unreadable file is logged and the verdicts then come from the
+  reports only. It belongs to the user that created it - the web server
+  user on a server - so manual reprocessing runs must run as that user
+  too, or their appends fail with a WARNING.
+- Images processed before the file existed: the verdict comes from the
+  report of the newest run of the image that left one, by the same rules -
+  found through the name of the `img_*` directory holding the image
+  (results directories stay in `IMAGE_DATA_ROOT` when an upload directory
+  moves to quarantine), or, for an archive copy, through the preview image
+  of the frame the run left in its `results_*` directory (since about
+  2026-01; when the run's `fits_images_for_download.txt` exists, it must
+  list the frame as a second-epoch image - runs also leave previews of
+  their reference frames). With neither, the verdict is unknown and the
+  image is measured as before. On 2026-10-02 about 11% of a random sample of archive frames
+  came from rejected runs.
 
 ## 7. Files changed / added
 

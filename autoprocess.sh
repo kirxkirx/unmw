@@ -481,6 +481,82 @@ function check_free_space() {
     return $overall_status
 }
 
+# Record the verdict of the transient search on this upload in the list that
+# monitoring_update.py reads: transient_search_verdicts.txt in IMAGE_DATA_ROOT
+# (see the comment above RUN_VERDICTS_BASENAME in nmw_monitoring_lib.py), one
+# line per image of the upload:
+#  <unix time> <verdict> <results_* directory> <image name> [<reason>]
+# The image name drops the wcs_/fd_/d_ prefixes and the .fz suffix of the
+# copies the pipeline makes, so every copy of the frame (uploads, quarantine,
+# archive) finds its line; the newest line of an image wins. The verdicts are
+# pending (written right before the transient search starts), ok, error (the
+# report holds a line containing ERROR) and failed (no complete report, or a
+# nonzero exit code). The manual monitoring modes measure only the images of
+# runs that were not rejected, and record the images of rejected runs as
+# processed and rejected in the monitoring ledgers. The lines of one call go
+# out in a single short append, so concurrent runs do not interleave them.
+# The file belongs to the user that creates it - on a server, the web server
+# user that runs the uploads; run manual reprocessing as that user as well
+# (sudo -u apache), or its appends fail with a WARNING.
+# Arguments: verdict reason
+function record_transient_search_verdict {
+ local VERDICT="$1"
+ local REASON="$2"
+ local VERDICT_LIST="$IMAGE_DATA_ROOT/transient_search_verdicts.txt"
+ local UNIXTIME
+ local IMAGE_FILE
+ local CORE_NAME
+ local CORE_NAMES=""
+ local LINES=""
+ local N_IMAGES=0
+ UNIXTIME=$(date +%s)
+ # one line without tabs, at most 300 characters
+ REASON=$(printf '%s' "$REASON" | tr '\t\r\n' '   ' | cut -c1-300)
+ for IMAGE_FILE in "$ABSOLUTE_PATH_TO_IMAGES"/*.fts "$ABSOLUTE_PATH_TO_IMAGES"/*.fits "$ABSOLUTE_PATH_TO_IMAGES"/*.fit "$ABSOLUTE_PATH_TO_IMAGES"/*.fts.fz "$ABSOLUTE_PATH_TO_IMAGES"/*.fits.fz "$ABSOLUTE_PATH_TO_IMAGES"/*.fit.fz ;do
+  if [ ! -f "$IMAGE_FILE" ];then
+   continue
+  fi
+  CORE_NAME=$(basename "$IMAGE_FILE")
+  CORE_NAME="${CORE_NAME%.fz}"
+  CORE_NAME="${CORE_NAME#wcs_}"
+  CORE_NAME="${CORE_NAME#fd_}"
+  CORE_NAME="${CORE_NAME#d_}"
+  # the list is whitespace-separated
+  case "$CORE_NAME" in
+   *[[:space:]]*) continue ;;
+  esac
+  CORE_NAMES="$CORE_NAMES$CORE_NAME
+"
+ done
+ while read -r CORE_NAME ;do
+  if [ -z "$CORE_NAME" ];then
+   continue
+  fi
+  if [ -n "$REASON" ];then
+   LINES="$LINES$UNIXTIME $VERDICT $VAST_RESULTS_DIR_FILENAME $CORE_NAME $REASON
+"
+  else
+   LINES="$LINES$UNIXTIME $VERDICT $VAST_RESULTS_DIR_FILENAME $CORE_NAME
+"
+  fi
+  N_IMAGES=$((N_IMAGES + 1))
+ done < <(printf '%s' "$CORE_NAMES" | sort -u)
+ if [ $N_IMAGES -eq 0 ];then
+  echo "WARNING: no images found in $ABSOLUTE_PATH_TO_IMAGES - the transient search verdict ($VERDICT) is not recorded" | tee -a "$AUTOPROCESS_LOG"
+  return 1
+ fi
+ if ! printf '%s' "$LINES" >> "$VERDICT_LIST" ;then
+  echo "WARNING: cannot append the transient search verdict ($VERDICT) to $VERDICT_LIST" | tee -a "$AUTOPROCESS_LOG"
+  return 1
+ fi
+ # The manual monitoring modes run as another user and must be able to read it
+ if [ -O "$VERDICT_LIST" ];then
+  chmod 644 "$VERDICT_LIST" 2>/dev/null
+ fi
+ echo "Transient search verdict: $VERDICT for $N_IMAGES image(s) recorded in $VERDICT_LIST" | tee -a "$AUTOPROCESS_LOG"
+ return 0
+}
+
 
 # Check input
 if [ -z "$INPUT_ZIP_ARCHIVE" ];then
@@ -925,12 +1001,45 @@ if [ -s "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" ] && [ -d "$IMAGE
  fi
 fi
 ############################################################################
+# Until the transient search has finished, its verdict is pending: the
+# plate-solved wcs_* images appear in the image directory while the run is
+# still going, and a manual monitoring rescan must not measure them yet
+record_transient_search_verdict "pending" ""
 echo "Starting work"  | tee -a "$AUTOPROCESS_LOG"
 UNIXSEC_START=$(date +%s)
 ########################## ACTUAL WORK ##########################
 util/transients/transient_factory_test31.sh "$ABSOLUTE_PATH_TO_IMAGES"
 SCRIPT_EXIT_CODE=$?
 echo "SCRIPT_EXIT_CODE=$SCRIPT_EXIT_CODE" | tee -a "$AUTOPROCESS_LOG"
+# The verdict of the transient search on this upload: any line containing
+# ERROR in the report rejects the run - the rule of the nightly summary page
+# and of the monitoring ingest below, with no distinction between fatal and
+# non-fatal conditions - and so does a missing or incomplete report or a
+# nonzero exit code. A rejection is recorded at once (a write at the end of
+# the script is lost when the script is killed). A successful run stays
+# 'pending' until its own monitoring measurements are in the ledgers (see
+# below), so that a manual rescan cannot measure its images first and bypass
+# the frame-quality check of the ingest; if the script is killed before
+# that, the stale 'pending' verdict counts as failed.
+if [ ! -s transient_report/index.html ];then
+ RUN_VERDICT="failed"
+ RUN_VERDICT_REASON="the transient search left no report (transient_report/index.html is missing or empty)"
+elif grep --quiet 'ERROR' transient_report/index.html ;then
+ RUN_VERDICT="error"
+ RUN_VERDICT_REASON=$(grep --max-count=1 'ERROR' transient_report/index.html | sed 's/<[^>]*>//g')
+elif ! grep --quiet 'Processing complete!' transient_report/index.html ;then
+ RUN_VERDICT="failed"
+ RUN_VERDICT_REASON="the transient search did not complete (no 'Processing complete!' in its report)"
+elif [ $SCRIPT_EXIT_CODE -ne 0 ];then
+ RUN_VERDICT="failed"
+ RUN_VERDICT_REASON="the transient search exited with code $SCRIPT_EXIT_CODE"
+else
+ RUN_VERDICT="ok"
+ RUN_VERDICT_REASON=""
+fi
+if [ "$RUN_VERDICT" != "ok" ];then
+ record_transient_search_verdict "$RUN_VERDICT" "$RUN_VERDICT_REASON"
+fi
 CPU_TEMERATURE_AT_THE_END_OF_THE_RUN_STRING=$(is_temperature_low log)
 #################################################################
 if [ ! -f transient_report/index.html ];then
@@ -1002,39 +1111,42 @@ $MSG"
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
   fi
  fi # grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
- # Source monitoring: quality-check and ingest the factory's monitoring
- # measurements, on successful runs only (nonempty report, zero exit
- # code and no processing ERROR in the report, see the run-status guard
- # below). The frame-quality (cloud) check needs the frame and
- # reference-frame star catalogs that live in the VaST working copy, and
- # the ingest reads the raw measurements file from the same copy, so BOTH
- # run synchronously here, before the working copy is deleted further
- # down (the previous detached ingest raced that deletion). The transient
- # alerts above are already sent at this point, so the only cost is a
- # slightly later script completion.
- if [ $SCRIPT_EXIT_CODE -eq 0 ] && [ -n "$MONITORING_POSITIONS_FILE" ] && [ -s transient_report/monitoring_raw_measurements.txt ];then
-  MONITORING_RAW_ABS=$(readlink -f transient_report/monitoring_raw_measurements.txt)
-  # Run-status guard: measurements from a run that raised any processing
-  # ERROR are not ingested. The test is the one the nightly summary page
-  # uses to mark a run red (any line containing ERROR in the report), with
-  # no distinction between fatal and non-fatal conditions; it also covers
-  # ERRORs raised after the factory's own monitoring block (which applies
-  # the same rule to its field before measuring). The raw file stays in
-  # the results directory as a record of what was measured.
-  if grep --quiet 'ERROR' transient_report/index.html ;then
-   MONITORING_RUN_ERROR_LINE=$(grep --max-count=1 'ERROR' transient_report/index.html | sed 's/<[^>]*>//g')
-   echo "Source monitoring: NOT ingesting $MONITORING_RAW_ABS - the transient search raised a processing error: $MONITORING_RUN_ERROR_LINE" | tee -a "$AUTOPROCESS_LOG"
-   echo "monitoring: $(date '+%Y-%m-%d %H:%M:%S') --ingest: NOT ingesting $MONITORING_RAW_ABS - the transient search raised a processing error: $MONITORING_RUN_ERROR_LINE" >> "$IMAGE_DATA_ROOT/monitoring_update.log"
-  else
-   # The cloud check rewrites the status of measurements from
-   # cloud-affected frames to 'cloudy'; it always exits 0 and leaves the
-   # raw file untouched on any trouble, so it can never block the ingest
-   python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --frame-quality "$MONITORING_RAW_ABS" "$PWD" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
-   python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --ingest "$MONITORING_RAW_ABS" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
-   echo "Source monitoring: ingest completed for $MONITORING_RAW_ABS" | tee -a "$AUTOPROCESS_LOG"
-  fi
- fi
 fi # if [ ! -f transient_report/index.html ];then
+# Source monitoring: quality-check and ingest the factory's monitoring
+# measurements. The frame-quality (cloud) check needs the frame and
+# reference-frame star catalogs that live in the VaST working copy, and the
+# ingest reads the raw measurements file from the same copy, so BOTH run
+# synchronously here, before the working copy is deleted further down (the
+# previous detached ingest raced that deletion). The transient alerts above
+# are already sent at this point, so the only cost is a slightly later
+# script completion.
+# Run-status guard: the measurements of a run whose verdict is not 'ok' (see
+# above) are never published. They are recorded in the ledgers as
+# processed-and-rejected instead (--ingest-rejected: status run_error, the
+# measured values kept), so that no manual rescan measures these images
+# later. The guard also covers ERRORs raised after the factory's own
+# monitoring block, which applies the same rule to its field before
+# measuring and writes run_error rows itself when it refuses.
+if [ -n "$MONITORING_POSITIONS_FILE" ] && [ -s transient_report/monitoring_raw_measurements.txt ];then
+ MONITORING_RAW_ABS=$(readlink -f transient_report/monitoring_raw_measurements.txt)
+ if [ "$RUN_VERDICT" = "ok" ];then
+  # The cloud check rewrites the status of measurements from
+  # cloud-affected frames to 'cloudy'; it always exits 0 and leaves the
+  # raw file untouched on any trouble, so it can never block the ingest
+  python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --frame-quality "$MONITORING_RAW_ABS" "$PWD" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
+  python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --ingest "$MONITORING_RAW_ABS" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
+  echo "Source monitoring: ingest completed for $MONITORING_RAW_ABS" | tee -a "$AUTOPROCESS_LOG"
+ else
+  echo "Source monitoring: recording $MONITORING_RAW_ABS as rejected (run_error), NOT publishing it - the transient search run was rejected ($RUN_VERDICT): $RUN_VERDICT_REASON" | tee -a "$AUTOPROCESS_LOG"
+  echo "monitoring: $(date '+%Y-%m-%d %H:%M:%S') --ingest-rejected: $MONITORING_RAW_ABS - the transient search run was rejected ($RUN_VERDICT): $RUN_VERDICT_REASON" >> "$IMAGE_DATA_ROOT/monitoring_update.log"
+  python3 "$UNMW_SCRIPT_DIR_FOR_MONITORING/monitoring_update.py" --ingest-rejected "$MONITORING_RAW_ABS" >> "$IMAGE_DATA_ROOT/monitoring_update.log" 2>&1
+ fi
+fi
+# The verdict of a successful run, now that its monitoring measurements are in
+# the ledgers (a rejected run's verdict was recorded right after the factory)
+if [ "$RUN_VERDICT" = "ok" ];then
+ record_transient_search_verdict "$RUN_VERDICT" "$RUN_VERDICT_REASON"
+fi
 ##
 UNIXSEC_STOP=$(date +%s)
 ############################################################################

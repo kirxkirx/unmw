@@ -1212,3 +1212,467 @@ def test_central_index_shows_rounded_coordinates_with_full_tooltip():
         assert '<td class="code" title="-12:34:56.78">-12:34:56.8</td>' in page
     finally:
         shutil.rmtree(sandbox, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Transient-search run verdicts, the rejected-run ingest and the refusal
+# statuses of the forced photometry frame-level checks (nmw_monitoring_lib,
+# monitoring_update, nmw_forced_phot_lib)
+# ---------------------------------------------------------------------------
+
+_FRAME = 'Per-02-Q1b1x1_2026-09-17_23-03-28_20.00sec_0.00C_LIGHTs_0111.fits'
+_UPLOAD = 'img_2026-09-17_CI_Per-02-Q1b1x1_230448_TTUQ1b1x1_1712436_eIesSJ9U'
+_COMPLETE_REPORT = '<H2>Processing complete!</H2>\n'
+
+
+def _write_file(path, text=''):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as fh:
+        fh.write(text)
+
+
+def _ledger_by_basename(uploads, source_id):
+    rows, _ = nml.read_ledger(nml.source_dir_path(uploads, source_id))
+    return {r['basename']: (r['status'], r['mag'], r['err']) for r in rows}
+
+
+def test_image_core_name_strips_pipeline_prefixes_and_fz():
+    for name in (_FRAME, 'fd_' + _FRAME, 'wcs_fd_' + _FRAME,
+                 'wcs_fd_' + _FRAME + '.fz', '/q/img_x/wcs_' + _FRAME,
+                 'd_' + _FRAME):
+        assert nml.image_core_name(name) == _FRAME
+
+
+def test_read_run_verdicts_newest_line_wins(tmp_path):
+    _write_file(str(tmp_path / nml.RUN_VERDICTS_BASENAME),
+                '1000 pending results_A X.fits\n'
+                'garbage\n'
+                '1100 error results_A X.fits ERROR: passing clouds\n'
+                '1050 ok results_B X.fits\n'
+                '1000 ok results_A Y.fits\n')
+    verdicts = nml.read_run_verdicts(str(tmp_path))
+    assert verdicts['X.fits'] == (1100.0, 'error', 'results_A',
+                                  'ERROR: passing clouds')
+    assert verdicts['Y.fits'][1] == 'ok'
+    assert nml.read_run_verdicts(str(tmp_path / 'missing')) == {}
+
+
+def test_verdict_from_report_rules(tmp_path):
+    reports = {
+        'ok': _COMPLETE_REPORT,
+        'error': '<b>ERROR: too few stars</b>\n' + _COMPLETE_REPORT,
+        'killed': "manually reload the page untill the 'Processing complete'"
+                  " message appears\n",
+        'empty': '',
+    }
+    for name, text in reports.items():
+        _write_file(str(tmp_path / (name + '.html')), text)
+    assert nml.verdict_from_report(str(tmp_path / 'ok.html')) == ('ok', '')
+    assert nml.verdict_from_report(str(tmp_path / 'error.html')) == (
+        'error', 'ERROR: too few stars')
+    assert nml.verdict_from_report(str(tmp_path / 'killed.html'))[0] == \
+        'failed'
+    assert nml.verdict_from_report(str(tmp_path / 'empty.html')) is None
+    assert nml.verdict_from_report(str(tmp_path / 'missing.html')) is None
+
+
+def test_upload_dir_of_results_dir_names():
+    assert nml.upload_dir_of_results_dir(
+        'results_20260917_230531_' + _UPLOAD[4:]) == (
+            _UPLOAD, '20260917_230531')
+    assert nml.upload_dir_of_results_dir(
+        'results_20260920_101010_reprocess_' + _UPLOAD + '_349237_BVS8Ieoj'
+    ) == (_UPLOAD, '20260920_101010')
+    assert nml.upload_dir_of_results_dir(
+        'results_20260728_034122_reprocess_img_X_1283857_349237') == (
+            'img_X_1283857', '20260728_034122')
+    assert nml.upload_dir_of_results_dir('results_comets.txt') == (None, None)
+
+
+def test_run_verdict_resolver_sources(tmp_path):
+    root = str(tmp_path / 'workdir')
+    copy_in_quarantine = os.path.join(str(tmp_path), 'quarantine', _UPLOAD,
+                                      'wcs_fd_' + _FRAME)
+    copy_in_archive = str(tmp_path / 'archive' / ('wcs_fd_' + _FRAME + '.fz'))
+    _write_file(copy_in_quarantine)
+    _write_file(copy_in_archive)
+    original_run = os.path.join(root, 'results_20260917_230531_' + _UPLOAD[4:])
+    _write_file(os.path.join(original_run, 'index.html'),
+                '<b>ERROR: passing clouds</b>\n' + _COMPLETE_REPORT)
+    # The upload directory names its run
+    resolver = nml.RunVerdictResolver(root)
+    assert resolver.verdict_for_image(copy_in_quarantine)[0] == 'error'
+    # The archive copy is found through the frame preview of the run
+    assert resolver.verdict_for_image(copy_in_archive)[0] is None
+    _write_file(os.path.join(original_run, _FRAME + '_preview.png'))
+    resolver = nml.RunVerdictResolver(root)
+    assert resolver.verdict_for_image(copy_in_archive)[0] == 'error'
+    # A newer successful reprocessing wins; one without a report says nothing
+    reprocessing = os.path.join(
+        root, 'results_20260920_101010_reprocess_{}_4242_abcdEFGH'.format(
+            _UPLOAD))
+    _write_file(os.path.join(reprocessing, 'index.html'), _COMPLETE_REPORT)
+    _write_file(os.path.join(reprocessing, 'fd_' + _FRAME + '_preview.png'))
+    os.makedirs(os.path.join(
+        root, 'results_20260921_101010_reprocess_{}_4343_abcdEFGH'.format(
+            _UPLOAD)))
+    resolver = nml.RunVerdictResolver(root)
+    assert resolver.verdict_for_image(copy_in_quarantine)[0] == 'ok'
+    assert resolver.verdict_for_image(copy_in_archive)[0] == 'ok'
+    # A newer reprocessing that was killed (no completion marker) did not
+    # judge the frame: the earlier conclusive verdict stands
+    killed = os.path.join(
+        root, 'results_20260922_101010_reprocess_{}_4444_abcdEFGH'.format(
+            _UPLOAD))
+    _write_file(os.path.join(killed, 'index.html'), 'header only\n')
+    resolver = nml.RunVerdictResolver(root)
+    assert resolver.verdict_for_image(copy_in_quarantine)[0] == 'ok'
+    # The verdict list written by autoprocess.sh overrides the reports
+    now = 1790000000.0
+    _write_file(os.path.join(root, nml.RUN_VERDICTS_BASENAME),
+                '%d failed results_X %s the transient search exited with '
+                'code 1\n' % (now - 100, _FRAME))
+    resolver = nml.RunVerdictResolver(root, now=now)
+    for copy in (copy_in_quarantine, copy_in_archive):
+        assert resolver.verdict_for_image(copy)[:2] == (
+            'failed', 'the transient search exited with code 1')
+    # A run in progress is pending; one that never finished counts as failed
+    with open(os.path.join(root, nml.RUN_VERDICTS_BASENAME), 'a') as fh:
+        fh.write('%d pending results_Y %s\n' % (now - 60, _FRAME))
+    assert nml.RunVerdictResolver(root, now=now).verdict_for_image(
+        copy_in_archive)[0] == 'pending'
+    stale = now + nml.PENDING_RUN_VERDICT_STALE_SECONDS + 1
+    assert nml.RunVerdictResolver(root, now=stale).verdict_for_image(
+        copy_in_archive)[0] == 'failed'
+
+
+def test_verdict_for_copies_prefers_ok_then_rejected_then_pending():
+    class FixedVerdicts(nml.RunVerdictResolver):
+        def __init__(self, table):
+            self.table = table
+
+        def verdict_for_image(self, image_path):
+            return self.table[image_path]
+    resolver = FixedVerdicts({'a': ('error', 'x', 'o1'),
+                              'b': ('ok', '', 'o2'),
+                              'c': (None, '', 'no verdict'),
+                              'd': ('pending', '', 'o3')})
+    assert resolver.verdict_for_copies(['a', 'b'])[0] == 'ok'
+    assert resolver.verdict_for_copies(['c', 'a'])[0] == 'error'
+    assert resolver.verdict_for_copies(['c', 'a'])[3] == 'a'
+    assert resolver.verdict_for_copies(['d', 'c'])[0] == 'pending'
+    assert resolver.verdict_for_copies(['c'])[0] is None
+
+
+def test_append_ledger_rows_supersedes_run_error_rows_only(tmp_path):
+    uploads = str(tmp_path)
+
+    def row(basename, status, mag='99.0000', err='99.0000'):
+        return {'basename': basename, 'jd': '2461000.5', 'mag': mag,
+                'err': err, 'status': status, 'camera': 'C1'}
+    assert nml.append_ledger_rows(uploads, 'SRC', [
+        row('a.fits', 'run_error', '12.5000', '0.0500'),
+        row('b.fits', 'detection', '13.0000', '0.0200')]) == 2
+    # a rejected run never replaces a row
+    assert nml.append_ledger_rows(uploads, 'SRC',
+                                  [row('a.fits.fz', 'run_error')]) == 0
+    # a successful run replaces run_error rows, and nothing else
+    assert nml.append_ledger_rows(uploads, 'SRC', [
+        row('a.fits', 'detection', '12.4000', '0.0400'),
+        row('b.fits', 'upperlimit', '15.0000'),
+        row('c.fits', 'detection', '14.0000', '0.1000')],
+        supersede_statuses=nml.SUPERSEDABLE_STATUSES) == 2
+    ledger = _ledger_by_basename(uploads, 'SRC')
+    assert ledger == {'a.fits': ('detection', '12.4000', '0.0400'),
+                      'b.fits': ('detection', '13.0000', '0.0200'),
+                      'c.fits': ('detection', '14.0000', '0.1000')}
+
+
+def _patch_ingest_context(monkeypatch, uploads, entry):
+    import monitoring_update as mu
+    monkeypatch.setattr(mu, 'load_context',
+                        lambda: (uploads, {}, uploads, None))
+    monkeypatch.setattr(mu, 'list_entries_or_exit',
+                        lambda: ('monitoring_list.txt', [entry]))
+    monkeypatch.setattr(mu, 'read_factory_text', lambda cfg: '')
+    monkeypatch.setattr(nml, 'rebuild_source_products',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(nml, 'rebuild_central_index',
+                        lambda *args, **kwargs: None)
+    return mu
+
+
+def test_ingest_rejected_records_run_error_and_ingest_replaces_it(
+        tmp_path, monkeypatch):
+    uploads = str(tmp_path)
+    os.makedirs(nml.source_dir_path(uploads, 'SRC'))
+    entry = {'source_id': 'SRC', 'name': 'SRC', 'ra': '01:00:00.00',
+             'dec': '+10:00:00.0'}
+    mu = _patch_ingest_context(monkeypatch, uploads, entry)
+    raw = tmp_path / 'raw_rejected.txt'
+    raw.write_text(
+        'SRC wcs_fd_a.fits 2461000.5 12.5000 0.0500 detection C1\n'
+        'SRC wcs_fd_b.fits 2461000.5 15.1000 99.0000 upperlimit C1\n'
+        'SRC wcs_fd_c.fits 2461000.5 99.0000 99.0000 edge C1\n'
+        'SRC wcs_fd_d.fits 2461000.5 99.0000 99.0000 run_error C1\n')
+    assert mu.mode_ingest(str(raw), rejected=True) == 0
+    ledger = _ledger_by_basename(uploads, 'SRC')
+    assert ledger['wcs_fd_a.fits'] == ('run_error', '12.5000', '0.0500')
+    assert ledger['wcs_fd_b.fits'] == ('run_error', '15.1000', '99.0000')
+    assert ledger['wcs_fd_c.fits'][0] == 'edge'
+    assert ledger['wcs_fd_d.fits'][0] == 'run_error'
+    # A later successful reprocessing replaces the run_error rows only
+    raw_ok = tmp_path / 'raw_ok.txt'
+    raw_ok.write_text(
+        'SRC wcs_fd_a.fits 2461000.5 12.4000 0.0400 detection C1\n'
+        'SRC wcs_fd_c.fits 2461000.5 13.0000 0.0300 detection C1\n')
+    assert mu.mode_ingest(str(raw_ok)) == 0
+    ledger = _ledger_by_basename(uploads, 'SRC')
+    assert ledger['wcs_fd_a.fits'] == ('detection', '12.4000', '0.0400')
+    assert ledger['wcs_fd_c.fits'][0] == 'edge'
+
+
+def test_manual_measurement_honours_run_verdicts(tmp_path, monkeypatch):
+    import monitoring_update as mu
+    root = str(tmp_path / 'workdir')
+    os.makedirs(nml.source_dir_path(root, 'SRC'))
+    entry = {'source_id': 'SRC', 'name': 'SRC', 'ra': '01:00:00.00',
+             'dec': '+10:00:00.0'}
+    now = 1790000000.0
+    _write_file(os.path.join(root, nml.RUN_VERDICTS_BASENAME),
+                '%d error results_A bad.fits ERROR: passing clouds\n'
+                '%d pending results_B busy.fits\n'
+                '%d pending results_C stale.fits\n'
+                '%d ok results_D good.fits\n'
+                '%d error results_E offimage.fits ERROR: wrong field?\n'
+                '%d error results_F packed.fits ERROR: passing clouds\n' % (
+                    now - 100, now - 100, now - 3 * 86400, now - 100,
+                    now - 100, now - 100))
+    images = [os.path.join(root, 'img_A', 'wcs_fd_' + name) for name in (
+        'bad.fits', 'busy.fits', 'stale.fits', 'good.fits', 'unknown.fits',
+        'offimage.fits')]
+    # an image seen only through an fpack-compressed archive copy
+    images.append(os.path.join(root, 'archive', 'wcs_fd_packed.fits.fz'))
+    for image in images:
+        _write_file(image)
+    monkeypatch.setattr(mu, 'read_factory_text', lambda cfg: '')
+    sky2xy_calls = []
+
+    def fake_sky2xy(vast_dir, path, ra, dec):
+        sky2xy_calls.append(os.path.basename(path))
+        return None if 'offimage' in path else (100.0, 100.0)
+    monkeypatch.setattr(mu, 'sky2xy_on_image', fake_sky2xy)
+    monkeypatch.setattr(nfp, 'get_jd_and_atel_date',
+                        lambda vast_dir, path: ('2461000.5000', None))
+    monkeypatch.setattr(nfp, 'camera_settings_for_path',
+                        lambda text, path: 'C1')
+    monkeypatch.setattr(nfp, 'derive_band', lambda text, path, default: 'V')
+    monkeypatch.setattr(nfp, 'derive_sextractor_config',
+                        lambda text, path: None)
+    work_dir = str(tmp_path / 'work')
+    seen = {}
+
+    def fake_setup(vast_dir, parent_dir, prefix=None):
+        os.makedirs(work_dir, exist_ok=True)
+        return work_dir
+
+    def fake_solve(work, local_config_path, todo, workers, skip_log):
+        seen['todo'] = sorted(os.path.basename(p) for p in todo)
+        return None, None, None, {}, None
+    monkeypatch.setattr(nfp, 'setup_vast_working_copy', fake_setup)
+    monkeypatch.setattr(nfp, '_phase1_parallel_solve_plate', fake_solve)
+    n_rows = mu.measure_images_for_source(
+        {}, None, entry, images, root,
+        verdicts=nml.RunVerdictResolver(root, now=now))
+    # the images of rejected runs are recorded without being measured; a
+    # position off the image gets no row, an fpack-compressed copy is
+    # recorded without the on-image test
+    assert n_rows == 3
+    assert _ledger_by_basename(root, 'SRC') == {
+        'wcs_fd_bad.fits': ('run_error', '99.0000', '99.0000'),
+        'wcs_fd_stale.fits': ('run_error', '99.0000', '99.0000'),
+        'wcs_fd_packed.fits.fz': ('run_error', '99.0000', '99.0000')}
+    assert 'wcs_fd_packed.fits.fz' not in sky2xy_calls
+    assert 'wcs_fd_offimage.fits' in sky2xy_calls
+    # the run in progress is left alone; ok and unknown runs are measured
+    assert seen['todo'] == ['wcs_fd_good.fits', 'wcs_fd_unknown.fits']
+
+
+def test_refusal_statuses_are_listed_as_excluded(tmp_path, monkeypatch):
+    monkeypatch.setenv('MPLCONFIGDIR', str(tmp_path / 'mpl'))
+    uploads = str(tmp_path / 'uploads')
+    source_dir = nml.source_dir_path(uploads, 'SRC')
+    _write_file(os.path.join(source_dir, nml.LEDGER_BASENAME),
+                '# image_basename JD mag err status camera\n'
+                'ok.fits 2461000.4 12.1000 0.0300 detection C1\n'
+                'a.fits 2461000.5 12.3456 0.0500 bad_wcs C1\n'
+                'b.fits 2461000.6 15.6501 99.0000 no_nearby_stars C1\n'
+                'c.fits 2461000.7 99.0000 99.0000 run_error C1\n'
+                'd.fits na 99.0000 99.0000 run_error C1\n'
+                'e.fits 2461000.8 14.4269 99.0000 cloudy C1\n')
+    rows, _ = nml.read_ledger(source_dir)
+    det, lim, excluded = nml.classify_ledger_rows(rows)
+    assert [r['basename'] for r in det] == ['ok.fits'] and not lim
+    by_name = {r['basename']: r for r in excluded}
+    assert set(by_name) == {'a.fits', 'b.fits', 'c.fits', 'e.fits'}
+    assert by_name['a.fits']['reason'] == 'unreliable_plate_solution'
+    assert by_name['a.fits']['err_float'] == 0.05
+    assert by_name['b.fits']['reason'] == 'no_stars_around_position'
+    assert by_name['c.fits']['reason'] == 'processing_error_in_run'
+    assert by_name['c.fits']['mag_float'] is None
+    entry = {'source_id': 'SRC', 'name': 'SRC', 'ra': '01:00:00.00',
+             'dec': '+10:00:00.0'}
+    nml.rebuild_source_products(uploads, entry, {}, '')
+    with open(os.path.join(source_dir,
+                           nml.EXCLUDED_MEASUREMENTS_BASENAME)) as fh:
+        text = fh.read()
+    assert '12.3456 0.0500 C1 unreliable_plate_solution a.fits' in text
+    assert '15.6501 99.0000 C1 no_stars_around_position b.fits' in text
+    assert '99.0000 99.0000 C1 processing_error_in_run c.fits' in text
+    assert '14.4269 99.0000 C1 cloudy_frame e.fits' in text
+    with open(os.path.join(source_dir, nml.LIGHTCURVE_BASENAME)) as fh:
+        published = [line for line in fh if not line.startswith('#')]
+    assert len(published) == 1 and ' 12.1000 ' in published[0]
+
+
+def test_restore_measurement_keeps_real_format_upper_limits(tmp_path):
+    uploads = str(tmp_path)
+    source_dir = nml.source_dir_path(uploads, 'SRC')
+    _write_file(os.path.join(source_dir, nml.LEDGER_BASENAME),
+                '# image_basename JD mag err status camera\n'
+                'lim.fits 2461000.7 13.6758 99.0000 upperlimit C1\n')
+    assert nml.rewrite_measurement_status(uploads, 'SRC', 'lim.fits') == 1
+    assert nml.rewrite_measurement_status(uploads, 'SRC', 'lim.fits',
+                                          restore=True) == 1
+    assert _ledger_by_basename(uploads, 'SRC')['lim.fits'] == (
+        'upperlimit', '13.6758', '99.0000')
+
+
+def test_coordinate_lightcurve_files_skip_refused_rows(tmp_path):
+    results = [
+        {'jd': '2461000.5', 'mag': '12.34', 'err': '0.05',
+         'status': 'detection'},
+        {'jd': '2461000.6', 'mag': '>15.10', 'err': '99.00',
+         'status': 'upperlimit'},
+        {'jd': '2461000.7', 'mag': '12.40', 'err': '0.05',
+         'status': 'bad_wcs'},
+        {'jd': '2461000.8', 'mag': '15.60', 'err': '99.00',
+         'status': 'no_nearby_stars'},
+        {'jd': '2461000.9', 'mag': '99.00', 'err': '99.00', 'status': 'edge'},
+    ]
+    lc_path, ul_path = nfp._write_lightcurve_data_files(str(tmp_path),
+                                                        results)
+    with open(lc_path) as fh:
+        lc_rows = [line for line in fh if not line.startswith('#')]
+    with open(ul_path) as fh:
+        ul_rows = [line for line in fh if not line.startswith('#')]
+    assert len(lc_rows) == 1 and lc_rows[0].startswith('2461000.50000 12.340')
+    assert len(ul_rows) == 1 and ul_rows[0].startswith('2461000.60000 15.100')
+
+
+class TestRunForcedPhotometryFrameChecks:
+    """The unmw forced photometry asks util/forced_photometry for its
+    frame-level checks and hands the refusal statuses back unchanged."""
+
+    IMAGE = TestRunForcedPhotometryOffImage.IMAGE
+
+    def test_checks_requested_and_inherited_overrides_dropped(
+            self, monkeypatch, tmp_path):
+        seen = {}
+
+        def fake_run(cmd, cwd=None, env=None, timeout=None):
+            seen['env'] = dict(env or {})
+            return _FakeCompletedRun(1, '', 'ERROR: sky2xy failed\n')
+        monkeypatch.setattr(nfp, '_run_capture_session', fake_run)
+        monkeypatch.setenv('FORCED_PHOTOMETRY_STAR_CATALOG', '/x/other.wcscat')
+        monkeypatch.setenv('FORCED_PHOTOMETRY_WCS_IMAGE', '/x/other.fits')
+        nfp.run_forced_photometry_c(
+            str(tmp_path), None, self.IMAGE, self.IMAGE,
+            '18:31:15.62', '-05:34:31.9', 'V')
+        assert seen['env'].get('FORCED_PHOTOMETRY_FRAME_CHECKS') == 'yes'
+        assert 'FORCED_PHOTOMETRY_STAR_CATALOG' not in seen['env']
+        assert 'FORCED_PHOTOMETRY_WCS_IMAGE' not in seen['env']
+
+    def test_refusal_status_passes_through_with_its_values(
+            self, monkeypatch, tmp_path):
+        stdout = ('# aperture_diameter_pix: 3.0\n# target_pixel: 100 200\n'
+                  '# C implementation:\n'
+                  '2461000.5  12.3456  0.0500  bad_wcs  wcs_x.fits\n')
+        monkeypatch.setattr(
+            nfp, '_run_capture_session',
+            lambda cmd, cwd=None, env=None, timeout=None:
+            _FakeCompletedRun(0, stdout, ''))
+        fp = nfp.run_forced_photometry_c(
+            str(tmp_path), None, self.IMAGE, self.IMAGE,
+            '18:31:15.62', '-05:34:31.9', 'V')
+        assert (fp['status'], fp['mag'], fp['err']) == (
+            'bad_wcs', '12.3456', '0.0500')
+
+
+def test_listed_verdicts_earlier_conclusive_verdict_stands(tmp_path):
+    root = str(tmp_path)
+    now = 1790000000.0
+    day = 86400
+
+    def verdict_after(*lines):
+        _write_file(os.path.join(root, nml.RUN_VERDICTS_BASENAME),
+                    ''.join('%d %s %s X.fits\n' % (now - age, verdict, run)
+                            for age, verdict, run in lines))
+        return nml.RunVerdictResolver(root, now=now).verdict_for_image(
+            '/q/img_a/wcs_fd_X.fits')[0]
+    # a later run that failed or never finished does not reject the frame
+    assert verdict_after((5 * day, 'ok', 'r1'), (4 * day, 'failed', 'r2')) == 'ok'
+    assert verdict_after((5 * day, 'ok', 'r1'), (3 * day, 'pending', 'r2')) == 'ok'
+    # a later run in progress makes the frame wait
+    assert verdict_after((5 * day, 'ok', 'r1'), (60, 'pending', 'r2')) == 'pending'
+    # a conclusive later verdict wins, either way
+    assert verdict_after((5 * day, 'ok', 'r1'), (4 * day, 'error', 'r2')) == 'error'
+    assert verdict_after((5 * day, 'error', 'r1'), (4 * day, 'ok', 'r2')) == 'ok'
+    # with nothing conclusive, an unfinished run rejects the frame
+    assert verdict_after((3 * day, 'pending', 'r1')) == 'failed'
+    assert verdict_after((3 * day, 'failed', 'r1')) == 'failed'
+
+
+def test_verdict_list_followed_while_it_grows(tmp_path):
+    root = str(tmp_path)
+    path = os.path.join(root, nml.RUN_VERDICTS_BASENAME)
+    _write_file(path, '1000 ok results_A A.fits\n')
+    resolver = nml.RunVerdictResolver(root, now=2000.0)
+    assert resolver.verdict_for_image('/x/img_a/wcs_fd_A.fits')[0] == 'ok'
+    assert resolver.verdict_for_image('/x/img_b/wcs_fd_B.fits')[0] is None
+    # an upload processed while the manual run goes on
+    with open(path, 'a') as fh:
+        fh.write('1500 pending results_B B.fits\n1600 error resul')
+    assert resolver.verdict_for_image('/x/img_b/wcs_fd_B.fits')[0] == 'pending'
+    # the partial line is read once it is complete
+    with open(path, 'a') as fh:
+        fh.write('ts_B B.fits ERROR: passing clouds\n')
+    assert resolver.verdict_for_image('/x/img_b/wcs_fd_B.fits')[:2] == (
+        'error', 'ERROR: passing clouds')
+    # a list that got shorter (replaced) is read anew
+    _write_file(path, '1700 ok results_C B.fits\n')
+    assert resolver.verdict_for_image('/x/img_b/wcs_fd_B.fits')[0] == 'ok'
+
+
+def test_archive_copy_not_matched_to_a_run_that_used_it_as_reference(tmp_path):
+    root = str(tmp_path / 'workdir')
+    copy_in_archive = str(tmp_path / 'archive' / ('wcs_fd_' + _FRAME))
+    _write_file(copy_in_archive)
+    own_run = os.path.join(root, 'results_20260917_230531_' + _UPLOAD[4:])
+    _write_file(os.path.join(own_run, 'index.html'), _COMPLETE_REPORT)
+    _write_file(os.path.join(own_run, _FRAME + '_preview.png'))
+    _write_file(os.path.join(own_run, 'fits_images_for_download.txt'),
+                'Per-02-Q1b1x1 second-epoch /w/{}/{}\n'.format(_UPLOAD,
+                                                               _FRAME))
+    # A later run of the field the next day used the frame as its reference
+    later_run = os.path.join(
+        root, 'results_20260918_230000_2026-09-18_CI_Per-02-Q1b1x1_225959_'
+        'TTUQ1b1x1_99_abcdEFGH')
+    _write_file(os.path.join(later_run, 'index.html'),
+                'ERROR: passing clouds\n' + _COMPLETE_REPORT)
+    _write_file(os.path.join(later_run, _FRAME + '_preview.png'))
+    _write_file(os.path.join(later_run, 'fits_images_for_download.txt'),
+                'Per-02-Q1b1x1 reference /refs/' + _FRAME + '\n'
+                'Per-02-Q1b1x1 second-epoch /w/img_y/Per-02-Q1b1x1_other.fits\n')
+    assert nml.RunVerdictResolver(root).verdict_for_image(
+        copy_in_archive)[0] == 'ok'

@@ -10,10 +10,15 @@ Design: source_monitoring_design.md. Key points:
   lightcurve_aavso.txt, plot, index.html). No JSON anywhere.
 - The ledger is keyed by image basename: an image is never measured twice,
   which makes archive/recent overlaps and upload reprocessing harmless.
-  edge/saturated/bad_region rows stay in the ledger (never retried) but are
-  excluded from every published product.
+  Rows with an EXCLUDED_STATUSES status (edge, saturated, bad_region, the
+  bad_wcs / no_nearby_stars refusals of the forced photometry tool, run_error
+  for the images of rejected transient-search runs, ...) stay in the ledger
+  (never re-measured) but are excluded from every published product. The
+  manual modes honour the verdicts of the transient-search runs (see
+  RUN_VERDICTS_BASENAME).
 """
 
+import datetime
 import decimal
 import fcntl
 import os
@@ -22,6 +27,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 import nmw_coord_lib as ncl
 from nmw_coord_lib import html_escape
@@ -46,9 +52,14 @@ LOCK_SUBDIR = '.monitoring_locks'
 GLOBAL_LOCK_BASENAME = 'monitoring_global.lock'
 
 # Measurement statuses excluded from all published products (still recorded
-# in the ledger so the image is never re-measured)
+# in the ledger so the image is never re-measured). 'bad_wcs' and
+# 'no_nearby_stars' come from the frame-level sanity checks of VaST's
+# util/forced_photometry (a TAN-only plate solution on a wide field; too few
+# detected stars around the position - a cloud patch); 'run_error' marks the
+# images of a transient-search run that was rejected, see RUN_ERROR_STATUS.
 EXCLUDED_STATUSES = ('edge', 'saturated', 'bad_region', 'nan_pixel',
-                     'calib_fail', 'fail', 'tool_fail')
+                     'calib_fail', 'fail', 'tool_fail',
+                     'run_error', 'bad_wcs', 'no_nearby_stars')
 
 # Within-visit consistency check (monitoring products only). The transient
 # pipeline takes its second-epoch frames of one field minutes apart, so
@@ -84,11 +95,29 @@ REASON_CLOUDY = 'cloudy_frame'
 MANUAL_STATUS = 'manual'
 REASON_MANUAL = 'manual_exclusion'
 
+# Ledger status of the images of a transient-search run that was rejected:
+# the run raised a processing ERROR or failed (see RUN_VERDICTS_BASENAME).
+# Such images are processed-and-rejected and the row is never published. It
+# is written by the ingest of the run (autoprocess.sh calls --ingest-rejected
+# on the rows of the factory, which emits run_error rows itself for a field
+# it refused to measure), and by the manual modes when they meet an image of
+# a rejected run that is not in the ledger yet. It keeps the magnitude and
+# error the factory measured when it had measured the image before the run
+# turned red (an upper limit keeps its 99.0000 error), and carries
+# 99.0000 99.0000 otherwise. The manual modes never re-measure such an
+# image; unlike the other terminal statuses, the row is replaced by the
+# ingest of a later reprocessing run of the image that succeeds
+# (SUPERSEDABLE_STATUSES).
+RUN_ERROR_STATUS = 'run_error'
+SUPERSEDABLE_STATUSES = (RUN_ERROR_STATUS,)
+
 # Displayed reason for the EXCLUDED_STATUSES that are REPORTED on the source
 # page and in EXCLUDED_MEASUREMENTS_BASENAME. These rows carry no usable
-# magnitude, but they are listed rather than dropped: the frame did cover the
-# position and the measurement was refused or failed, so leaving them out
-# makes a rejected measurement look like an image that was never taken.
+# magnitude (bad_wcs, no_nearby_stars and some run_error rows keep the value
+# that was measured, which is shown but means nothing), but they are listed
+# rather than dropped: the frame did cover the position and the measurement
+# was refused or failed, so leaving them out makes a rejected measurement
+# look like an image that was never taken.
 #
 # 'edge' is deliberately NOT in this table. It means the position falls off
 # the frame, or its aperture and sky annulus reach past the border, i.e. the
@@ -102,6 +131,9 @@ REASON_FOR_EXCLUDED_STATUS = {
     'calib_fail': 'magnitude_calibration_failed',
     'fail': 'measurement_failed',
     'tool_fail': 'measurement_failed',
+    'run_error': 'processing_error_in_run',
+    'bad_wcs': 'unreliable_plate_solution',
+    'no_nearby_stars': 'no_stars_around_position',
 }
 
 # Name and coordinate validation for monitoring_list.txt lines
@@ -436,30 +468,66 @@ def format_ledger_row(basename, jd, mag, err, status, camera):
                                       camera or 'unknown')
 
 
-def append_ledger_rows(uploads_dir, source_id, new_rows):
+def append_ledger_rows(uploads_dir, source_id, new_rows,
+                       supersede_statuses=()):
     """Append rows (list of dicts as returned by read_ledger) whose basenames
-    are not yet in the ledger. Check-then-append happens under the per-source
-    lock. Returns the number of rows actually appended."""
+    are not yet in the ledger. A row whose image IS already in the ledger is
+    skipped, unless the existing row's status is in supersede_statuses: then
+    the new row replaces it (the ledger is rewritten atomically). The callers
+    that record a SUCCESSFUL measurement pass SUPERSEDABLE_STATUSES, so a
+    reprocessing run that succeeds replaces the run_error rows of an earlier
+    rejected run. Check-then-write happens under the per-source lock.
+    Returns the number of rows appended or replaced."""
     source_dir = source_dir_path(uploads_dir, source_id)
     os.makedirs(source_dir, mode=0o755, exist_ok=True)
     lock_fh = acquire_source_lock(uploads_dir, source_id)
     try:
-        _, existing = read_ledger(source_dir)
+        existing_rows, existing = read_ledger(source_dir)
         path = os.path.join(source_dir, LEDGER_BASENAME)
-        need_header = not os.path.exists(path)
-        n_added = 0
-        with open(path, 'a') as fh:
-            if need_header:
-                fh.write('# image_basename JD mag err status camera\n')
-            for row in new_rows:
-                if ledger_key(row['basename']) in existing:
+        supersedable = set()
+        if supersede_statuses:
+            supersedable = set(ledger_key(r['basename']) for r in existing_rows
+                               if r['status'] in supersede_statuses)
+        replacements = {}
+        to_append = []
+        seen = set()
+        for row in new_rows:
+            key = ledger_key(row['basename'])
+            if key in seen:
+                continue
+            if key in existing:
+                if key in supersedable:
+                    replacements[key] = row
+                    seen.add(key)
+                continue
+            to_append.append(row)
+            seen.add(key)
+        if replacements:
+            with open(path) as fh:
+                lines = fh.read().splitlines()
+            out_lines = []
+            for line in lines:
+                parts = line.split()
+                is_row = len(parts) >= 6 and not line.lstrip().startswith('#')
+                if is_row and ledger_key(parts[0]) in replacements and parts[4] in supersede_statuses:
+                    row = replacements.pop(ledger_key(parts[0]))
+                    out_lines.append(format_ledger_row(
+                        row['basename'], row['jd'], row['mag'], row['err'],
+                        row['status'], row['camera']))
                     continue
-                fh.write(format_ledger_row(
-                    row['basename'], row['jd'], row['mag'], row['err'],
-                    row['status'], row['camera']) + '\n')
-                existing.add(ledger_key(row['basename']))
-                n_added += 1
-        return n_added
+                out_lines.append(line)
+            _write_text_atomic(path, '\n'.join(out_lines) + '\n')
+        n_replaced = len(supersedable & seen) if supersede_statuses else 0
+        need_header = not os.path.exists(path)
+        if to_append:
+            with open(path, 'a') as fh:
+                if need_header:
+                    fh.write('# image_basename JD mag err status camera\n')
+                for row in to_append:
+                    fh.write(format_ledger_row(
+                        row['basename'], row['jd'], row['mag'], row['err'],
+                        row['status'], row['camera']) + '\n')
+        return len(to_append) + n_replaced
     finally:
         lock_fh.close()
 
@@ -475,8 +543,9 @@ def rewrite_measurement_status(uploads_dir, source_id, image_basename,
     restore=False: 'detection'/'upperlimit' rows become MANUAL_STATUS (the
     manual quality exclusion; the published products drop the point on the
     next rebuild). restore=True: MANUAL_STATUS rows go back to 'upperlimit'
-    when their magnitude carries the '<' prefix and to 'detection'
-    otherwise (the original magnitude and error are still in the row).
+    when they hold an upper limit - the error is the 99.0000 no-value marker
+    (or the magnitude carries a '<' prefix) - and to 'detection' otherwise
+    (the original magnitude and error are still in the row).
 
     Returns the number of rows changed (0 when the image is not in this
     source's ledger or no row was in a flippable state)."""
@@ -502,8 +571,9 @@ def rewrite_measurement_status(uploads_dir, source_id, image_basename,
                     changed += 1
                     continue
                 if restore and status == MANUAL_STATUS:
-                    parts[4] = ('upperlimit' if parts[2].startswith('<')
-                                else 'detection')
+                    err_value = _float_or_none(parts[3])
+                    is_limit = parts[2].startswith('<') or err_value is None or err_value >= 90.0
+                    parts[4] = 'upperlimit' if is_limit else 'detection'
                     out_lines.append(' '.join(parts))
                     changed += 1
                     continue
@@ -516,6 +586,386 @@ def rewrite_measurement_status(uploads_dir, source_id, image_basename,
         return changed
     finally:
         lock_fh.close()
+
+
+# ---------- transient-search run verdicts ----------
+#
+# The ingest gate in autoprocess.sh keeps the measurements of a run that
+# raised a processing ERROR (or failed) out of the lightcurves. The manual
+# modes of monitoring_update.py (--reconcile, --rescan-recent,
+# --rescan-archive) find images on disk long after their run - in uploads,
+# in the quarantine tree, in the long-term archive - so they need the run's
+# verdict too, from a place that outlives the processing logs and the moves
+# of the image files: autoprocess.sh appends the verdict of every run to
+# RUN_VERDICTS_BASENAME in IMAGE_DATA_ROOT, one line per image of the upload:
+#   <unix time> <verdict> <results_* directory> <image name> [<reason>]
+# The image name is the uploaded file name, without the wcs_/fd_/d_ prefixes
+# and the .fz suffix of the copies the pipeline makes (image_core_name), so
+# every copy of the image finds its line. The newest line of an image wins:
+# a reprocessing run overrides the verdict of the original run. The verdict
+# is also kept in the monitoring ledgers, where the images of a rejected run
+# get RUN_ERROR_STATUS rows.
+# For images processed before the list existed, the verdict comes from the
+# report (index.html) of the newest run of the image that left one, judged by
+# the rules autoprocess.sh applies (verdict_from_report). The run is found
+# through the name of the img_* directory that holds the image or, for an
+# archive copy, through the preview image of the frame that the run left in
+# its results_* directory (written since about 2026-01). With neither, the
+# verdict is unknown and the image is measured as before.
+RUN_VERDICTS_BASENAME = 'transient_search_verdicts.txt'
+RUN_VERDICT_OK = 'ok'
+# 'error': the report holds a processing ERROR; 'failed': the transient
+# search exited with an error code, left no complete report or never finished
+REJECTING_RUN_VERDICTS = ('error', 'failed')
+# Written by autoprocess.sh right before the transient search starts: the
+# plate-solved wcs_* images appear in the upload directory while the run is
+# still going, and a manual rescan must not measure them before the run's
+# verdict is known. A run that never finished (the machine went down
+# mid-run) leaves 'pending' behind for good; after
+# PENDING_RUN_VERDICT_STALE_SECONDS it counts as 'failed'.
+RUN_VERDICT_PENDING = 'pending'
+PENDING_RUN_VERDICT_STALE_SECONDS = 86400
+# Written into the report when the transient search reaches its end; a
+# report without it comes from a run that was killed
+REPORT_COMPLETE_MARKER = 'Processing complete!'
+# The verdicts that judge the images. A 'failed' run (killed, crashed, no
+# complete report, nonzero exit) and a 'pending' run that never finished did
+# not judge them, so an earlier conclusive verdict of the same image stands
+# (a reprocessing run killed by a reboot does not reject a frame that a
+# previous run processed successfully).
+CONCLUSIVE_RUN_VERDICTS = (RUN_VERDICT_OK, 'error')
+KNOWN_RUN_VERDICTS = (RUN_VERDICT_PENDING, RUN_VERDICT_OK) + REJECTING_RUN_VERDICTS
+# A long manual run lists the results_* directories again, when it meets an
+# upload directory missing from its index, at most this often
+RESULTS_INDEX_REFRESH_SECONDS = 600
+
+_RESULTS_DIR_RE = re.compile(r'^results_(\d{8}_\d{6})_(.+)$')
+# A reprocessing run of img_<name> is named results_<ts>_reprocess_img_<name>_<key>
+# where <key> is the new session key, "<pid>" or "<pid>_<8 letters/digits>"
+_REPROCESS_RUN_RE = re.compile(r'^reprocess_(img_.+?)_\d+(?:_[A-Za-z0-9]{8})?$')
+# <date>_CI_<field>_ in an upload (dataset) name, as astrocam-go makes it
+_DATASET_DATE_FIELD_RE = re.compile(r'(\d{4}-\d{2}-\d{2})_CI_([^_]+)_')
+# <field>_<date>_ at the start of an image name
+_IMAGE_FIELD_DATE_RE = re.compile(r'^([^_]+)_(\d{4}-\d{2}-\d{2})_')
+
+
+def image_core_name(path):
+    """The uploaded file name of an image from the path of any of its
+    copies: the basename without a trailing .fz and without the wcs_, fd_
+    and d_ prefixes the pipeline adds (wcs_fd_X.fits.fz -> X.fits).
+    autoprocess.sh applies the same rule when it writes
+    RUN_VERDICTS_BASENAME."""
+    name = os.path.basename(path)
+    if name.endswith('.fz'):
+        name = name[:-3]
+    for prefix in ('wcs_', 'fd_', 'd_'):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+    return name
+
+
+class RunVerdictList:
+    """The lines of RUN_VERDICTS_BASENAME per image core name: newest[core]
+    is the newest line of the image and conclusive[core] the newest one with
+    a CONCLUSIVE_RUN_VERDICTS verdict, each a (unix time, verdict, results_*
+    name, reason) tuple. The file is append-only, so refresh() reads only
+    what was appended since the previous call (a file that got shorter is
+    read anew): a manual run that lasts hours sees the verdicts of the
+    uploads processed meanwhile. A partial last line - an append in
+    progress - is left for the next refresh. A list that exists but cannot
+    be read is reported once through log; the verdicts then come from the
+    reports only."""
+
+    def __init__(self, image_data_root, log=None):
+        self.path = os.path.join(image_data_root, RUN_VERDICTS_BASENAME)
+        self.log = log
+        self.newest = {}
+        self.conclusive = {}
+        self._offset = 0
+        self._warned = False
+
+    def refresh(self):
+        try:
+            size = os.path.getsize(self.path)
+        except OSError:
+            return
+        if size < self._offset:
+            self.newest = {}
+            self.conclusive = {}
+            self._offset = 0
+        if size == self._offset:
+            return
+        try:
+            with open(self.path, 'rb') as fh:
+                fh.seek(self._offset)
+                chunk = fh.read(size - self._offset)
+        except OSError as exc:
+            if self.log is not None and not self._warned:
+                self.log('WARNING: cannot read {} ({}) - the verdicts of the '
+                         'transient search runs come from their reports '
+                         'only'.format(self.path, exc))
+                self._warned = True
+            return
+        end = chunk.rfind(b'\n')
+        if end < 0:
+            return
+        self._offset += end + 1
+        for raw in chunk[:end].split(b'\n'):
+            self._add_line(raw.decode('ascii', 'replace'))
+
+    def _add_line(self, line):
+        parts = line.split(None, 4)
+        if len(parts) < 4 or parts[1] not in KNOWN_RUN_VERDICTS:
+            return
+        unixtime = _float_or_none(parts[0])
+        if unixtime is None:
+            return
+        record = (unixtime, parts[1], parts[2],
+                  parts[4].strip() if len(parts) > 4 else '')
+        core = parts[3]
+        known = self.newest.get(core)
+        if known is None or unixtime >= known[0]:
+            self.newest[core] = record
+        if parts[1] in CONCLUSIVE_RUN_VERDICTS:
+            known = self.conclusive.get(core)
+            if known is None or unixtime >= known[0]:
+                self.conclusive[core] = record
+
+
+def read_run_verdicts(image_data_root, log=None):
+    """{image core name: (unix time, verdict, results_* name, reason)} of
+    the newest line of each image in RUN_VERDICTS_BASENAME; {} when the
+    list does not exist yet."""
+    verdict_list = RunVerdictList(image_data_root, log)
+    verdict_list.refresh()
+    return verdict_list.newest
+
+
+def verdict_from_report(report_path):
+    """(verdict, reason) of a transient-search run from its report
+    (index.html), by the rules autoprocess.sh applies: 'error' and the first
+    line containing ERROR (tags stripped); 'failed' when the report lacks
+    REPORT_COMPLETE_MARKER (the run was killed); RUN_VERDICT_OK otherwise.
+    None when the report is missing or empty: the run stopped before the
+    transient search began (an aborted reprocessing, say) and says nothing
+    about the images."""
+    have_report = False
+    complete = False
+    try:
+        with open(report_path, errors='replace') as fh:
+            for line in fh:
+                have_report = True
+                if 'ERROR' in line:
+                    return ('error', re.sub(r'<[^>]*>', '', line).strip())
+                if REPORT_COMPLETE_MARKER in line:
+                    complete = True
+    except OSError:
+        return None
+    if not have_report:
+        return None
+    if not complete:
+        return ('failed', 'the transient search did not complete (no "{}" '
+                'in its report)'.format(REPORT_COMPLETE_MARKER))
+    return (RUN_VERDICT_OK, '')
+
+
+def upload_dir_of_results_dir(results_dirname):
+    """(img_dir_name, run_timestamp) for a results_* directory name, both
+    None when the name does not follow the autoprocess.sh convention."""
+    m = _RESULTS_DIR_RE.match(results_dirname)
+    if not m:
+        return None, None
+    timestamp, rest = m.group(1), m.group(2)
+    reprocess = _REPROCESS_RUN_RE.match(rest)
+    if reprocess:
+        return reprocess.group(1), timestamp
+    return 'img_' + rest, timestamp
+
+
+class RunVerdictResolver:
+    """Verdicts of the transient-search runs that processed images; see the
+    comment above RUN_VERDICTS_BASENAME. One instance serves a whole manual
+    run: the verdict list is followed as it grows (RunVerdictList), the
+    results_* index is listed again when an upload directory is missing
+    from it (at most every RESULTS_INDEX_REFRESH_SECONDS), and the report of
+    a run is read once. now fixes the clock (tests)."""
+
+    def __init__(self, image_data_root, now=None, log=None):
+        self.image_data_root = image_data_root
+        self.fixed_now = now
+        self.log = log
+        self.verdict_list = RunVerdictList(image_data_root, log)
+        self._runs_by_upload = None
+        self._runs_by_date_field = None
+        self._results_index_time = 0.0
+        self._report_verdicts = {}
+        self._second_epoch_names = {}
+
+    def _now(self):
+        return time.time() if self.fixed_now is None else self.fixed_now
+
+    def _load_results_index(self, force=False):
+        if self._runs_by_upload is not None and not force:
+            return
+        self._results_index_time = time.time()
+        self._runs_by_upload = {}
+        self._runs_by_date_field = {}
+        try:
+            names = os.listdir(self.image_data_root)
+        except OSError:
+            names = []
+        for name in names:
+            img_name, timestamp = upload_dir_of_results_dir(name)
+            if img_name is None:
+                continue
+            self._runs_by_upload.setdefault(img_name, []).append(
+                (timestamp, name))
+            date_field = _DATASET_DATE_FIELD_RE.search(img_name)
+            if date_field:
+                self._runs_by_date_field.setdefault(
+                    (date_field.group(1), date_field.group(2)), []).append(
+                        (timestamp, name))
+        for runs in self._runs_by_upload.values():
+            runs.sort(reverse=True)
+        for runs in self._runs_by_date_field.values():
+            runs.sort(reverse=True)
+
+    def _verdict_of_run(self, results_name):
+        if results_name not in self._report_verdicts:
+            self._report_verdicts[results_name] = verdict_from_report(
+                os.path.join(self.image_data_root, results_name,
+                             'index.html'))
+        return self._report_verdicts[results_name]
+
+    def _processed_as_new_image(self, results_dir, core):
+        """False when the run's list of its images
+        (fits_images_for_download.txt, written since 2026-07) does not name
+        the frame as a second-epoch image: the frame was then the run's
+        reference image, whose preview the run also leaves. True when it
+        does, or when the run has no such list."""
+        if results_dir not in self._second_epoch_names:
+            names = None
+            try:
+                with open(os.path.join(results_dir,
+                                       'fits_images_for_download.txt'),
+                          errors='replace') as fh:
+                    names = set()
+                    for line in fh:
+                        parts = line.split()
+                        if len(parts) >= 3 and parts[1] == 'second-epoch':
+                            names.add(image_core_name(parts[2]))
+            except OSError:
+                names = None
+            self._second_epoch_names[results_dir] = names
+        names = self._second_epoch_names[results_dir]
+        return names is None or core in names
+
+    def _verdict_from_reports(self, image_path, core):
+        """The verdict from the reports of the runs of the image, newest
+        first: the first conclusive one, else the newest 'failed' one; None
+        when no run of the image left a report."""
+        self._load_results_index()
+        dir_name = os.path.basename(os.path.dirname(
+            os.path.abspath(image_path)))
+        candidates = []
+        if dir_name.startswith('img_'):
+            candidates = self._runs_by_upload.get(dir_name)
+            if candidates is None and time.time() - self._results_index_time > RESULTS_INDEX_REFRESH_SECONDS:
+                self._load_results_index(force=True)
+                candidates = self._runs_by_upload.get(dir_name)
+            candidates = candidates or []
+        need_preview = False
+        if not candidates:
+            # An archive copy: the runs of the field around the date of the
+            # frame that left a preview of it
+            m = _IMAGE_FIELD_DATE_RE.match(core)
+            if m is None:
+                return None
+            try:
+                day = datetime.date(int(m.group(2)[0:4]),
+                                    int(m.group(2)[5:7]),
+                                    int(m.group(2)[8:10]))
+            except ValueError:
+                return None
+            for delta in (-1, 0, 1):
+                date = (day + datetime.timedelta(days=delta)).isoformat()
+                candidates = candidates + self._runs_by_date_field.get(
+                    (date, m.group(1)), [])
+            candidates = sorted(candidates, reverse=True)
+            need_preview = True
+        inconclusive = None
+        for _timestamp, results_name in candidates:
+            results_dir = os.path.join(self.image_data_root, results_name)
+            if need_preview:
+                has_preview = os.path.exists(os.path.join(
+                    results_dir, core + '_preview.png')) or os.path.exists(
+                        os.path.join(results_dir, 'fd_' + core + '_preview.png'))
+                if not has_preview:
+                    continue
+                if not self._processed_as_new_image(results_dir, core):
+                    continue
+            from_report = self._verdict_of_run(results_name)
+            if from_report is None:
+                continue
+            result = (from_report[0], from_report[1][:500],
+                      os.path.join(results_dir, 'index.html'))
+            if from_report[0] in CONCLUSIVE_RUN_VERDICTS:
+                return result
+            if inconclusive is None:
+                inconclusive = result
+        return inconclusive
+
+    def _judge_listed(self, newest, conclusive):
+        """(verdict, reason, origin) from the newest list line of an image
+        and its newest conclusive one (or None)."""
+        unixtime, verdict, results_name, reason = newest
+        origin = '{} ({})'.format(RUN_VERDICTS_BASENAME, results_name)
+        if verdict == RUN_VERDICT_PENDING:
+            if self._now() - unixtime <= PENDING_RUN_VERDICT_STALE_SECONDS:
+                return (verdict, reason, origin)
+            verdict = 'failed'
+            reason = ('the transient search run {} started {} never '
+                      'finished'.format(results_name, time.strftime(
+                          '%Y-%m-%d %H:%M', time.localtime(unixtime))))
+        if verdict == 'failed' and conclusive is not None:
+            # The later run did not judge the images: the earlier verdict stands
+            return (conclusive[1], conclusive[3], '{} ({}; the later run {} '
+                    'did not complete)'.format(RUN_VERDICTS_BASENAME,
+                                               conclusive[2], results_name))
+        return (verdict, reason, origin)
+
+    def verdict_for_image(self, image_path):
+        """(verdict, reason, origin) for one image file: verdict is
+        RUN_VERDICT_OK, one of REJECTING_RUN_VERDICTS, RUN_VERDICT_PENDING
+        (the run is in progress) or None when unknown; origin names where
+        the verdict came from (for the log)."""
+        self.verdict_list.refresh()
+        core = image_core_name(image_path)
+        newest = self.verdict_list.newest.get(core)
+        if newest is not None:
+            return self._judge_listed(newest,
+                                      self.verdict_list.conclusive.get(core))
+        from_reports = self._verdict_from_reports(image_path, core)
+        if from_reports is not None:
+            return from_reports
+        return (None, '', 'no verdict')
+
+    def verdict_for_copies(self, image_paths):
+        """(verdict, reason, origin, path) for one image found at several
+        paths (copies sharing a ledger key: the same frame in an img_*
+        directory and in the archive, say), path being the copy the verdict
+        came from. A successful run wins, then a rejected run, then a run in
+        progress; unknown when no copy has a verdict."""
+        found = {}
+        for path in image_paths:
+            verdict, reason, origin = self.verdict_for_image(path)
+            if verdict is not None and verdict not in found:
+                found[verdict] = (verdict, reason, origin, path)
+        preference = (RUN_VERDICT_OK,) + REJECTING_RUN_VERDICTS + (RUN_VERDICT_PENDING,)
+        for wanted in preference:
+            if wanted in found:
+                return found[wanted]
+        return (None, '', 'no verdict', image_paths[0])
 
 
 def _float_or_none(text):
@@ -550,7 +1000,11 @@ def classify_ledger_rows(rows):
             mag = _float_or_none(row['mag'].lstrip('<'))
             parsed['mag_float'] = mag if mag is not None and mag <= 90.0 \
                 else None
+            # bad_wcs, no_nearby_stars and run_error rows may keep the
+            # measured magnitude and error (99.0000 for an upper limit)
             parsed['err_float'] = None
+            if parsed['mag_float'] is not None:
+                parsed['err_float'] = _float_or_none(row['err'])
             parsed['reason'] = REASON_FOR_EXCLUDED_STATUS[row['status']]
             quality_excluded.append(parsed)
             continue
@@ -842,7 +1296,11 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
                      '# measurements excluded from lightcurve.dat, the plot'
                      ' and the AAVSO file',
                      '# mag/err 99.0000 mean the measurement could not be'
-                     ' made on that image (see the reason column)']
+                     ' made on that image (see the reason column);'
+                     ' a magnitude with err 99.0000 is an upper limit;'
+                     ' the magnitudes of the unreliable_plate_solution,'
+                     ' no_stars_around_position and processing_error_in_run'
+                     ' rows were measured but are not trustworthy']
         for row in excluded:
             err = row.get('err_float')
             mag = row.get('mag_float')
@@ -855,9 +1313,11 @@ def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
                     row['jd_float'], row['camera'], row['reason'],
                     row['basename']))
                 continue
+            # An upper limit (or a row without an error) keeps the 99.0000
+            # no-value marker in the error column
             inc_lines.append('{:.5f} {:.4f} {:.4f} {} {} {}'.format(
                 row['jd_float'], mag,
-                err if err is not None and err < 90.0 else 0.001,
+                err if err is not None and err < 90.0 else 99.0,
                 row['camera'], row['reason'], row['basename']))
         inc_path = os.path.join(source_dir, EXCLUDED_MEASUREMENTS_BASENAME)
         _write_text_atomic(inc_path, '\n'.join(inc_lines) + '\n')
@@ -1088,7 +1548,7 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
             ' Reason <span class="code">{rc}</span>: the frame failed the'
             ' cloud check - its field stars disagree with the reference'
             ' frame in a way uniform transparency loss cannot explain.'
-            ' The remaining reasons mean the measurement could not be made'
+            ' The next five reasons mean the measurement could not be made'
             ' on that image at all, so no magnitude is shown:'
             ' <span class="code">{rb}</span> - the position falls on a'
             ' masked part of the detector (bad_region.lst of that camera);'
@@ -1100,6 +1560,18 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
             ' tool failed. These images WERE taken and WERE measured: they'
             ' are listed here so that a rejected measurement is never'
             ' mistaken for a gap in the coverage.'
+            ' Three more reasons reject a measurement that was or could'
+            ' have been made, so a magnitude may be shown, but it means'
+            ' nothing: <span class="code">{re}</span> - the transient search'
+            ' run that processed the image raised a processing error or'
+            ' failed, so none of its measurements is used;'
+            ' <span class="code">{rw}</span> - the image was plate-solved'
+            ' without a distortion polynomial, so away from the frame centre'
+            ' the aperture may be tens of arcseconds off the source;'
+            ' <span class="code">{rz}</span> - (almost) no stars were'
+            ' detected within half a degree of the position on a frame rich'
+            ' enough in stars to expect dozens there, typically a thick'
+            ' cloud over the source.'
             ' The excluded rows are kept in'
             ' <a href="{f}">{f}</a>.</p>\n<pre>\n'.format(
                 rv=REASON_VISIT, rc=REASON_CLOUDY,
@@ -1108,6 +1580,9 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                 rn=REASON_FOR_EXCLUDED_STATUS['nan_pixel'],
                 rk=REASON_FOR_EXCLUDED_STATUS['calib_fail'],
                 rf=REASON_FOR_EXCLUDED_STATUS['fail'],
+                re=REASON_FOR_EXCLUDED_STATUS[RUN_ERROR_STATUS],
+                rw=REASON_FOR_EXCLUDED_STATUS['bad_wcs'],
+                rz=REASON_FOR_EXCLUDED_STATUS['no_nearby_stars'],
                 f=EXCLUDED_MEASUREMENTS_BASENAME))
         table_fmt = '{:<16} {:<17} {:<7} {:<8} {:<28} {:<11} {}\n'
         parts.append(table_fmt.format(
