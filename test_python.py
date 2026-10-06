@@ -1910,3 +1910,554 @@ def test_manual_measurement_installs_each_camera_list_before_solving(
                                  verdicts=nml.RunVerdictResolver(root))
     assert seen == [(['wcs_fd_a1.fits', 'wcs_fd_a2.fits'], 'CAM_ABS list\n'),
                     (['wcs_fd_n1.fits'], 'DEFAULT\n')]
+
+
+# ---------------------------------------------------------------------------
+# Frames excluded by hand: excluded for every monitored source on them, and
+# for the sources activated later (monitoring_excluded_frames.txt)
+# ---------------------------------------------------------------------------
+
+def _ledger_rows(*lines):
+    return '# image_basename JD mag err status camera\n' + ''.join(
+        line + '\n' for line in lines)
+
+
+def _write_ledger(uploads, source_id, *lines):
+    _write_file(os.path.join(nml.source_dir_path(uploads, source_id),
+                             nml.LEDGER_BASENAME), _ledger_rows(*lines))
+
+
+def _entries(source_ids):
+    return [{'source_id': sid, 'name': sid, 'ra': '01:00:00.00',
+             'dec': '+10:00:00.0'} for sid in source_ids]
+
+
+def _patch_exclusion_context(monkeypatch, uploads, source_ids,
+                             real_rebuild=False):
+    """Patch the updater's context. The products are rebuilt for real with
+    real_rebuild; otherwise the stub records, per call, the source and the
+    set of frames excluded by hand it was given."""
+    import monitoring_update as mu
+    entries = _entries(source_ids)
+    rebuilt = []
+    rebuilt_frames = {}
+    messages = []
+    monkeypatch.setattr(mu, 'load_context',
+                        lambda: (uploads, {}, uploads, None))
+    monkeypatch.setattr(mu, 'list_entries_or_exit',
+                        lambda: ('monitoring_list.txt', entries))
+    monkeypatch.setattr(mu, 'read_factory_text', lambda cfg: '')
+    monkeypatch.setattr(mu, 'log', messages.append)
+    if not real_rebuild:
+        def fake_rebuild(uploads_dir, entry, cfg, factory_text,
+                         excluded_frames=None):
+            rebuilt.append(entry['source_id'])
+            rebuilt_frames[entry['source_id']] = excluded_frames
+        monkeypatch.setattr(nml, 'rebuild_source_products', fake_rebuild)
+        monkeypatch.setattr(nml, 'rebuild_central_index',
+                            lambda *args, **kwargs: None)
+    return mu, rebuilt, rebuilt_frames, messages
+
+
+def _aavso_jds(uploads, source_id):
+    path = os.path.join(nml.source_dir_path(uploads, source_id),
+                        nml.AAVSO_BASENAME)
+    with open(path) as fh:
+        return sorted(line.split(',')[1] for line in fh
+                      if line.strip() and not line.startswith('#'))
+
+
+def test_excluded_frames_list_roundtrip(tmp_path):
+    uploads = str(tmp_path)
+    assert nml.read_excluded_frames(uploads) is None
+    old_umask = os.umask(0o077)
+    try:
+        nml.write_excluded_frames(uploads, {'B.fits': '2026-10-05T00:00:00Z x',
+                                            'A.fits': ''})
+    finally:
+        os.umask(old_umask)
+    path = nml.excluded_frames_path(uploads)
+    assert os.path.basename(path) == nml.EXCLUDED_FRAMES_BASENAME
+    # world-readable whatever the umask of the writer
+    assert os.stat(path).st_mode & 0o777 == 0o644
+    assert nml.read_excluded_frames(uploads) == {
+        'A.fits': '', 'B.fits': '2026-10-05T00:00:00Z x'}
+    # every copy name of a frame is read as its core name; comments and
+    # blank lines are skipped; the first line of a frame wins
+    with open(path, 'a') as fh:
+        fh.write('\n# a comment\nwcs_fd_C.fits.fz 2026 note\nC.fits later\n')
+    frames = nml.read_excluded_frames(uploads)
+    assert set(frames) == {'A.fits', 'B.fits', 'C.fits'}
+    assert frames['C.fits'] == '2026 note'
+    # a list without frames is still a list (no fallback to the ledgers)
+    nml.write_excluded_frames(uploads, {})
+    assert nml.read_excluded_frames(uploads) == {}
+
+
+def test_empty_or_headerless_list_is_refused(tmp_path):
+    uploads = str(tmp_path)
+    path = nml.excluded_frames_path(uploads)
+    for content in ('', 'X.fits 2026 note\n'):
+        with open(path, 'w') as fh:
+            fh.write(content)
+        with pytest.raises(nml.ExcludedFramesUnreadable):
+            nml.read_excluded_frames(uploads)
+        with pytest.raises(nml.ExcludedFramesUnreadable):
+            nml.excluded_frame_set(uploads)
+
+
+def test_excluded_frame_set_is_the_list_or_else_the_manual_rows(tmp_path):
+    uploads = str(tmp_path)
+    _write_ledger(uploads, 'A', 'wcs_fd_M.fits 2461000.5 12.0 0.02 manual C1',
+                  'wcs_fd_N.fits 2461000.6 12.0 0.02 detection C1')
+    _write_ledger(uploads, 'FROZEN',
+                  'wcs_fd_F.fits 2461000.5 12.0 0.02 manual C1')
+    # no list yet: the manual rows of every registry ledger stand in for it
+    assert nml.excluded_frame_set(uploads) == {'M.fits', 'F.fits'}
+    assert nml.frames_with_manual_rows(uploads, ['A', 'FROZEN']) == {
+        'M.fits': ['A'], 'F.fits': ['FROZEN']}
+    assert nml.registry_source_ids(uploads) == ['A', 'FROZEN']
+    # the first locked run writes them into the list, which then rules alone
+    listed, created = nml.ensure_excluded_frames_list(uploads)
+    assert created and set(listed) == {'M.fits', 'F.fits'}
+    assert 'migrated from the manual rows of A' in listed['M.fits']
+    nml.write_excluded_frames(uploads, {'L.fits': ''})
+    assert nml.excluded_frame_set(uploads) == {'L.fits'}
+    assert nml.ensure_excluded_frames_list(uploads) == ({'L.fits': ''}, False)
+
+
+def test_migration_is_not_written_when_a_ledger_cannot_be_read(tmp_path):
+    uploads = str(tmp_path)
+    _write_ledger(uploads, 'A', 'wcs_fd_M.fits 2461000.5 12.0 0.02 manual C1')
+    path = os.path.join(nml.source_dir_path(uploads, 'A'), nml.LEDGER_BASENAME)
+    os.chmod(path, 0)
+    try:
+        if os.access(path, os.R_OK):
+            pytest.skip('running as a user who can read anything')
+        with pytest.raises(nml.ExcludedFramesUnreadable):
+            nml.ensure_excluded_frames_list(uploads)
+    finally:
+        os.chmod(path, 0o644)
+    assert nml.read_excluded_frames(uploads) is None
+    # once the ledger is readable again the migration does happen
+    listed, created = nml.ensure_excluded_frames_list(uploads)
+    assert created and set(listed) == {'M.fits'}
+
+
+def test_unreadable_list_stops_every_mode_without_changes(tmp_path,
+                                                         monkeypatch):
+    uploads = str(tmp_path)
+    _write_ledger(uploads, 'A', 'wcs_fd_X.fits 2461000.5 12.0 0.02 detection C1',
+                  'wcs_fd_Y.fits 2461000.6 12.1 0.02 manual C1')
+    nml.write_excluded_frames(uploads, {'Y.fits': 't', 'Q.fits': 't'})
+    path = nml.excluded_frames_path(uploads)
+    with open(path) as fh:
+        content = fh.read()
+    mu, rebuilt, _, messages = _patch_exclusion_context(monkeypatch, uploads,
+                                                        ['A'])
+    os.chmod(path, 0)
+    try:
+        if os.access(path, os.R_OK):
+            pytest.skip('running as a user who can read anything')
+        with pytest.raises(nml.ExcludedFramesUnreadable):
+            nml.read_excluded_frames(uploads)
+        assert mu.mode_flag_measurement('X.fits', restore=False) == 1
+        assert mu.mode_flag_measurement('Y.fits', restore=True) == 1
+        assert mu.mode_sync_exclusions() == 1
+        assert mu.mode_rebuild_pages() == 1
+        raw = tmp_path / 'raw.txt'
+        raw.write_text('A wcs_fd_Q.fits 2461000.7 12.5 0.05 detection C1\n')
+        assert mu.mode_ingest(str(raw)) == 1
+    finally:
+        os.chmod(path, 0o644)
+    with open(path) as fh:
+        assert fh.read() == content
+    assert _ledger_by_basename(uploads, 'A') == {
+        'wcs_fd_X.fits': ('detection', '12.0', '0.02'),
+        'wcs_fd_Y.fits': ('manual', '12.1', '0.02')}
+    assert rebuilt == []
+    assert any('cannot read' in m for m in messages)
+
+
+def test_products_never_publish_a_listed_frame(tmp_path, monkeypatch):
+    monkeypatch.setenv('MPLCONFIGDIR', str(tmp_path / 'mpl'))
+    uploads = str(tmp_path / 'uploads')
+    # e.g. a source re-added with the registry directory it had before the
+    # frame was excluded: its ledger still says detection
+    _write_ledger(uploads, 'SRC',
+                  'wcs_fd_ok.fits 2461000.4 12.1000 0.0300 detection C1',
+                  'wcs_fd_X.fits 2461000.5 12.3000 0.0300 detection C1',
+                  'wcs_fd_L.fits 2461000.6 14.0000 99.0000 upperlimit C1')
+    nml.write_excluded_frames(uploads, {'X.fits': 't', 'L.fits': 't'})
+    rows, _ = nml.read_ledger(nml.source_dir_path(uploads, 'SRC'))
+    det, lim, excl = nml.classify_ledger_rows(rows, {'X.fits', 'L.fits'})
+    assert [r['basename'] for r in det] == ['wcs_fd_ok.fits'] and not lim
+    assert all(r['reason'] == nml.REASON_MANUAL for r in excl)
+    nml.rebuild_source_products(uploads, _entries(['SRC'])[0], {}, '')
+    source_dir = nml.source_dir_path(uploads, 'SRC')
+    with open(os.path.join(source_dir, nml.LIGHTCURVE_BASENAME)) as fh:
+        published = [line for line in fh if not line.startswith('#')]
+    assert len(published) == 1 and ' 12.1000 ' in published[0]
+    assert _aavso_jds(uploads, 'SRC') == ['2461000.40000']
+    with open(os.path.join(source_dir,
+                           nml.EXCLUDED_MEASUREMENTS_BASENAME)) as fh:
+        text = fh.read()
+    assert 'manual_exclusion wcs_fd_X.fits' in text
+    assert 'manual_exclusion wcs_fd_L.fits' in text
+
+
+def test_central_index_counts_what_the_products_publish(tmp_path,
+                                                       monkeypatch):
+    monkeypatch.setenv('MPLCONFIGDIR', str(tmp_path / 'mpl'))
+    uploads = str(tmp_path / 'uploads')
+    _write_ledger(uploads, 'SRC',
+                  'wcs_fd_a.fits 2461000.4 12.0000 0.0300 detection C1',
+                  'wcs_fd_b.fits 2461001.4 13.0000 0.0300 detection C1',
+                  'wcs_fd_X.fits 2461002.4 12.3000 0.0300 detection C1')
+    nml.write_detection_threshold(nml.source_dir_path(uploads, 'SRC'), 12.5)
+    nml.write_excluded_frames(uploads, {'X.fits': 't'})
+    nml.rebuild_central_index(uploads, _entries(['SRC']), '')
+    with open(os.path.join(nml.monitoring_root(uploads), 'index.html')) as fh:
+        page = fh.read()
+    # one detection (12.0), one upper limit (13.0 above the threshold), the
+    # excluded frame not counted
+    assert re.search(r'<td>1</td><td>1</td>', page)
+
+
+def test_rewrite_measurement_status_matches_every_copy_of_a_frame(tmp_path):
+    uploads = str(tmp_path)
+    _write_ledger(uploads, 'SRC',
+                  'fd_X.fits.fz 2461000.5 12.0000 0.0200 detection C1',
+                  'wcs_fd_Y.fits 2461000.6 12.5000 0.0300 detection C1')
+    assert nml.rewrite_measurement_status(uploads, 'SRC',
+                                          '/archive/wcs_fd_X.fits') == 1
+    assert _ledger_by_basename(uploads, 'SRC')['fd_X.fits.fz'][0] == 'manual'
+    assert nml.rewrite_measurement_status(uploads, 'SRC', 'X.fits',
+                                          restore=True) == 1
+    ledger = _ledger_by_basename(uploads, 'SRC')
+    assert ledger['fd_X.fits.fz'] == ('detection', '12.0000', '0.0200')
+    assert ledger['wcs_fd_Y.fits'][0] == 'detection'
+
+
+def test_exclude_measurement_excludes_the_frame_for_every_source(
+        tmp_path, monkeypatch):
+    uploads = str(tmp_path)
+    _write_ledger(uploads, 'A',
+                  'wcs_fd_X.fits 2461000.5 12.0000 0.0200 detection C1')
+    _write_ledger(uploads, 'B',
+                  'fd_X.fits.fz 2461000.5 15.1000 99.0000 upperlimit C1')
+    _write_ledger(uploads, 'C',
+                  'wcs_fd_X.fits 2461000.5 99.0000 99.0000 edge C1')
+    _write_ledger(uploads, 'D',
+                  'wcs_fd_Y.fits 2461000.6 12.3000 0.0200 detection C1')
+    mu, rebuilt, frames, _ = _patch_exclusion_context(
+        monkeypatch, uploads, ['A', 'B', 'C', 'D'])
+    assert mu.mode_flag_measurement('/data/wcs_fd_X.fits.fz',
+                                    restore=False) == 0
+    assert _ledger_by_basename(uploads, 'A')['wcs_fd_X.fits'][0] == 'manual'
+    assert _ledger_by_basename(uploads, 'B')['fd_X.fits.fz'] == (
+        'manual', '15.1000', '99.0000')
+    assert _ledger_by_basename(uploads, 'C')['wcs_fd_X.fits'][0] == 'edge'
+    assert _ledger_by_basename(uploads, 'D')['wcs_fd_Y.fits'][0] == 'detection'
+    # every source with a row on the frame is rebuilt with the frame excluded
+    assert sorted(rebuilt) == ['A', 'B', 'C']
+    assert all('X.fits' in frames[sid] for sid in ('A', 'B', 'C'))
+    assert set(nml.read_excluded_frames(uploads)) == {'X.fits'}
+    # excluding it again succeeds and rebuilds the same sources
+    del rebuilt[:]
+    assert mu.mode_flag_measurement('X.fits', restore=False) == 0
+    assert sorted(rebuilt) == ['A', 'B', 'C']
+    assert set(nml.read_excluded_frames(uploads)) == {'X.fits'}
+    # a frame no activated source has measured is refused (typo guard)
+    assert mu.mode_flag_measurement('wcs_fd_nosuch.fits', restore=False) == 1
+    assert set(nml.read_excluded_frames(uploads)) == {'X.fits'}
+
+
+def test_restore_measurement_restores_the_frame_for_every_source(
+        tmp_path, monkeypatch):
+    uploads = str(tmp_path)
+    _write_ledger(uploads, 'A',
+                  'wcs_fd_X.fits 2461000.5 12.0000 0.0200 manual C1',
+                  'wcs_fd_Z.fits 2461000.7 12.2000 0.0200 manual C1')
+    _write_ledger(uploads, 'B',
+                  'wcs_fd_X.fits 2461000.5 15.1000 99.0000 manual C1',
+                  'wcs_fd_Z.fits 2461000.7 12.9000 0.0300 cloudy C1')
+    nml.write_excluded_frames(uploads, {'X.fits': 't', 'Z.fits': 't'})
+    mu, rebuilt, frames, _ = _patch_exclusion_context(monkeypatch, uploads,
+                                                      ['A', 'B'])
+    assert mu.mode_flag_measurement('X.fits', restore=True) == 0
+    assert _ledger_by_basename(uploads, 'A')['wcs_fd_X.fits'][0] == 'detection'
+    assert _ledger_by_basename(uploads, 'B')['wcs_fd_X.fits'][0] == 'upperlimit'
+    assert set(nml.read_excluded_frames(uploads)) == {'Z.fits'}
+    assert all('X.fits' not in frames[sid] for sid in ('A', 'B'))
+    # restoring a frame that is not excluded changes nothing and says so
+    assert mu.mode_flag_measurement('X.fits', restore=True) == 1
+    # a restore undoes the exclusion: back to the measured status, even on a
+    # frame another source has as cloudy (that row stays cloudy)
+    assert mu.mode_flag_measurement('wcs_fd_Z.fits', restore=True) == 0
+    assert _ledger_by_basename(uploads, 'A')['wcs_fd_Z.fits'] == (
+        'detection', '12.2000', '0.0200')
+    assert _ledger_by_basename(uploads, 'B')['wcs_fd_Z.fits'][0] == 'cloudy'
+    assert nml.read_excluded_frames(uploads) == {}
+
+
+def test_restore_publishes_again_even_where_only_the_list_held_it(
+        tmp_path, monkeypatch):
+    monkeypatch.setenv('MPLCONFIGDIR', str(tmp_path / 'mpl'))
+    uploads = str(tmp_path / 'uploads')
+    _write_ledger(uploads, 'A', 'wcs_fd_X.fits 2461000.5 12.0000 0.0200 manual C1')
+    # C's row was never flipped (re-added source, raced ingest); only the
+    # list keeps it out of the products
+    _write_ledger(uploads, 'C', 'wcs_fd_X.fits 2461000.5 13.0000 0.0300 detection C1',
+                  'wcs_fd_c.fits 2461001.5 13.1000 0.0300 detection C1')
+    nml.write_excluded_frames(uploads, {'X.fits': 't'})
+    for sid in ('A', 'C'):
+        nml.rebuild_source_products(uploads, _entries([sid])[0], {}, '')
+    assert _aavso_jds(uploads, 'C') == ['2461001.50000']
+    # an interrupted restore: the list was rewritten, nothing else happened
+    nml.write_excluded_frames(uploads, {})
+    mu, _, _, messages = _patch_exclusion_context(
+        monkeypatch, uploads, ['A', 'C'], real_rebuild=True)
+    assert mu.mode_flag_measurement('X.fits', restore=True) == 0
+    assert _aavso_jds(uploads, 'A') == ['2461000.50000']
+    assert _aavso_jds(uploads, 'C') == ['2461000.50000', '2461001.50000']
+
+
+def test_frozen_sources_are_left_alone(tmp_path, monkeypatch):
+    uploads = str(tmp_path)
+    _write_ledger(uploads, 'A',
+                  'wcs_fd_X.fits 2461000.5 12.0000 0.0200 detection C1')
+    frozen_rows = ('wcs_fd_X.fits 2461000.5 13.0000 0.0300 detection C1',
+                   'wcs_fd_W.fits 2461000.9 13.1000 0.0300 manual C1')
+    _write_ledger(uploads, 'FROZEN', *frozen_rows)
+    nml.write_excluded_frames(uploads, {'W.fits': 't'})
+    mu, rebuilt, _, _ = _patch_exclusion_context(monkeypatch, uploads, ['A'])
+    path = os.path.join(nml.source_dir_path(uploads, 'FROZEN'),
+                        nml.LEDGER_BASENAME)
+    for call in (lambda: mu.mode_flag_measurement('X.fits', restore=False),
+                 lambda: mu.mode_flag_measurement('W.fits', restore=True),
+                 mu.mode_sync_exclusions):
+        call()
+        with open(path) as fh:
+            assert fh.read() == _ledger_rows(*frozen_rows)
+    assert 'FROZEN' not in rebuilt
+
+
+def test_exclusion_command_line_takes_one_image_and_no_source(monkeypatch):
+    import monitoring_update as mu
+
+    def refuse(*args, **kwargs):
+        raise AssertionError('must not be called')
+    monkeypatch.setattr(mu, 'mode_flag_measurement', refuse)
+    monkeypatch.delenv('GATEWAY_INTERFACE', raising=False)
+    assert mu.main(['monitoring_update.py', '--exclude-measurement',
+                    'X.fits', '--source', 'A']) == 1
+    assert mu.main(['monitoring_update.py', '--restore-measurement',
+                    'X.fits', 'extra']) == 1
+
+
+def test_exclusion_reports_what_the_rebuild_publishes_elsewhere(tmp_path,
+                                                              monkeypatch):
+    monkeypatch.setenv('MPLCONFIGDIR', str(tmp_path / 'mpl'))
+    uploads = str(tmp_path / 'uploads')
+    _write_ledger(uploads, 'A',
+                  'wcs_fd_V2.fits 2461000.50100 12.4000 0.0200 detection C1')
+    # B's visit mixes a detection and an upper limit: held back whole
+    _write_ledger(uploads, 'B',
+                  'wcs_fd_V1.fits 2461000.50000 12.0000 0.0200 detection C1',
+                  'wcs_fd_V2.fits 2461000.50100 13.5000 99.0000 upperlimit C1')
+    for sid in ('A', 'B'):
+        nml.rebuild_source_products(uploads, _entries([sid])[0], {}, '')
+    assert _aavso_jds(uploads, 'B') == []
+    mu, _, _, messages = _patch_exclusion_context(
+        monkeypatch, uploads, ['A', 'B'], real_rebuild=True)
+    assert mu.mode_flag_measurement('V2.fits', restore=False) == 0
+    assert _aavso_jds(uploads, 'B') == ['2461000.50000']
+    published = [m for m in messages if 'NOW PUBLISHED' in m]
+    assert len(published) == 1 and 'B:' in published[0] \
+        and '2461000.50000' in published[0]
+    # A's own point on the excluded frame is not reported as a side effect
+    assert not any('withdrawn' in m and 'A:' in m for m in messages)
+    del messages[:]
+    assert mu.mode_flag_measurement('V2.fits', restore=True) == 0
+    assert any('withdrawn' in m and '2461000.50000' in m for m in messages)
+
+
+def test_rerunning_an_interrupted_exclusion_rebuilds_stale_sources(
+        tmp_path, monkeypatch):
+    uploads = str(tmp_path)
+    _write_ledger(uploads, 'A', 'wcs_fd_X.fits 2461000.5 12.0 0.02 manual C1')
+    _write_ledger(uploads, 'B', 'wcs_fd_X.fits 2461000.5 13.0 0.03 manual C1')
+    nml.write_excluded_frames(uploads, {'X.fits': 't'})
+    # B's rows were flipped but its products were never rebuilt
+    stale_aavso = os.path.join(nml.source_dir_path(uploads, 'B'),
+                               nml.AAVSO_BASENAME)
+    _write_file(stale_aavso, 'B,2461000.5,13.0\n')
+    os.utime(stale_aavso, (1000000000, 1000000000))
+    mu, rebuilt, frames, _ = _patch_exclusion_context(monkeypatch, uploads,
+                                                      ['A', 'B'])
+    assert mu.mode_flag_measurement('X.fits', restore=False) == 0
+    assert 'B' in rebuilt and 'X.fits' in frames['B']
+
+
+def test_locked_runs_apply_a_newly_created_list_at_once(tmp_path,
+                                                       monkeypatch):
+    uploads = str(tmp_path)
+    # excluded for GB6 only before the list existed; RX And measured later
+    _write_ledger(uploads, 'GB6', 'wcs_fd_G.fits 2461000.5 12.0 0.02 manual C1')
+    _write_ledger(uploads, 'RX', 'wcs_fd_G.fits 2461000.5 13.0 0.03 detection C1')
+    _write_ledger(uploads, 'OTHER', 'wcs_fd_O.fits 2461000.9 13.0 0.03 detection C1')
+    mu, rebuilt, frames, _ = _patch_exclusion_context(
+        monkeypatch, uploads, ['GB6', 'RX', 'OTHER'])
+    # any locked run will do - here a threshold for an unrelated source
+    assert mu.mode_set_threshold('OTHER', 15.0) == 0
+    assert set(nml.read_excluded_frames(uploads)) == {'G.fits'}
+    assert _ledger_by_basename(uploads, 'RX')['wcs_fd_G.fits'][0] == 'manual'
+    assert 'RX' in rebuilt and 'G.fits' in frames['RX']
+
+
+def test_ingest_records_rows_on_excluded_frames_as_manual(tmp_path,
+                                                          monkeypatch):
+    uploads = str(tmp_path)
+    os.makedirs(nml.source_dir_path(uploads, 'NEW'))
+    nml.write_excluded_frames(uploads, {'X.fits': 't', 'C.fits': 't'})
+    # once the list exists, a manual row elsewhere no longer excludes a frame
+    _write_ledger(uploads, 'OLD', 'wcs_fd_Z.fits 2461000.7 12.0 0.02 manual C1')
+    mu, _, frames, _ = _patch_exclusion_context(monkeypatch, uploads,
+                                                ['NEW', 'OLD'])
+    raw = tmp_path / 'raw.txt'
+    raw.write_text(
+        'NEW wcs_fd_X.fits 2461000.5 12.5000 0.0500 detection C1\n'
+        'NEW wcs_fd_C.fits 2461000.55 12.6000 0.0500 cloudy C1\n'
+        'NEW wcs_fd_Z.fits 2461000.7 15.1000 99.0000 upperlimit C1\n'
+        'NEW wcs_fd_E.fits 2461000.8 99.0000 99.0000 edge C1\n'
+        'NEW wcs_fd_Y.fits 2461000.6 12.4000 0.0400 detection C1\n')
+    assert mu.mode_ingest(str(raw)) == 0
+    assert _ledger_by_basename(uploads, 'NEW') == {
+        'wcs_fd_X.fits': ('manual', '12.5000', '0.0500'),
+        'wcs_fd_C.fits': ('cloudy', '12.6000', '0.0500'),
+        'wcs_fd_Z.fits': ('upperlimit', '15.1000', '99.0000'),
+        'wcs_fd_E.fits': ('edge', '99.0000', '99.0000'),
+        'wcs_fd_Y.fits': ('detection', '12.4000', '0.0400')}
+    assert frames['NEW'] == {'X.fits', 'C.fits'}
+
+
+def test_manual_measurement_applies_frames_excluded_by_hand(tmp_path,
+                                                            monkeypatch):
+    import monitoring_update as mu
+    root = str(tmp_path / 'workdir')
+    os.makedirs(nml.source_dir_path(root, 'SRC'))
+    nml.write_excluded_frames(root, {'excl.fits': 't', 'excledge.fits': 't',
+                                     'both.fits': 't'})
+    _write_file(os.path.join(nml.source_dir_path(root, 'OTHER'),
+                             nml.LEDGER_BASENAME),
+                'wcs_fd_both.fits 2461000.5 12.0 0.02 cloudy C1\n')
+    entry = _entries(['SRC'])[0]
+    names = ('excl', 'excledge', 'both', 'clear')
+    images = [os.path.join(root, 'img_A', 'wcs_fd_{}.fits'.format(n))
+              for n in names]
+    for image in images:
+        _write_file(image)
+    monkeypatch.setattr(mu, 'read_factory_text', lambda cfg: '')
+    monkeypatch.setattr(mu, 'sky2xy_on_image',
+                        lambda vast_dir, path, ra, dec: (100.0, 100.0))
+    monkeypatch.setattr(nfp, 'get_jd_and_atel_date',
+                        lambda vast_dir, path: ('2461000.5000', None))
+    monkeypatch.setattr(nfp, 'camera_settings_for_path',
+                        lambda text, path: 'C1')
+    monkeypatch.setattr(nfp, 'derive_band', lambda text, path, default: 'V')
+    monkeypatch.setattr(nfp, 'derive_sextractor_config',
+                        lambda text, path: None)
+    work_dir = str(tmp_path / 'work')
+
+    def fake_setup(vast_dir, parent_dir, prefix=None):
+        os.makedirs(work_dir, exist_ok=True)
+        return work_dir
+
+    def fake_solve(work, local_config_path, todo, workers, skip_log):
+        return None, None, None, {p: p for p in todo}, None
+
+    def fake_measure(work, local_config_path, img, compute_path, ra, dec,
+                     band, debug_log=None, off_image_as_edge=False,
+                     edge_margin_pix=None):
+        if 'edge' in img:
+            return {'jd': '2461000.5000', 'mag': '99.0000',
+                    'err': '99.0000', 'status': 'edge'}
+        return {'jd': '2461000.5000', 'mag': '12.3456', 'err': '0.0210',
+                'status': 'detection'}
+    monkeypatch.setattr(nfp, 'setup_vast_working_copy', fake_setup)
+    monkeypatch.setattr(nfp, '_phase1_parallel_solve_plate', fake_solve)
+    monkeypatch.setattr(nfp, 'run_forced_photometry_c', fake_measure)
+    mu.measure_images_for_source(
+        {}, None, entry, images, root,
+        verdicts=nml.RunVerdictResolver(root, now=1790000000.0))
+    # the excluded frame is measured and recorded as manual with the values;
+    # an edge result keeps its status; the cloud verdict comes first
+    assert _ledger_by_basename(root, 'SRC') == {
+        'wcs_fd_excl.fits': ('manual', '12.3456', '0.0210'),
+        'wcs_fd_excledge.fits': ('edge', '99.0000', '99.0000'),
+        'wcs_fd_both.fits': ('cloudy', '12.3456', '0.0210'),
+        'wcs_fd_clear.fits': ('detection', '12.3456', '0.0210')}
+
+
+def test_manual_modes_pass_the_listed_frames_on_and_rebuild_stale_sources(
+        tmp_path, monkeypatch):
+    uploads = str(tmp_path)
+    _write_ledger(uploads, 'A', 'wcs_fd_M.fits 2461000.5 12.0 0.02 manual C1')
+    open(os.path.join(nml.source_dir_path(uploads, 'A'),
+                      nml.BACKFILL_MARKER_BASENAME), 'w').close()
+    # A's products predate its ledger (an interrupted update)
+    stale_aavso = os.path.join(nml.source_dir_path(uploads, 'A'),
+                               nml.AAVSO_BASENAME)
+    _write_file(stale_aavso, 'A,2461000.5,12.0\n')
+    os.utime(stale_aavso, (1000000000, 1000000000))
+    mu, rebuilt, frames, _ = _patch_exclusion_context(monkeypatch, uploads,
+                                                      ['A'])
+    seen = []
+    monkeypatch.setattr(mu, 'covering_fields_for_entry',
+                        lambda cfg, entry: {'F1'})
+    monkeypatch.setattr(mu, 'enumerate_archive_images',
+                        lambda cfg, fields: ['/archive/wcs_fd_new.fits'])
+    monkeypatch.setattr(nml, 'RunVerdictResolver',
+                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(mu, 'measure_images_for_source',
+                        lambda cfg, lcp, entry, images, uploads_dir,
+                        verdicts=None, excluded_frames=None:
+                        seen.append(excluded_frames) or 0)
+    assert mu.mode_rescan('rescan-archive', '--all') == 0
+    # no list yet: the run created it from the manual rows and passed it on
+    assert seen == [{'M.fits'}]
+    assert set(nml.read_excluded_frames(uploads)) == {'M.fits'}
+    assert 'A' in rebuilt and frames['A'] == {'M.fits'}
+
+
+def test_sync_exclusions_migrates_then_applies_the_list(tmp_path, monkeypatch):
+    uploads = str(tmp_path)
+    # excluded for A only, before the list existed
+    _write_ledger(uploads, 'A', 'wcs_fd_X.fits 2461000.5 12.0000 0.0200 manual C1')
+    _write_ledger(uploads, 'B',
+                  'wcs_fd_X.fits 2461000.5 13.0000 0.0300 detection C1',
+                  'wcs_fd_W.fits 2461000.9 13.1000 0.0300 detection C1')
+    _write_ledger(uploads, 'C',
+                  'wcs_fd_Y.fits 2461000.6 15.2000 99.0000 upperlimit C1')
+    mu, rebuilt, frames, messages = _patch_exclusion_context(
+        monkeypatch, uploads, ['A', 'B', 'C'])
+    assert mu.mode_sync_exclusions() == 0
+    listed = nml.read_excluded_frames(uploads)
+    assert set(listed) == {'X.fits'}
+    assert 'migrated from the manual rows of A' in listed['X.fits']
+    assert _ledger_by_basename(uploads, 'B')['wcs_fd_X.fits'][0] == 'manual'
+    assert _ledger_by_basename(uploads, 'B')['wcs_fd_W.fits'][0] == 'detection'
+    assert _ledger_by_basename(uploads, 'C')['wcs_fd_Y.fits'][0] == 'upperlimit'
+    assert rebuilt == ['B'] and frames['B'] == {'X.fits'}
+    # once the list exists a manual row on an unlisted frame is reported, not
+    # turned into a frame-wide exclusion
+    _write_ledger(uploads, 'C',
+                  'wcs_fd_Y.fits 2461000.6 15.2000 99.0000 manual C1')
+    del rebuilt[:]
+    del messages[:]
+    assert mu.mode_sync_exclusions() == 0
+    assert set(nml.read_excluded_frames(uploads)) == {'X.fits'}
+    assert any('Y.fits is excluded for this source only' in m
+               for m in messages)
+    assert rebuilt == []

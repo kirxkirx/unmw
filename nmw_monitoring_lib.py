@@ -16,6 +16,10 @@ Design: source_monitoring_design.md. Key points:
   (never re-measured) but are excluded from every published product. The
   manual modes honour the verdicts of the transient-search runs (see
   RUN_VERDICTS_BASENAME).
+- A frame excluded by hand is excluded for every monitored source on it,
+  including sources activated later: the list EXCLUDED_FRAMES_BASENAME is
+  the single source of truth and the products never publish a listed
+  frame.
 """
 
 import datetime
@@ -106,6 +110,34 @@ CLOUD_RESTATUSED_STATUSES = ('detection', 'upperlimit')
 # (monitoring_update.py --exclude-measurement)
 MANUAL_STATUS = 'manual'
 REASON_MANUAL = 'manual_exclusion'
+# The statuses an exclusion by hand turns into MANUAL_STATUS: only a
+# published measurement is excluded; edge, the refusals, run_error and cloudy
+# rows keep their own status (they are not published anyway)
+MANUAL_RESTATUSED_STATUSES = ('detection', 'upperlimit')
+# A frame excluded by hand is excluded for EVERY monitored source on it,
+# including the sources activated later. The excluded frames are listed in
+# EXCLUDED_FRAMES_BASENAME in IMAGE_DATA_ROOT - next to RUN_VERDICTS_BASENAME
+# and outside the registry, so the list survives a registry wipe - one line
+# per frame: '<image core name> <UTC time> <note>' (image_core_name, so every
+# copy of the frame matches). --exclude-measurement adds a frame and
+# --restore-measurement removes it, each updating the ledgers of all the
+# activated sources. The list is the single source of truth: the products
+# (rebuild_source_products, rebuild_central_index) never publish a detection
+# or upper limit on a listed frame, whatever its ledger status says, and the
+# measurement paths (the ingest and the manual modes) record such a row as
+# MANUAL_STATUS, keeping the measured values, the way the cloud verdict is
+# applied. Until the list exists, the frames with a MANUAL_STATUS row in any
+# registry ledger stand in for it - the exclusions made before the list
+# existed, which could be limited to one source - and the first run that
+# holds the global monitoring lock writes them into a new list
+# (ensure_excluded_frames_list). A list that exists but cannot be read stops
+# every mode that would use it (ExcludedFramesUnreadable): treating it as
+# empty would publish the excluded frames, and rewriting it would lose them.
+EXCLUDED_FRAMES_BASENAME = 'monitoring_excluded_frames.txt'
+
+
+class ExcludedFramesUnreadable(Exception):
+    """EXCLUDED_FRAMES_BASENAME exists but cannot be read."""
 
 # Ledger status of the images of a transient-search run that was rejected:
 # the run raised a processing ERROR or failed (see RUN_VERDICTS_BASENAME).
@@ -546,26 +578,28 @@ def append_ledger_rows(uploads_dir, source_id, new_rows,
 
 def rewrite_measurement_status(uploads_dir, source_id, image_basename,
                                restore=False):
-    """Flip the status of the ledger row(s) of one source that match
-    image_basename (compared via ledger_key, so a trailing .fz does not
-    matter), rewriting the ledger atomically under the per-source lock -
-    the same lock append_ledger_rows takes, so a concurrent autoprocess
-    ingest simply waits the few milliseconds this takes.
+    """Flip the status of the ledger row(s) of one source that belong to the
+    frame of image_basename (compared via image_core_name, so a directory, a
+    trailing .fz and the wcs_/fd_/d_ prefixes do not matter: every copy of
+    the frame matches), rewriting the ledger atomically under the per-source
+    lock - the same lock append_ledger_rows takes, so a concurrent
+    autoprocess ingest simply waits the few milliseconds this takes.
 
-    restore=False: 'detection'/'upperlimit' rows become MANUAL_STATUS (the
-    manual quality exclusion; the published products drop the point on the
-    next rebuild). restore=True: MANUAL_STATUS rows go back to 'upperlimit'
-    when they hold an upper limit - the error is the 99.0000 no-value marker
-    (or the magnitude carries a '<' prefix) - and to 'detection' otherwise
-    (the original magnitude and error are still in the row).
+    restore=False: MANUAL_RESTATUSED_STATUSES rows (detection, upperlimit)
+    become MANUAL_STATUS (the manual quality exclusion; the published
+    products drop the point on the next rebuild). restore=True:
+    MANUAL_STATUS rows go back to 'upperlimit' when they hold an upper limit
+    - the error is the 99.0000 no-value marker (or the magnitude carries a
+    '<' prefix) - and to 'detection' otherwise (the original magnitude and
+    error are still in the row), which undoes the exclusion.
 
-    Returns the number of rows changed (0 when the image is not in this
+    Returns the number of rows changed (0 when the frame is not in this
     source's ledger or no row was in a flippable state)."""
     source_dir = source_dir_path(uploads_dir, source_id)
     ledger_path = os.path.join(source_dir, LEDGER_BASENAME)
     if not os.path.isfile(ledger_path):
         return 0
-    key = ledger_key(os.path.basename(image_basename))
+    core = image_core_name(image_basename)
     lock_fh = acquire_source_lock(uploads_dir, source_id)
     try:
         with open(ledger_path) as fh:
@@ -575,9 +609,9 @@ def rewrite_measurement_status(uploads_dir, source_id, image_basename,
         for line in lines:
             parts = line.split()
             if (len(parts) >= 6 and not line.lstrip().startswith('#')
-                    and ledger_key(parts[0]) == key):
+                    and image_core_name(parts[0]) == core):
                 status = parts[4]
-                if not restore and status in ('detection', 'upperlimit'):
+                if not restore and status in MANUAL_RESTATUSED_STATUSES:
                     parts[4] = MANUAL_STATUS
                     out_lines.append(' '.join(parts))
                     changed += 1
@@ -598,6 +632,193 @@ def rewrite_measurement_status(uploads_dir, source_id, image_basename,
         return changed
     finally:
         lock_fh.close()
+
+
+# ---------- frames excluded by hand ----------
+
+def excluded_frames_path(uploads_dir):
+    return os.path.join(uploads_dir, EXCLUDED_FRAMES_BASENAME)
+
+
+def read_excluded_frames(uploads_dir):
+    """The frames listed in EXCLUDED_FRAMES_BASENAME, as {image core name:
+    the rest of its line (time and note)}; None when there is no list yet.
+    Raises ExcludedFramesUnreadable when the list exists but cannot be
+    read."""
+    path = excluded_frames_path(uploads_dir)
+    try:
+        with open(path, errors='replace') as fh:
+            lines = fh.read().splitlines()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ExcludedFramesUnreadable(
+            'cannot read {} ({})'.format(path, exc))
+    # The list is always written with its comment header; an empty or
+    # headerless file is a cut-short write or a hand-made file, and taking it
+    # for "no frame excluded" would publish every excluded frame
+    if not lines or not lines[0].startswith('#'):
+        raise ExcludedFramesUnreadable(
+            '{} is empty or lacks its comment header - restore it from a '
+            'backup, or delete it to rebuild it from the manual rows of the '
+            'ledgers'.format(path))
+    frames = {}
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        parts = stripped.split(None, 1)
+        core = image_core_name(parts[0])
+        if core and core not in frames:
+            frames[core] = parts[1] if len(parts) > 1 else ''
+    return frames
+
+
+def write_excluded_frames(uploads_dir, frames):
+    """Rewrite EXCLUDED_FRAMES_BASENAME from {image core name: time and
+    note}, atomically and world-readable whatever the umask (the manual
+    modes may run as another user than the web server user that wrote it).
+    The callers hold the global monitoring lock."""
+    lines = ['# Frames excluded by hand from the published products of every '
+             'monitored source',
+             '# on them, including sources added later. Managed with '
+             'monitoring_update.py',
+             '# --exclude-measurement, --restore-measurement and '
+             '--sync-exclusions.',
+             '# One frame per line: <image core name> <UTC time> <note>']
+    for core in sorted(frames):
+        lines.append('{} {}'.format(core, frames[core]).rstrip())
+    path = excluded_frames_path(uploads_dir)
+    tmp = '{}.tmp{}'.format(path, os.getpid())
+    with open(tmp, 'w') as fh:
+        fh.write('\n'.join(lines) + '\n')
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)
+    # make the rename itself durable (a power cut must not leave the old
+    # list, or none, behind a decision already reported as done)
+    try:
+        dir_fd = os.open(os.path.dirname(os.path.abspath(path)), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except OSError:
+        pass
+
+
+def frames_with_manual_rows(uploads_dir, source_ids, log=None, strict=False):
+    """{image core name: [source id, ...]} of the frames with a
+    MANUAL_STATUS row in the ledgers of source_ids. A ledger that cannot be
+    read is reported through log - or, with strict, raises
+    ExcludedFramesUnreadable (the migration must not write a list that
+    misses its exclusions)."""
+    found = {}
+    for source_id in source_ids:
+        path = os.path.join(source_dir_path(uploads_dir, source_id),
+                            LEDGER_BASENAME)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, errors='replace') as fh:
+                for line in fh:
+                    parts = line.split()
+                    if len(parts) < 6 or parts[0].startswith('#'):
+                        continue
+                    if parts[4] == MANUAL_STATUS:
+                        found.setdefault(image_core_name(parts[0]),
+                                         []).append(source_id)
+        except OSError as exc:
+            if strict:
+                raise ExcludedFramesUnreadable(
+                    'cannot read {} ({}) - the list of frames excluded by '
+                    'hand is not created without it'.format(path, exc))
+            if log is not None:
+                log('WARNING: cannot read {} ({}) - its exclusions by hand '
+                    'are not applied'.format(path, exc))
+    return found
+
+
+def excluded_frame_set(uploads_dir, log=None):
+    """Image core names of the frames excluded by hand: the frames listed in
+    EXCLUDED_FRAMES_BASENAME or, while there is no list yet, the frames with
+    a MANUAL_STATUS row in any registry ledger (see the comment at
+    EXCLUDED_FRAMES_BASENAME). Raises ExcludedFramesUnreadable."""
+    listed = read_excluded_frames(uploads_dir)
+    if listed is not None:
+        return set(listed)
+    return set(frames_with_manual_rows(uploads_dir,
+                                       registry_source_ids(uploads_dir), log))
+
+
+def ensure_excluded_frames_list(uploads_dir, log=None):
+    """(listed, created): the listed frames, {core name: time and note}, and
+    whether the list was created now. When there is no list yet, it is
+    created from the frames with a MANUAL_STATUS row in any registry ledger
+    - the one-time migration of the exclusions made before the list existed;
+    a ledger or a registry that cannot be read stops it rather than writing
+    a list without their exclusions. Callers hold the global monitoring
+    lock. Raises ExcludedFramesUnreadable."""
+    listed = read_excluded_frames(uploads_dir)
+    if listed is not None:
+        return listed, False
+    legacy = frames_with_manual_rows(
+        uploads_dir, registry_source_ids(uploads_dir, strict=True), log,
+        strict=True)
+    stamp = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    listed = dict((core, '{} migrated from the manual rows of {}'.format(
+        stamp, ','.join(sorted(set(ids))))) for core, ids in legacy.items())
+    write_excluded_frames(uploads_dir, listed)
+    if log is not None:
+        log('created {} with the {} frame(s) of the existing manual '
+            'exclusions'.format(excluded_frames_path(uploads_dir),
+                                len(listed)))
+    return listed, True
+
+
+def products_stale(source_dir):
+    """Are the published files of a source older than its ledger or its
+    detection threshold? The updater rewrites those first and the products
+    after them, so an update that was cut short leaves them older."""
+    try:
+        aavso_mtime = os.stat(os.path.join(source_dir,
+                                           AAVSO_BASENAME)).st_mtime
+    except OSError:
+        return False
+    for basename in (LEDGER_BASENAME, DETECTION_THRESHOLD_BASENAME):
+        try:
+            if os.stat(os.path.join(source_dir, basename)).st_mtime > \
+                    aavso_mtime:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def ledger_has_frame(uploads_dir, source_id, image_name):
+    """Does the ledger of source_id hold a row, whatever its status, for the
+    frame of image_name (matched by image_core_name)?"""
+    core = image_core_name(image_name)
+    rows, _ = read_ledger(source_dir_path(uploads_dir, source_id))
+    return any(image_core_name(row['basename']) == core for row in rows)
+
+
+def registry_source_ids(uploads_dir, strict=False):
+    """The source ids that have a registry directory, sorted (none when the
+    registry does not exist). A registry that cannot be listed gives none,
+    or, with strict, raises ExcludedFramesUnreadable."""
+    root = monitoring_root(uploads_dir)
+    try:
+        return sorted(name for name in os.listdir(root)
+                      if os.path.isdir(os.path.join(root, name)))
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        if strict:
+            raise ExcludedFramesUnreadable(
+                'cannot list {} ({})'.format(root, exc))
+        return []
 
 
 # ---------- transient-search run verdicts ----------
@@ -1021,9 +1242,12 @@ def _float_or_none(text):
         return None
 
 
-def classify_ledger_rows(rows):
+def classify_ledger_rows(rows, excluded_frames=frozenset()):
     """Split ledger rows into (detections, upperlimits, quality_excluded),
-    each JD-sorted and with parsed jd/mag floats attached. Rows with the
+    each JD-sorted and with parsed jd/mag floats attached. A detection or
+    upper limit on a frame excluded by hand (excluded_frames: image core
+    names, see EXCLUDED_FRAMES_BASENAME) is treated as a MANUAL_STATUS row,
+    whatever its ledger status says. Rows with the
     'cloudy' status (condemned by the per-frame cloud check at ingest time)
     go to quality_excluded, and so do the rows whose status says the
     measurement itself could not be made (EXCLUDED_STATUSES: the position
@@ -1054,6 +1278,10 @@ def classify_ledger_rows(rows):
             parsed['reason'] = REASON_FOR_EXCLUDED_STATUS[row['status']]
             quality_excluded.append(parsed)
             continue
+        if excluded_frames and row['status'] in MANUAL_RESTATUSED_STATUSES \
+                and image_core_name(row['basename']) in excluded_frames:
+            row = dict(row)
+            row['status'] = MANUAL_STATUS
         jd = _float_or_none(row['jd'])
         mag = _float_or_none(row['mag'].lstrip('<'))
         if row['status'] in (CLOUDY_STATUS, MANUAL_STATUS):
@@ -1293,36 +1521,51 @@ def _write_text_atomic(path, text):
     os.replace(tmp, path)
 
 
-def rebuild_source_products(uploads_dir, entry, cfg, factory_text):
+def published_rows(source_dir, rows, excluded_frames=frozenset()):
+    """What the products of a source publish from its ledger rows:
+    (detections, upperlimits, excluded, threshold) - the classification
+    (frames excluded by hand included), the within-visit consistency check,
+    then the manual detection threshold."""
+    detections, upperlimits, quality_excluded = \
+        classify_ledger_rows(rows, excluded_frames)
+    detections, upperlimits, inconsistent = \
+        split_inconsistent_visits(detections, upperlimits)
+    for row in inconsistent:
+        row['reason'] = REASON_VISIT
+    excluded = sorted(quality_excluded + inconsistent,
+                      key=lambda r: r['jd_float'])
+    # Manual per-source detection threshold - applied AFTER the
+    # visit-consistency check so a flare-rise visit straddling the
+    # threshold keeps its detection instead of being discarded as a
+    # mixed detection+limit visit.
+    threshold = read_detection_threshold(source_dir)
+    detections, upperlimits = apply_detection_threshold(
+        detections, upperlimits, threshold)
+    return detections, upperlimits, excluded, threshold
+
+
+def rebuild_source_products(uploads_dir, entry, cfg, factory_text,
+                            excluded_frames=None):
     """Rebuild every derived file of one source from its ledger: the
     four-column lightcurve, the upper-limits file, the AAVSO file, the plot
-    and the source page. Idempotent; caller holds no lock (we take the
-    per-source lock here)."""
+    and the source page. A detection or upper limit on a frame excluded by
+    hand is never published (excluded_frames: image core names; read here
+    when not given - raises ExcludedFramesUnreadable when the list cannot
+    be read, leaving the products as they are). Idempotent; caller holds
+    no lock (we take the per-source lock here)."""
     from nmw_forced_phot_lib import render_lightcurve_plots, band_for_camera
     source_id = entry['source_id']
     source_dir = source_dir_path(uploads_dir, source_id)
     if not os.path.isdir(source_dir):
         return
+    if excluded_frames is None:
+        excluded_frames = excluded_frame_set(uploads_dir)
     vast_dir = (cfg.get('VAST_REFERENCE_COPY') or '').strip()
     lock_fh = acquire_source_lock(uploads_dir, source_id)
     try:
         rows, _ = read_ledger(source_dir)
-        detections, upperlimits, quality_excluded = \
-            classify_ledger_rows(rows)
-        detections, upperlimits, inconsistent = \
-            split_inconsistent_visits(detections, upperlimits)
-        for row in inconsistent:
-            row['reason'] = REASON_VISIT
-        excluded = sorted(quality_excluded + inconsistent,
-                          key=lambda r: r['jd_float'])
-
-        # Manual per-source detection threshold - applied AFTER the
-        # visit-consistency check so a flare-rise visit straddling the
-        # threshold keeps its detection instead of being discarded as a
-        # mixed detection+limit visit.
-        threshold = read_detection_threshold(source_dir)
-        detections, upperlimits = apply_detection_threshold(
-            detections, upperlimits, threshold)
+        detections, upperlimits, excluded, threshold = published_rows(
+            source_dir, rows, excluded_frames)
 
         # The trailing field-name column is extracted from the image
         # basename; the plot readers parse only the leading numeric columns
@@ -1662,12 +1905,17 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
     _write_text_atomic(os.path.join(source_dir, 'index.html'), ''.join(parts))
 
 
-def rebuild_central_index(uploads_dir, entries, vast_dir):
+def rebuild_central_index(uploads_dir, entries, vast_dir,
+                          excluded_frames=None):
     """The central monitoring page: one row per activated source, plus a
-    pending list for list entries not activated on this machine."""
+    pending list for list entries not activated on this machine. The counts
+    leave out the frames excluded by hand (excluded_frames, read here when
+    not given)."""
     root = monitoring_root(uploads_dir)
     if not os.path.isdir(root):
         return
+    if excluded_frames is None:
+        excluded_frames = excluded_frame_set(uploads_dir)
     parts = ['<html><head><title>Monitored sources</title>\n{}\n</head>'
              '<body>\n<h2>Monitored sources</h2>\n'.format(ncl._PAGE_CSS)]
     activated = []
@@ -1686,9 +1934,8 @@ def rebuild_central_index(uploads_dir, entries, vast_dir):
         for entry in sorted(activated, key=lambda e: e['name'].lower()):
             source_dir = source_dir_path(uploads_dir, entry['source_id'])
             rows, _ = read_ledger(source_dir)
-            detections, upperlimits, _excluded = classify_ledger_rows(rows)
-            detections, upperlimits, _inconsistent = \
-                split_inconsistent_visits(detections, upperlimits)
+            detections, upperlimits, _excluded, _threshold = published_rows(
+                source_dir, rows, excluded_frames)
             all_jd = [r['jd_float'] for r in detections + upperlimits]
             if all_jd:
                 last_jd_num = max(all_jd)

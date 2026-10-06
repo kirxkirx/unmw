@@ -74,6 +74,10 @@ and the measurement ledger are all plain ASCII.
     regardless of their number or age - no window cap, no image-count cap.
     It is a command-line tool, not a CGI, so there is no rush and no need
     for limits.
+13. An image excluded by hand is excluded for EVERY monitored source on it,
+    and the decision is kept, so a source added later that falls on the
+    image gets it excluded too (2026-10-05, user request). There is no
+    per-source exclusion any more (section 6.6).
 
 ## 3. Master list format
 
@@ -139,6 +143,7 @@ uploads/monitoring/<source_id>/
     lightcurve.png, lightcurve.eps           derived plot
     index.html                               derived page
 uploads/.monitoring_locks/                   flock files (per source + one global)
+uploads/monitoring_excluded_frames.txt       frames excluded by hand, for every source (section 6.6)
 ```
 
 `<source_id>` = display name with whitespace runs replaced by `_`, restricted
@@ -192,9 +197,10 @@ without a measured value carries 99.0000 99.0000.
   from the published products and, except `edge` (the image does not cover
   the source), listed in `excluded_measurements.dat` and the page's
   "excluded" table with a reason:
-  - `cloudy` (the frame-quality cloud check at ingest), `manual`
-    (`--exclude-measurement`) and the within-visit consistency check keep
-    the measured value;
+  - `cloudy` (the frame-quality cloud check at ingest), `manual` (a frame
+    excluded by hand with `--exclude-measurement`, for every source on it,
+    section 6.6) and the within-visit consistency check keep the measured
+    value;
   - `bad_region`, `saturated`, `nan_pixel`, `calib_fail`, `fail`,
     `tool_fail`: no measurement could be made (99.0000 99.0000);
   - `bad_wcs` (TAN-only plate solution of a wide field) and
@@ -358,6 +364,11 @@ are `cloudy` rows too, a frame stays condemned until every `cloudy` row of
 it, in every ledger, has been edited back by hand. The check itself is never
 run in the manual path; frames the ingest never checked are measured as
 before. A rejected run takes precedence over a cloud verdict.
+
+Frames excluded by hand (section 6.6) are applied the same way: a manual
+run measures such a frame and records a detection or upper limit on it as
+`manual`, with the measured values. A cloud verdict takes precedence (the
+row is recorded as `cloudy`).
 
 The images of a manual run are processed camera by camera. Before the
 plate-solve/catalog pass of a camera's images, the bad-region list the
@@ -534,6 +545,97 @@ one line per image of the upload:
   their reference frames). With neither, the verdict is unknown and the
   image is measured as before. On 2026-10-02 about 11% of a random sample of archive frames
   came from rejected runs.
+
+### 6.6 Frames excluded by hand
+
+A frame that is bad for one source is bad for every source on it, so an
+exclusion by hand applies to the FRAME, for every monitored source that
+falls on it, now and in the future (decision 13; until 2026-10-05
+`--exclude-measurement` could be limited to one source with `--source`,
+which no longer exists).
+
+- The record is `$IMAGE_DATA_ROOT/monitoring_excluded_frames.txt`, one line
+  per frame:
+  ```
+  # comment lines
+  <image core name> <UTC time of the exclusion> <note>
+  Per-02-Q1b1x1_2025-12-23_00-38-06_20.00sec_-14.90C_LIGHT_0322.fits 2026-10-05T22:31:07Z --exclude-measurement
+  ```
+  Frames are identified by `nml.image_core_name`, so every copy matches (a
+  directory, a trailing `.fz` and the `wcs_`/`fd_`/`d_` prefixes are
+  ignored). The list is rewritten atomically (fsynced, then renamed) under
+  the global monitoring lock and kept world-readable. It lives next to
+  `transient_search_verdicts.txt`, outside the registry, so a registry
+  wipe + `--reconcile` re-applies the exclusions instead of forgetting them.
+- The list is the single source of truth. The products
+  (`rebuild_source_products`, `rebuild_central_index`) never publish a
+  detection or upper limit on a listed frame, whatever its ledger status
+  says - a source re-added with the registry directory it had before the
+  exclusion, a ledger restored from a backup or a row appended by an ingest
+  racing the exclusion are all covered. The measurement paths keep the
+  ledgers consistent with it: the ingest (`--ingest`, re-reading the list
+  for every source) and the manual modes record a detection or upper limit
+  on a listed frame as `manual`, keeping the measured values (a cloud
+  verdict comes first: such a row is recorded as `cloudy`).
+- `monitoring_update.py --exclude-measurement <image>` adds the frame to the
+  list and flips every `detection` or `upperlimit` row on it, in the ledger
+  of every activated source, to `manual`; every source with a row on the
+  frame is rebuilt, whatever happened to its rows (so a re-run repairs what
+  an interrupted run left behind). The frame must be in at least one
+  activated source's ledger (a guard against typos); excluding an excluded
+  frame again succeeds.
+- `--restore-measurement <image>` removes the frame from the list and flips
+  its `manual` rows back to `detection` / `upperlimit` in every activated
+  source's ledger - a true undo - and rebuilds every source with a row on
+  the frame. It exits 1 when the frame was not excluded and nothing
+  changed.
+- Every rebuild these modes make compares the source's
+  `lightcurve_aavso.txt` before and after and logs each record it adds or
+  removes on another frame ("NOW PUBLISHED by this rebuild - check it" /
+  "withdrawn by this rebuild"). Without the frame (or with it again) the
+  within-visit consistency check may judge a visit differently - a visit it
+  held back can pass - and an exclusion applied to a source for the first
+  time removes points; the operator sees the points nobody vetted before
+  the AAVSO robot submits them.
+- Every mode that holds the global lock - the two above,
+  `--sync-exclusions`, the manual modes, `--rebuild-pages` and
+  `--set-detection-threshold` - starts by creating the list if there is
+  none yet and by bringing the ledgers and products of every activated
+  source in line with it: detections and upper limits on listed frames are
+  flipped to `manual` and those sources (and any whose products are older
+  than their ledger) are rebuilt, with the report above. This repairs a
+  source re-added with its old registry directory, the rows of an ingest
+  that raced an exclusion, and applies the migration in the run that
+  creates the list.
+- Migration: until the list exists, the frames with a `manual` row in any
+  registry ledger stand in for it (the per-source exclusions made before);
+  the first locked run writes them into a new list - and refuses to when a
+  ledger or the registry cannot be read, rather than writing a list that
+  misses their exclusions. From then on a `manual` row on a frame that is
+  not listed is an exclusion left for one source only (a restore made while
+  a source was off the list, a hand edit); it stays excluded for that
+  source and never spreads.
+- `--sync-exclusions` (idempotent) runs only that first step, then reports
+  each exclusion left for one source only with the command that settles
+  it. Run it once after upgrading. On tau.kirx.net on 2026-10-05 the
+  migration concerns 4 rows: two frames excluded for GB6 J0128+4901 were
+  published for RX And, and two excluded for PKS 0716+71 for Z Cam - both
+  sources were added after the exclusions.
+- A list that exists but cannot be read, is empty or lacks its comment
+  header stops every mode that would use it - the exclusion modes,
+  `--sync-exclusions`, the manual modes, `--rebuild-pages`,
+  `--set-detection-threshold` and the ingest (whose raw file is kept) -
+  without changing anything: treating it as empty would publish the
+  excluded frames, and rewriting it would lose them. To recover, restore it
+  from a backup, or delete it to rebuild it from the `manual` rows of the
+  ledgers.
+- The central page counts what the products publish (the same pipeline:
+  frames excluded by hand, the visit check and the detection threshold).
+- Sources removed from the list (frozen registry directories) are neither
+  changed nor rebuilt; their `manual` rows count in the one-time migration.
+- A frame excluded after the AAVSO submission robot submitted some of its
+  points removes those points from the local products; the robot then
+  reports them as rows to delete by hand in WebObs.
 
 ## 7. Files changed / added
 

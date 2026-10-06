@@ -51,7 +51,10 @@ Modes (see source_monitoring_design.md):
   progress are left for the next rescan. They also honour the verdict of
   the ingest's cloud check, kept in the ledgers: a frame with a 'cloudy'
   row in any source's ledger is measured and a detection or upper limit on
-  it is recorded as 'cloudy' (the values kept), as the ingest does. The
+  it is recorded as 'cloudy' (the values kept), as the ingest does. A
+  detection or upper limit on a frame excluded by hand is recorded as
+  'manual' in the same way, by the manual modes and by the ingest (see
+  --exclude-measurement). The
   images are processed camera by camera with the bad-region list the
   transient factory uses for the camera (BAD_REGION_FILE of the camera
   block) in place for the plate-solve pass and the measurement.
@@ -61,22 +64,53 @@ Modes (see source_monitoring_design.md):
       anything. Run this to apply changes to the page/plot templates to
       already-generated pages (--reconcile only re-renders sources that
       gained new measurements).
-  --exclude-measurement <image_basename> [--source <source_id>]
-      Manually exclude the measurement(s) coming from one image: flip the
-      matching ledger row to the 'manual' status so the point moves from
-      the published lightcurve/plot/AAVSO file to the "excluded by the
-      quality checks" table (reason manual_exclusion). By default every
-      activated source whose ledger contains the image is updated (a bad
-      frame is bad for all sources on it); --source restricts to one.
-      The image is matched by basename with the trailing .fz ignored.
-      The ledger row keeps the original magnitude, so the exclusion is
-      reversible; the row also keeps deduplicating rescans, so the image
-      is never re-measured. Note that a full registry wipe + reconcile
-      re-measures everything and forgets manual exclusions.
-  --restore-measurement <image_basename> [--source <source_id>]
-      Undo --exclude-measurement: manually excluded rows go back to
-      'detection' (or 'upperlimit' for fainter-than rows) and the point is
-      published again on the rebuilt products.
+  --exclude-measurement <image>
+      Exclude a frame by hand, for EVERY monitored source on it - a bad
+      frame is bad for all of them - including the sources activated
+      later: the frame is added to monitoring_excluded_frames.txt in
+      IMAGE_DATA_ROOT, and every detection or upper limit on it in the
+      ledgers of the activated sources is flipped to the 'manual' status,
+      so the point moves from the published lightcurve/plot/AAVSO file to
+      the "excluded by the quality checks" table (reason manual_exclusion).
+      The list is the single source of truth: the products never publish
+      a detection or upper limit on a listed frame, whatever the ledger
+      says (a source re-added with its old registry directory included),
+      and the ingest and the manual modes record any later measurement on
+      the frame as 'manual' too. The image may be given as a file name or a
+      path; every copy of the frame matches (a trailing .fz and the wcs_,
+      fd_ and d_ prefixes are ignored). The frame must be in the ledger of
+      at least one activated source (a guard against typos); excluding a
+      frame that is already excluded succeeds, and rebuilds the products of
+      a source an interrupted run left older than its ledger. The ledger
+      rows keep the measured values, so the exclusion is reversible, and
+      they keep deduplicating rescans, so the frame is never re-measured.
+      The list lives outside the registry, so a registry wipe + reconcile
+      re-applies the exclusions. Every source with a row on the frame is
+      rebuilt, and every published record that the rebuild adds or removes
+      on another frame is logged ("NOW PUBLISHED" / "withdrawn"): without
+      the frame, the within-visit check may judge a visit differently. A
+      frame excluded after the AAVSO robot submitted some of its points
+      makes the robot ask for their deletion in WebObs.
+  --restore-measurement <image>
+      Undo --exclude-measurement for every source: the frame leaves the
+      list, and its 'manual' rows go back to 'detection' (or 'upperlimit'
+      for fainter-than rows) and are published again on the rebuilt
+      products. Exits 1 when the frame was not excluded.
+  --sync-exclusions
+      Only the step every locked mode starts with (see below), plus a report
+      of the 'manual' rows on frames that are not listed - an exclusion left
+      for one source only - with the command that settles each. Run it once
+      after upgrading. Idempotent.
+  Every mode that holds the global lock (the two above, --sync-exclusions,
+  the manual modes, --rebuild-pages, --set-detection-threshold) first
+  creates the list if there is none yet - from the frames with a 'manual'
+  row in any ledger: the exclusions made before, which could be limited to
+  one source - and brings the ledgers and products of every activated
+  source in line with it (flips the detections and upper limits on listed
+  frames to 'manual' and rebuilds those sources, logging what their
+  published records gained or lost). A list that exists but cannot be read,
+  is empty or lacks its comment header stops every mode that would use it,
+  without changing anything.
   --set-detection-threshold <source> <mag>
       Set a manual per-source detection threshold: detections FAINTER than
       <mag> are published as upper limits at the measured magnitude (use
@@ -361,6 +395,16 @@ def mode_ingest(raw_path, rejected=False):
         return 1
     entries_by_id = {e['source_id']: e for e in entries}
     factory_text = read_factory_text(cfg)
+    # Frames excluded by hand hold for every source, the ones activated after
+    # the exclusion included (a reprocessed upload brings them back here). A
+    # list that cannot be read stops the ingest, as an unreadable monitoring
+    # list does: the rows would be recorded - and published - as measured.
+    try:
+        nml.excluded_frame_set(uploads_dir, log)
+    except nml.ExcludedFramesUnreadable as exc:
+        log('{}: {}; not ingesting {} (measurements preserved in the raw '
+            'file)'.format(mode_name, exc, raw_path))
+        return 1
     n_total = 0
     for source_id, rows in sorted(rows_by_source.items()):
         source_dir = nml.source_dir_path(uploads_dir, source_id)
@@ -375,6 +419,25 @@ def mode_ingest(raw_path, rejected=False):
             log('{}: {} is no longer in monitoring_list.txt - '
                 'not appending'.format(mode_name, source_id))
             continue
+        # Read again for every source: an exclusion made while this ingest
+        # runs reaches the sources it has not appended yet
+        try:
+            excluded_frames = set() if rejected else \
+                nml.excluded_frame_set(uploads_dir, log)
+        except nml.ExcludedFramesUnreadable as exc:
+            log('{}: {}; stopping before {} (measurements preserved in the '
+                'raw file)'.format(mode_name, exc, source_id))
+            return 1
+        n_excluded = 0
+        for row in rows:
+            if row['status'] in nml.MANUAL_RESTATUSED_STATUSES and \
+                    nml.image_core_name(row['basename']) in excluded_frames:
+                row['status'] = nml.MANUAL_STATUS
+                n_excluded += 1
+        if n_excluded:
+            log('{}: {}: {} row(s) on frames excluded by hand recorded as '
+                '{}'.format(mode_name, source_id, n_excluded,
+                            nml.MANUAL_STATUS))
         n_added = nml.append_ledger_rows(
             uploads_dir, source_id, rows,
             supersede_statuses=(() if rejected
@@ -382,7 +445,8 @@ def mode_ingest(raw_path, rejected=False):
         n_total += n_added
         log('{}: {}: {} new row(s), {} duplicate(s) skipped'.format(
             mode_name, source_id, n_added, len(rows) - n_added))
-        nml.rebuild_source_products(uploads_dir, entry, cfg, factory_text)
+        nml.rebuild_source_products(uploads_dir, entry, cfg, factory_text,
+                                    None if rejected else excluded_frames)
     nml.rebuild_central_index(uploads_dir, entries,
                               (cfg.get('VAST_REFERENCE_COPY') or '').strip())
     log('{}: done, {} row(s) appended'.format(mode_name, n_total))
@@ -467,7 +531,8 @@ def install_bad_region_list(work_dir, factory_text, camera, default_text):
 
 
 def measure_images_for_source(cfg, local_config_path, entry, images,
-                              uploads_dir, verdicts=None):
+                              uploads_dir, verdicts=None,
+                              excluded_frames=None):
     """Measure one source on a list of already-solved images inside a
     disposable VaST working copy (the manual backfill/rescan path), appending
     ledger rows in chunks so an interrupted run keeps its progress.
@@ -480,7 +545,10 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
     kept in the ledgers: a frame with a 'cloudy' row in any source's ledger
     is measured, and a detection or upper limit on it is recorded with the
     status 'cloudy' (the measured values kept), exactly as the ingest
-    records its own rows. Images already in the ledger are skipped whatever
+    records its own rows. A detection or upper limit on a frame excluded by
+    hand (excluded_frames: image core names, nml.excluded_frame_set; read
+    here when not given) is recorded as 'manual' in the same way.
+    Images already in the ledger are skipped whatever
     their status - a run_error row is replaced only by the ingest of a
     successful reprocessing run. The images are processed camera by camera,
     each camera's bad-region list in place for both the plate-solve pass and
@@ -493,6 +561,8 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
     factory_text = read_factory_text(cfg)
     if verdicts is None:
         verdicts = nml.RunVerdictResolver(uploads_dir, log=log)
+    if excluded_frames is None:
+        excluded_frames = nml.excluded_frame_set(uploads_dir, log)
     source_id = entry['source_id']
     source_dir = nml.source_dir_path(uploads_dir, source_id)
     _, already_measured = nml.read_ledger(source_dir)
@@ -517,6 +587,7 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
     todo = []
     rejected = []
     condemned_keys = set()
+    excluded_keys = set()
     n_in_progress = 0
     for key in keys_in_order:
         verdict, reason, origin, path = verdicts.verdict_for_copies(
@@ -539,12 +610,15 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
             todo.append(copies[key][0])
             if nml.image_core_name(key) in cloudy_frames:
                 condemned_keys.add(key)
+            elif nml.image_core_name(key) in excluded_frames:
+                excluded_keys.add(key)
     log('{}: {} image(s) to measure ({} of them condemned by the cloud check '
-        'of the ingest: recorded as cloudy), {} of rejected transient-search '
-        'runs to record without measuring, {} of runs in progress skipped '
-        '({} already in the ledger or duplicate)'.format(
-            source_id, len(todo), len(condemned_keys), len(rejected),
-            n_in_progress, len(images) - len(keys_in_order)))
+        'of the ingest: recorded as cloudy; {} excluded by hand: recorded as '
+        'manual), {} of rejected transient-search runs to record without '
+        'measuring, {} of runs in progress skipped ({} already in the ledger '
+        'or duplicate)'.format(
+            source_id, len(todo), len(condemned_keys), len(excluded_keys),
+            len(rejected), n_in_progress, len(images) - len(keys_in_order)))
     n_appended = 0
     if rejected:
         n_appended += record_without_measuring(
@@ -646,6 +720,9 @@ def measure_images_for_source(cfg, local_config_path, entry, images,
                     # the ingest's cloud verdict on this frame, applied the
                     # way the ingest applies it to its own rows
                     status = nml.CLOUDY_STATUS
+                elif key in excluded_keys and status in nml.MANUAL_RESTATUSED_STATUSES:
+                    # the frame was excluded by hand, for every source
+                    status = nml.MANUAL_STATUS
                 pending_rows.append(
                     {'basename': os.path.basename(img),
                      'jd': '{}'.format(jd if jd else 'na'),
@@ -753,27 +830,236 @@ def mode_rebuild_pages():
     try:
         _, entries = list_entries_or_exit()
         factory_text = read_factory_text(cfg)
+        try:
+            excluded_frames = set(prepare_excluded_frames(
+                'rebuild-pages', uploads_dir, entries, cfg, factory_text))
+        except nml.ExcludedFramesUnreadable as exc:
+            log('{} - nothing rebuilt'.format(exc))
+            return 1
         vast_dir = (cfg.get('VAST_REFERENCE_COPY') or '').strip()
         n = 0
         for entry in entries:
             if not os.path.isdir(nml.source_dir_path(uploads_dir,
                                                      entry['source_id'])):
                 continue
-            nml.rebuild_source_products(uploads_dir, entry, cfg, factory_text)
+            nml.rebuild_source_products(uploads_dir, entry, cfg, factory_text,
+                                        excluded_frames)
             n += 1
             log('{}: products rebuilt'.format(entry['source_id']))
-        nml.rebuild_central_index(uploads_dir, entries, vast_dir)
+        nml.rebuild_central_index(uploads_dir, entries, vast_dir,
+                                  excluded_frames)
         log('rebuilt {} source page(s) + the central index'.format(n))
         return 0
     finally:
         lock_fh.close()
 
 
-def mode_flag_measurement(image_basename, source_filter, restore):
-    """Manually exclude (or restore) the measurement(s) of one image in the
-    per-source ledgers and rebuild the affected products. See the module
-    docstring for the CLI semantics."""
-    action = 'restore' if restore else 'exclude'
+def _aavso_points(source_dir):
+    """{(JD, MAG)} of the records of a source's lightcurve_aavso.txt - what
+    the AAVSO robot reads."""
+    points = set()
+    try:
+        with open(os.path.join(source_dir, nml.AAVSO_BASENAME),
+                  errors='replace') as fh:
+            for line in fh:
+                if not line.strip() or line.startswith('#'):
+                    continue
+                parts = line.rstrip('\n').rsplit(',', 14)
+                if len(parts) == 15:
+                    points.add((parts[1], parts[2]))
+    except OSError:
+        pass
+    return points
+
+
+def rebuild_and_report(tag, uploads_dir, entry, cfg, factory_text, frames,
+                       own_cores=()):
+    """Rebuild the products of a source and log every published record that
+    the rebuild added or removed, compared with the lightcurve_aavso.txt on
+    disk before - except the records of the frames own_cores (the frame
+    being excluded or restored). Such a record changed for another reason:
+    the within-visit check judging a visit again, an exclusion applied now,
+    rows appended meanwhile - and nobody vetted it. Returns True when the
+    published records changed at all."""
+    source_dir = nml.source_dir_path(uploads_dir, entry['source_id'])
+    own_jds = set()
+    if own_cores:
+        rows, _ = nml.read_ledger(source_dir)
+        for row in rows:
+            if nml.image_core_name(row['basename']) in own_cores:
+                try:
+                    own_jds.add('{:.5f}'.format(float(row['jd'])))
+                except ValueError:
+                    pass
+    before = _aavso_points(source_dir)
+    nml.rebuild_source_products(uploads_dir, entry, cfg, factory_text, frames)
+    after = _aavso_points(source_dir)
+    for jd, mag in sorted(after - before):
+        if jd not in own_jds:
+            log('{}: {}: NOW PUBLISHED by this rebuild - check it, nobody has '
+                'vetted it: JD {} mag {}'.format(tag, entry['source_id'], jd,
+                                                 mag))
+    for jd, mag in sorted(before - after):
+        if jd not in own_jds:
+            log('{}: {}: withdrawn by this rebuild: JD {} mag {}'.format(
+                tag, entry['source_id'], jd, mag))
+    return before != after
+
+
+def apply_excluded_frames(tag, uploads_dir, entries, cfg, factory_text,
+                          frames):
+    """Bring the ledgers and products of every activated source in line with
+    the frames excluded by hand: flip the detections and upper limits on
+    those frames to 'manual' and rebuild the sources that changed or whose
+    products are older than their ledger (rebuild_and_report). Covers a
+    source re-added with its old registry directory, the rows of an ingest
+    that raced an exclusion and the one-time migration. Returns the number
+    of sources rebuilt."""
+    n_rebuilt = 0
+    for entry in entries:
+        source_id = entry['source_id']
+        source_dir = nml.source_dir_path(uploads_dir, source_id)
+        if not os.path.isdir(source_dir):
+            continue
+        rows, _ = nml.read_ledger(source_dir)
+        n = 0
+        for core in sorted(set(
+                nml.image_core_name(row['basename']) for row in rows
+                if row['status'] in nml.MANUAL_RESTATUSED_STATUSES) & frames):
+            n += nml.rewrite_measurement_status(uploads_dir, source_id, core)
+        if not (n or nml.products_stale(source_dir)):
+            continue
+        if n:
+            log('{}: {}: {} row(s) on frames excluded by hand flipped to '
+                '{}'.format(tag, source_id, n, nml.MANUAL_STATUS))
+        else:
+            log('{}: {}: products older than the ledger - rebuilding'.format(
+                tag, source_id))
+        rebuild_and_report(tag, uploads_dir, entry, cfg, factory_text, frames)
+        n_rebuilt += 1
+    return n_rebuilt
+
+
+def prepare_excluded_frames(tag, uploads_dir, entries, cfg, factory_text):
+    """The step every mode holding the global lock starts with: the listed
+    frames ({core name: note}), the list created first when there is none
+    yet (the one-time migration of the per-source exclusions made before),
+    and applied to every activated source (apply_excluded_frames). Raises
+    nml.ExcludedFramesUnreadable, with nothing changed."""
+    listed, _created = nml.ensure_excluded_frames_list(uploads_dir, log)
+    frames = set(listed)
+    if apply_excluded_frames(tag, uploads_dir, entries, cfg, factory_text,
+                             frames):
+        nml.rebuild_central_index(
+            uploads_dir, entries,
+            (cfg.get('VAST_REFERENCE_COPY') or '').strip(), frames)
+    return listed
+
+
+def mode_flag_measurement(image_name, restore):
+    """--exclude-measurement / --restore-measurement: exclude a frame by hand
+    for every monitored source on it, or restore it. The frame is added to
+    (removed from) nml.EXCLUDED_FRAMES_BASENAME, so the decision also holds
+    for the sources activated later; the rows on the frame in every
+    activated source's ledger are updated, and every source with a row on
+    the frame is rebuilt, its other published changes logged
+    (rebuild_and_report). See the module docstring for the CLI semantics."""
+    tag = '{}-measurement'.format('restore' if restore else 'exclude')
+    script_dir, cfg, uploads_dir, local_config_path = load_context()
+    if not os.path.isdir(nml.monitoring_root(uploads_dir)):
+        log('monitoring is not deployed on this machine (no {} directory)'
+            .format(nml.monitoring_root(uploads_dir)))
+        return 1
+    core = nml.image_core_name(image_name.strip())
+    if not core:
+        log('{}: "{}" is not an image name'.format(tag, image_name))
+        return 1
+    lock_fh = nml.acquire_global_lock(uploads_dir)
+    if lock_fh is None:
+        log('another monitoring reconcile/rescan is already running - '
+            'exiting (NOT queuing)')
+        return 1
+    try:
+        _, entries = list_entries_or_exit()
+        if not entries:
+            log('nothing to do: the monitoring list is missing or empty')
+            return 1
+        targets = [e for e in entries if os.path.isdir(
+            nml.source_dir_path(uploads_dir, e['source_id']))]
+        factory_text = read_factory_text(cfg)
+        vast_dir = (cfg.get('VAST_REFERENCE_COPY') or '').strip()
+        try:
+            listed = prepare_excluded_frames(tag, uploads_dir, entries, cfg,
+                                             factory_text)
+        except nml.ExcludedFramesUnreadable as exc:
+            log('{}: {} - nothing changed'.format(tag, exc))
+            return 1
+        list_path = nml.excluded_frames_path(uploads_dir)
+        list_changed = False
+        if restore:
+            if core in listed:
+                del listed[core]
+                list_changed = True
+        elif core not in listed:
+            # A guard against typos: the frame must have been measured
+            if not any(nml.ledger_has_frame(uploads_dir, e['source_id'], core)
+                       for e in targets):
+                log('{}: no activated source has a measurement on {} - '
+                    'nothing recorded (check the image name)'.format(
+                        tag, core))
+                return 1
+            listed[core] = '{} --exclude-measurement'.format(
+                time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))
+            list_changed = True
+        if list_changed:
+            nml.write_excluded_frames(uploads_dir, listed)
+            log('{}: {} {} {}'.format(
+                tag, core, 'removed from' if restore else 'added to',
+                list_path))
+        elif not restore:
+            log('{}: {} is already in {}'.format(tag, core, list_path))
+        frames = set(listed)
+        changed = list_changed
+        n_total = 0
+        n_rebuilt = 0
+        for entry in targets:
+            source_id = entry['source_id']
+            if not nml.ledger_has_frame(uploads_dir, source_id, core):
+                continue
+            n = nml.rewrite_measurement_status(uploads_dir, source_id, core,
+                                               restore=restore)
+            if n:
+                log('{}: {}: {} ledger row(s) updated for {}'.format(
+                    tag, source_id, n, core))
+                n_total += n
+            # Rebuilt whatever happened to its rows: a source whose products
+            # an interrupted run left behind, or whose row only the list
+            # held back, must follow the list too
+            if rebuild_and_report(tag, uploads_dir, entry, cfg, factory_text,
+                                  frames, own_cores=(core,)):
+                changed = True
+            n_rebuilt += 1
+        if n_rebuilt:
+            nml.rebuild_central_index(uploads_dir, entries, vast_dir, frames)
+        if restore and not (changed or n_total):
+            log('{}: {} was not excluded - nothing changed'.format(tag, core))
+            return 1
+        log('{}: done - {} is {} for every monitored source; {} ledger '
+            'row(s) updated, {} source(s) rebuilt'.format(
+                tag, core, 'restored' if restore else 'excluded', n_total,
+                n_rebuilt))
+        return 0
+    finally:
+        lock_fh.close()
+
+
+def mode_sync_exclusions():
+    """--sync-exclusions: the step every locked mode starts with
+    (prepare_excluded_frames: create the list if needed, apply it to every
+    activated source), plus a report of the 'manual' rows on frames that
+    are not listed - an exclusion left for one source only - with the
+    command that settles each. Idempotent."""
+    tag = 'sync-exclusions'
     script_dir, cfg, uploads_dir, local_config_path = load_context()
     if not os.path.isdir(nml.monitoring_root(uploads_dir)):
         log('monitoring is not deployed on this machine (no {} directory)'
@@ -789,42 +1075,33 @@ def mode_flag_measurement(image_basename, source_filter, restore):
         if not entries:
             log('nothing to do: the monitoring list is missing or empty')
             return 1
-        targets = []
-        for entry in entries:
-            if source_filter and entry['source_id'] != source_filter:
-                continue
-            if os.path.isdir(nml.source_dir_path(uploads_dir,
-                                                 entry['source_id'])):
-                targets.append(entry)
-        if source_filter and not targets:
-            log('{}-measurement: source {} is not in monitoring_list.txt or '
-                'not activated on this machine'.format(action, source_filter))
+        try:
+            frames = set(prepare_excluded_frames(
+                tag, uploads_dir, entries, cfg, read_factory_text(cfg)))
+        except nml.ExcludedFramesUnreadable as exc:
+            log('{}: {} - nothing changed'.format(tag, exc))
             return 1
-        factory_text = read_factory_text(cfg)
-        vast_dir = (cfg.get('VAST_REFERENCE_COPY') or '').strip()
-        n_total = 0
-        for entry in targets:
-            n = nml.rewrite_measurement_status(
-                uploads_dir, entry['source_id'], image_basename,
-                restore=restore)
-            if n:
-                log('{}-measurement: {}: {} ledger row(s) updated for '
-                    '{}'.format(action, entry['source_id'], n,
-                                image_basename))
-                nml.rebuild_source_products(uploads_dir, entry, cfg,
-                                            factory_text)
-                n_total += n
-        if n_total:
-            nml.rebuild_central_index(uploads_dir, entries, vast_dir)
-            log('{}-measurement: done, {} row(s) updated'.format(
-                action, n_total))
-            return 0
-        log('{}-measurement: no matching ledger row for {} in {} source(s)'
-            ' - nothing changed (check the image basename{})'.format(
-                action, image_basename, len(targets),
-                '' if restore else '; rows already excluded or with a'
-                ' non-detection status are left as they are'))
-        return 1
+        n_unlisted = 0
+        for entry in entries:
+            source_id = entry['source_id']
+            source_dir = nml.source_dir_path(uploads_dir, source_id)
+            if not os.path.isdir(source_dir):
+                continue
+            rows, _ = nml.read_ledger(source_dir)
+            for core in sorted(set(
+                    nml.image_core_name(row['basename']) for row in rows
+                    if row['status'] == nml.MANUAL_STATUS) - frames):
+                n_unlisted += 1
+                log('{}: {}: {} is excluded for this source only (a manual '
+                    'row, the frame is not listed): --exclude-measurement {} '
+                    'excludes it for every source, --restore-measurement {} '
+                    'publishes it again'.format(tag, source_id, core, core,
+                                                core))
+        log('{}: done - {} frame(s) excluded by hand ({}), {} exclusion(s) '
+            'left for one source only'.format(
+                tag, len(frames), nml.excluded_frames_path(uploads_dir),
+                n_unlisted))
+        return 0
     finally:
         lock_fh.close()
 
@@ -881,6 +1158,12 @@ def mode_set_threshold(source_selector, threshold):
             log('detection-threshold: source {} is not activated on this '
                 'machine'.format(entry['source_id']))
             return 1
+        try:
+            prepare_excluded_frames('detection-threshold', uploads_dir,
+                                    entries, cfg, read_factory_text(cfg))
+        except nml.ExcludedFramesUnreadable as exc:
+            log('detection-threshold: {} - nothing changed'.format(exc))
+            return 1
         action = nml.write_detection_threshold(source_dir, threshold)
         log('detection-threshold: {}: {}'.format(entry['source_id'],
                                                  action))
@@ -918,6 +1201,19 @@ def _run_manual_mode(mode, source_selector):
     # IMAGE_DATA_ROOT is listed once
     verdicts = nml.RunVerdictResolver(uploads_dir, log=log)
     try:
+        # The frames excluded by hand, read once: --exclude-measurement and
+        # --restore-measurement take the global lock held for this whole run
+        try:
+            excluded_frames = set(prepare_excluded_frames(
+                mode, uploads_dir, entries, cfg, factory_text))
+        except nml.ExcludedFramesUnreadable as exc:
+            log('{} - not starting: the measurements on frames excluded by '
+                'hand would be recorded as measured'.format(exc))
+            return 1
+        if excluded_frames:
+            log('{} frame(s) excluded by hand: measurements on them are '
+                'recorded as {}'.format(len(excluded_frames),
+                                        nml.MANUAL_STATUS))
         if mode == 'reconcile':
             selected = entries
         else:
@@ -971,20 +1267,22 @@ def _run_manual_mode(mode, source_selector):
             if images:
                 n_new = measure_images_for_source(cfg, local_config_path,
                                                   entry, images, uploads_dir,
-                                                  verdicts)
+                                                  verdicts, excluded_frames)
             if mode == 'reconcile':
                 with open(marker, 'w'):
                     pass
             if n_new > 0 or not os.path.exists(
-                    os.path.join(source_dir, 'index.html')):
+                    os.path.join(source_dir, 'index.html')) or \
+                    nml.products_stale(source_dir):
                 nml.rebuild_source_products(uploads_dir, entry, cfg,
-                                            factory_text)
+                                            factory_text, excluded_frames)
                 log('{}: {} new measurement(s), products rebuilt'.format(
                     source_id, n_new))
             else:
                 log('{}: up to date'.format(source_id))
         nml.rebuild_central_index(uploads_dir, entries,
-                              (cfg.get('VAST_REFERENCE_COPY') or '').strip())
+                                  (cfg.get('VAST_REFERENCE_COPY') or '').strip(),
+                                  excluded_frames)
         log('central index rebuilt')
         return 0
     finally:
@@ -1030,16 +1328,17 @@ def main(argv):
         return mode_set_threshold(argv[2], None)
     if len(argv) >= 3 and argv[1] in ('--exclude-measurement',
                                       '--restore-measurement'):
-        source_filter = None
-        if len(argv) >= 5 and argv[3] == '--source':
-            source_filter = argv[4]
-        elif len(argv) >= 4:
-            sys.stderr.write('unrecognized extra arguments for {} (expected'
-                             ' --source <source_id>)\n'.format(argv[1]))
+        if len(argv) > 3:
+            sys.stderr.write(
+                '{} takes one image name and acts on every monitored source '
+                'on that frame; extra arguments ({}) are not accepted - '
+                '--source no longer exists\n'.format(
+                    argv[1], ' '.join(argv[3:])))
             return 1
         return mode_flag_measurement(
-            argv[2], source_filter,
-            restore=(argv[1] == '--restore-measurement'))
+            argv[2], restore=(argv[1] == '--restore-measurement'))
+    if len(argv) >= 2 and argv[1] == '--sync-exclusions':
+        return mode_sync_exclusions()
     sys.stderr.write(__doc__)
     return 1
 
