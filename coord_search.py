@@ -75,7 +75,8 @@ COORDS_REGEX = re.compile(r'^[0-9 :+\-.\t]{3,80}$')
 # both pages at once.
 import nmw_coord_lib as ncl
 from nmw_coord_lib import (
-    html_escape, _PAGE_CSS, back_link_url, form_page_url, emit_redirect,
+    html_escape, _PAGE_CSS, main_page_url, page_top_html, page_title_html,
+    page_end_html, back_link_url, form_page_url, emit_redirect,
     emit_message_page, parse_coordinates, read_config_vars,
     acquire_concurrency_slot, run_sky2xy_scan, get_image_metadata,
     zoomout_png_dims, make_zoomout_thumbnail, make_zoomin_thumbnail,
@@ -368,7 +369,10 @@ def main():
             # Push past Apache's CGI output buffer so the heading shows up
             # immediately rather than waiting for more data.
             print("<!-- {} -->".format(' ' * 4000))
-            print("<h2>{}</h2>".format(html_escape(page_title)))
+            print(page_top_html(main_page_url(), [
+                ('Main page', main_page_url()),
+                ('Reference images', form_page_url())]))
+            print(page_title_html(page_title))
             print("<p>Listing reference images from "
                   "<span class='code'>{}</span> ...</p>".format(
                       html_escape(ref_dir)), flush=True)
@@ -473,7 +477,7 @@ def main():
             print("<p style='color: #888; font-size: 90%;'>"
                   "Page generated in {:.1f} s.</p>".format(
                       time.time() - request_start), flush=True)
-            print("</body></html>", flush=True)
+            print(page_end_html(), flush=True)
             return  # done with list-all flow
 
         # ---- Coord-search mode (streaming).
@@ -483,7 +487,10 @@ def main():
         print(_PAGE_CSS)
         print("</head><body>")
         print("<!-- {} -->".format(' ' * 4000))
-        print("<h2>{}</h2>".format(html_escape(page_title)))
+        print(page_top_html(main_page_url(), [
+            ('Main page', main_page_url()),
+            ('Reference images', form_page_url())]))
+        print(page_title_html(page_title))
         print("<p>Searched for R.A. <b>{}</b>, Dec. <b>{}</b> (J2000) "
               "in <span class='code'>{}</span></p>".format(
                   html_escape(ra), html_escape(dec), html_escape(ref_dir)),
@@ -599,7 +606,7 @@ def main():
         print("<p style='color: #888; font-size: 90%;'>"
               "Page generated in {:.1f} s.</p>".format(
                   time.time() - request_start), flush=True)
-        print("</body></html>", flush=True)
+        print(page_end_html(), flush=True)
     finally:
         try:
             slot.close()  # releases the flock

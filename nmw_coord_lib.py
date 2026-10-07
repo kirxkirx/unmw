@@ -67,22 +67,71 @@ def field_name_from_fits(path):
 # move_to_htdocs/unmw.css they deliberately use a sans-serif font with
 # lining digits and black-on-white contrast. Only the link colors and the
 # heading accent bar are shared with the static pages.
-_PAGE_CSS = """<style type="text/css">
-body { color: #000; background: #fff;
- font-family: arial, helvetica, sans-serif;
- font-size: 17px; line-height: 1.5;
- margin: 3mm 10mm 3mm 10mm; }
-h2 { padding-left: 10px; border-left: 4px solid #b5451b; }
-.code { font-family: courier, monospace; background: #eee; color: #000;
- padding: 0 3px; }
-pre { font-size: 15px; line-height: 1.45; overflow-x: auto; }
-table.main { border-spacing: 5pt; border-collapse: collapse; }
-table.main th, table.main td { padding: 4pt 10pt; border: 1px solid #ccc;
- text-align: left; vertical-align: top; }
-.notice { background: #fff6cc; padding: 6pt; margin-bottom: 10pt; }
-a:link, a:visited, a:active { color: #1a4d8f; text-decoration: none; }
-a:hover { color: #b5451b; text-decoration: underline; }
-</style>"""
+# The page style lives in move_to_htdocs/unmw.css (the static pages link to
+# it; the generated pages embed it so they stay self-contained and the CGI
+# pages need no extra request). The minimal fallback below only keeps the
+# generated pages readable if the stylesheet is ever missing from the
+# checkout.
+_FALLBACK_CSS = """body { font-family: Inter, "Helvetica Neue", Helvetica, Arial, sans-serif;
+ font-size: 17px; line-height: 1.5; margin: 0; }
+.page { max-width: 1180px; margin: 0 auto; padding: 24px; }
+.topbar { background: #000; color: #fff; padding: 12px 24px; border-bottom: 4px solid #e90802; }
+.topbar a { color: #fff; font-weight: bold; text-decoration: none; margin-right: 18px; }
+.code, pre { font-family: "Red Hat Mono", Menlo, Consolas, monospace; }
+a { color: #d60000; }"""
+
+
+def _load_page_css():
+    css_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                            'move_to_htdocs', 'unmw.css')
+    try:
+        with open(css_path) as fh:
+            return fh.read()
+    except OSError:
+        return _FALLBACK_CSS
+
+
+_PAGE_CSS = '<style type="text/css">\n{}\n</style>'.format(_load_page_css())
+MAIN_PAGE_PATH = '/unmw/index.html'
+_SURVEY_NAME_CACHE = []
+
+
+def survey_name():
+    """Survey name shown in the black band of every page: SURVEY_NAME_TO_DISPLAY
+    from local_config.sh (the same setting generate_htdocs.sh uses for the
+    static pages), 'NMW' when unset. Read once per process."""
+    if not _SURVEY_NAME_CACHE:
+        name = read_config_vars('SURVEY_NAME_TO_DISPLAY').get(
+            'SURVEY_NAME_TO_DISPLAY', '').strip()
+        _SURVEY_NAME_CACHE.append(name or 'NMW')
+    return _SURVEY_NAME_CACHE[0]
+
+
+def page_top_html(main_href, nav_links=(), wide=True):
+    """The black band with the survey name linking to the main page plus the
+    page's own navigation links, followed by the opening <main> tag. The
+    caller closes it with page_end_html(); an unclosed <main> is also fine
+    for the browser, so pages that bail out early stay readable."""
+    nav = ''.join('<a href="{}">{}</a>'.format(html_escape(href),
+                                               html_escape(label))
+                  for label, href in nav_links)
+    return ('<header class="topbar"><a class="brand" href="{}">{}'
+            ' <small>New Milky Way survey</small></a><nav>{}</nav></header>\n'
+            '<main class="page{}">\n'.format(
+                html_escape(main_href), html_escape(survey_name()), nav,
+                ' wide' if wide else ''))
+
+
+def page_title_html(title, subtitle=None):
+    out = '<h1>{}</h1>\n'.format(html_escape(title))
+    if subtitle:
+        out += '<p class="subtitle">{}</p>\n'.format(html_escape(subtitle))
+    return out
+
+
+def page_end_html():
+    return '</main></body></html>'
+
 
 
 def back_link_url():
@@ -91,6 +140,11 @@ def back_link_url():
     if referer:
         return referer
     return DEFAULT_FORM_PATH
+
+
+def main_page_url():
+    """Absolute URL of the main page, derived like form_page_url()."""
+    return _absolute_url(MAIN_PAGE_PATH)
 
 
 def form_page_url():
@@ -105,6 +159,10 @@ def form_page_url():
     Falls back to the bare path (DEFAULT_FORM_PATH) when the request
     environment does not identify the host.
     """
+    return _absolute_url(DEFAULT_FORM_PATH)
+
+
+def _absolute_url(path):
     # Scheme: HTTPS is "on"/"1" behind TLS; some servers set REQUEST_SCHEME.
     scheme = os.environ.get('REQUEST_SCHEME', '').strip().lower()
     if not scheme:
@@ -123,8 +181,8 @@ def form_page_url():
             else:
                 host = name
     if not host:
-        return DEFAULT_FORM_PATH
-    return '{}://{}{}'.format(scheme, host, DEFAULT_FORM_PATH)
+        return path
+    return '{}://{}{}'.format(scheme, host, path)
 
 
 def emit_redirect(url):
@@ -146,10 +204,12 @@ def emit_message_page(title, body_html, status_line=None):
     print("<html><head><title>{}</title>".format(html_escape(title)))
     print(_PAGE_CSS)
     print("</head><body>")
-    print("<h2>{}</h2>".format(html_escape(title)))
+    print(page_top_html(main_page_url(), [('Main page', main_page_url())],
+                        wide=False))
+    print(page_title_html(title))
     print(body_html)
     print("<br><br><a href='{}'>Search again</a>".format(html_escape(back_link_url())))
-    print("</body></html>")
+    print(page_end_html())
 
 
 # ---------- coordinate parsing ----------

@@ -8,6 +8,12 @@
 </head>
 <body>
 
+<header class="topbar">
+<a class="brand" href="index.html"><span class="brand-name">NMW</span> <small>New Milky Way survey</small></a>
+<nav><a href="index.html">Main page</a></nav>
+</header>
+
+<main class="page">
 <h1>Forced photometry on recent images</h1>
 <p class="subtitle">Lightcurve at a sky position from the latest survey images</p>
 
@@ -21,39 +27,25 @@ zoom-in cutout marked with a red circle of the aperture used, and a link
 to the FITS file, plus a copy-paste ASCII table. The recent images are
 used as they come: some frames may be affected by clouds.</p>
 
-<table style="margin: 14px auto 0; border-spacing: 5pt;">
-<tr>
-  <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec.):</td>
-  <td style="padding: 0;">
-    <input type="text" name="coords" size="36" placeholder="19:20:11.64 +01:40:40.6">
-  </td>
-</tr>
-<tr>
-  <td style="text-align: right; padding: 0 10pt;">Look back (days):</td>
-  <td style="padding: 0;">
-    <input type="number" name="window_days" min="1" max="30" value="7" style="width: 5em;">
-  </td>
-</tr>
-<tr>
-  <td style="text-align: right; padding: 0 10pt;">Max images:</td>
-  <td style="padding: 0;">
-    <input type="number" name="max_images" min="1" max="50" value="20" style="width: 5em;">
-  </td>
-</tr>
-<!-- The calibration band is always auto-derived from the camera settings,
-     so no band selector is shown. Omitting the 'band' field makes the
-     server default to auto. -->
-<tr>
-  <td style="padding: 0;"></td>
-  <td style="padding: 0;">
-    <button type="button" id="max-lookback-button">Max lookback</button>
+<div class="form-grid">
+  <label for="coords">Coordinates (R.A. Dec.)</label>
+  <div><input type="text" name="coords" id="coords" size="36" placeholder="19:20:11.64 +01:40:40.6"></div>
+  <label for="window_days">Look back (days)</label>
+  <div><input type="number" name="window_days" id="window_days" min="1" max="30" value="7" style="width: 5em;"></div>
+  <label for="max_images">Max images</label>
+  <div><input type="number" name="max_images" id="max_images" min="1" max="50" value="20" style="width: 5em;"></div>
+  <!-- The calibration band is always auto-derived from the camera settings,
+       so no band selector is shown. Omitting the 'band' field makes the
+       server default to auto. -->
+  <span></span>
+  <div class="btn-row">
+    <button type="button" class="secondary" id="max-lookback-button">Max lookback</button>
     <input type="submit" id="forced-phot-button" value="Measure">
     <span id="forced-phot-working" class="working">Working...</span>
-  </td>
-</tr>
-</table>
+  </div>
+</div>
 
-<p class="formats">
+<div class="formats">
 Accepted coordinate formats:
 <ul>
 <li>Sexagesimal with colons: <span class="code">19:20:11.64 +01:40:40.6</span></li>
@@ -64,9 +56,9 @@ The Dec. sign may be <span class="code">-</span>, <span class="code">+</span>, o
 The calibration band is always derived automatically from the camera settings.
 <br>Press <span class="code">Max lookback</span> to set the day window and the maximum
 image count to the largest values allowed.
-</p>
+</div>
 
-<p class="secondary" style="text-align: center;">
+<p class="secondary">
 Measuring many images can take a while, since each image is calibrated and
 measured in turn. Please be patient after pressing Measure.
 </p>
@@ -75,7 +67,9 @@ measured in turn. Please be patient after pressing Measure.
 
 <div class="footer">
 <p><a href="index.html">Back to the main page</a></p>
+<p><span class="brand-name">NMW</span></p>
 </div>
+</main>
 
 <script type="text/javascript">
 (function () {

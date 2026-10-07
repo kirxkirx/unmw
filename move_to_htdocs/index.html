@@ -5,42 +5,54 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NMW transient search, image archive and photometry</title>
 <link rel="stylesheet" type="text/css" href="unmw.css">
-<style type="text/css">
-body { font-family: Georgia, "Times New Roman", serif; font-size: 18px; }
-p { margin: 4px 0 0 14px; }
-</style>
 </head>
 <body>
 
+<header class="topbar">
+<a class="brand" href="index.html"><span class="brand-name">NMW</span> <small>New Milky Way survey</small></a>
+<nav><a href="uploads/monitoring/index.html">Monitored sources</a><a href="coord_search.html">Reference images</a></nav>
+</header>
+
+<main class="page">
 <h1>NMW transient search, image archive and photometry</h1>
 <p class="subtitle">New Milky Way survey data access</p>
 
+<div class="entry">
 <h2><a href="uploads/">Transient candidate lists and processing logs</a></h2>
 <p>Per-night pages listing the candidate transients found in each
 processed field, together with the processing logs.</p>
+</div>
 
+<div class="entry">
 <h2><a href="uploads/monitoring/index.html">Monitored sources</a></h2>
 <p>Lightcurves of the sources in the monitoring list, updated after every
 processed image of their fields.</p>
+</div>
 
+<div class="entry">
 <h2><a href="coord_forced_photometry.html">Forced photometry on recent
 images</a></h2>
 <p>Measure the brightness at any sky position across all images taken
 during the last week. The recent images are used as they come: some
 frames may be affected by clouds.</p>
+</div>
 
 <!-- ARCHIVE_PHOTOMETRY_SECTION_BEGIN
      generate_htdocs.sh removes everything between these two marker comments
      when IMAGE_ARCHIVE_DIR is not configured in local_config.sh -->
+<div class="entry">
 <h2><a href="archive_forced_photometry.html">Forced photometry on the
 archived images</a></h2>
 <p>Measure the brightness at any sky position across the long-term image
 archive. The archive is expected to include only good-quality frames.</p>
+</div>
 <!-- ARCHIVE_PHOTOMETRY_SECTION_END -->
 
+<div class="entry">
 <h2><a href="coord_search.html">Reference images</a></h2>
 <p>Browse all reference images, or find which fields cover a particular
 sky position.</p>
+</div>
 
 <!-- MANUAL_UPLOAD_SECTION_BEGIN
      generate_htdocs.sh removes everything between these two marker comments
@@ -51,6 +63,7 @@ processing</a> (rarely needed - normally the survey images are uploaded
 automatically by the telescope control computer).</p>
 </div>
 <!-- MANUAL_UPLOAD_SECTION_END -->
+</main>
 
 </body>
 </html>

@@ -55,7 +55,8 @@ import urllib.parse
 
 import nmw_coord_lib as ncl
 from nmw_coord_lib import (
-    html_escape, _PAGE_CSS, form_page_url, emit_redirect,
+    html_escape, _PAGE_CSS, main_page_url, page_top_html, page_title_html,
+    page_end_html, form_page_url, emit_redirect,
     emit_message_page, parse_coordinates, read_config_vars,
     acquire_concurrency_slot, run_sky2xy_scan, field_name_from_fits,
 )
@@ -325,7 +326,10 @@ def main():
               "</style>")
         print("</head><body>")
         print("<!-- {} -->".format(' ' * 4000))  # past Apache's CGI buffer
-        print("<h2>{}</h2>".format(html_escape(page_title)))
+        print(page_top_html(main_page_url(), [
+            ('Main page', main_page_url()),
+            ('Archival photometry', form_page_url())]))
+        print(page_title_html(page_title))
         range_text = ''
         if date_from or date_to:
             range_text = "; UT date range {} .. {}".format(
@@ -347,7 +351,7 @@ def main():
             print("<div class='notice'>ERROR: reference-field scan failed: "
                   "{} ({}).</div>".format(
                       html_escape(type(err).__name__), html_escape(err)))
-            print("</body></html>")
+            print(page_end_html())
             return
         covering_fields = set(field_name_from_fits(p)
                               for p, _x, _y in matches)
@@ -361,7 +365,7 @@ def main():
                   "specified sky position.</div>")
             print("<br><a href='{}'>Submit another position</a>".format(
                 html_escape(form_page_url())))
-            print("</body></html>")
+            print(page_end_html())
             return
         print("<p>Covering field(s): <b>{}</b></p>{}".format(
             html_escape(', '.join(sorted(covering_fields))), _FLUSH_PAD),
@@ -377,7 +381,7 @@ def main():
                   "images of these fields.</div>")
             print("<br><a href='{}'>Submit another position</a>".format(
                 html_escape(form_page_url())))
-            print("</body></html>")
+            print(page_end_html())
             return
         print("<p>{} archive image(s) of the covering field(s) found.</p>{}"
               .format(len(snapshot_paths), _FLUSH_PAD), flush=True)
@@ -422,7 +426,7 @@ def main():
                   "after applying the date range.</div>")
             print("<br><a href='{}'>Submit another position</a>".format(
                 html_escape(form_page_url())))
-            print("</body></html>")
+            print(page_end_html())
             return
 
         # ---- Prior jobs at this position: purely informational. A
@@ -495,7 +499,7 @@ def main():
                       "prepared; follow it instead: <a href='{}'>{}</a>"
                       "</div>".format(html_escape(_status_url(dup_id)),
                                       html_escape(dup_id)))
-                print("</body></html>")
+                print(page_end_html())
                 return
             n_mine = sum(1 for _jid, _d, _st, rq in pending
                          if rq.get('remote_addr') == remote_addr)
@@ -506,7 +510,7 @@ def main():
                       .format(len(pending), n_mine))
                 print("<br><a href='{}'>Queue status</a>".format(
                     html_escape(_overview_url())))
-                print("</body></html>")
+                print(page_end_html())
                 return
             try:
                 job_id, _job_dir = apl.create_job(request_dict)
@@ -514,7 +518,7 @@ def main():
                 print("<div class='notice'>ERROR: could not create the job "
                       "directory: {} ({}).</div>".format(
                           html_escape(type(err).__name__), html_escape(err)))
-                print("</body></html>")
+                print(page_end_html())
                 return
         finally:
             if claim is not None:
@@ -545,7 +549,7 @@ def main():
         print("<script type='text/javascript'>setTimeout(function() {{ "
               "window.location = '{}'; }}, 5000);</script>".format(
                   status_url.replace("'", "\\'")))
-        print("</body></html>")
+        print(page_end_html())
     finally:
         slot.close()
 

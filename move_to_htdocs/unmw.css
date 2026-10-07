@@ -1,25 +1,115 @@
-/* Shared style for the NMW transient search static pages.
-   The base font is a sans-serif with lining digits so coordinates and
-   dates read cleanly; the main page (index.html) is the one page that
-   overrides it to the serif look in its own style block. */
-body { max-width: 620px; margin: 0 auto; padding: 30px 18px 48px;
- background: #fffdf8; color: #1a1a1a;
- font-family: arial, helvetica, sans-serif;
- font-size: 17px; line-height: 1.55; }
-h1 { text-align: center; font-size: 29px; font-weight: normal;
- margin: 6px 0 8px; }
-.subtitle { text-align: center; color: #666; font-size: 16px;
- margin: 0 0 34px; font-style: italic; }
-h2 { font-size: 20px; font-weight: bold; margin: 26px 0 4px;
- padding-left: 10px; border-left: 4px solid #b5451b; }
+/* Shared style for every NMW web page: the static pages in this directory
+   link to this file, and the Python-generated pages (CGI results and the
+   monitoring pages) embed its text inline (nmw_coord_lib._PAGE_CSS reads
+   this file), so edit the look in this one place.
+
+   Texas Tech University web palette: scarlet #E90802 for accents (#D60000
+   for link text, which has better contrast on white), black, white, light
+   gray #EDEDED, dark gray #333333, medium gray #757575. Fonts follow the
+   TTU web template's own stack: Neue Plak -> Inter -> Tahoma for display,
+   Inter for body and UI, Red Hat Mono for monospace; Inter and Red Hat
+   Mono come from Google Fonts and fall back to system faces when the
+   visitor's browser cannot reach fonts.googleapis.com. Every face in every
+   stack has lining figures (digits of equal height); coordinates, dates
+   and tables additionally use tabular figures so columns line up. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Red+Hat+Mono:wght@400;500&display=swap");
+
+:root {
+  --scarlet: #e90802; --scarlet-dark: #d60000; --ink: #1b1b1b; --ink-2: #333333;
+  --muted: #757575; --rule: #dadada; --panel: #ededed; --panel-2: #f6f6f6; --paper: #fdfdfd;
+  --sans: Inter, "Helvetica Neue", Helvetica, Arial, Tahoma, sans-serif;
+  --mono: "Red Hat Mono", Menlo, Consolas, "Liberation Mono", "DejaVu Sans Mono", monospace;
+}
+html { background: var(--paper); }
+body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans);
+  font-size: 17px; line-height: 1.55; font-variant-numeric: lining-nums; }
+
+/* black band with the scarlet rule, as in the TTU global template */
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 12px 24px; background: #000; color: #fff; border-bottom: 4px solid var(--scarlet); }
+.topbar .brand { font-weight: 800; font-size: 19px; letter-spacing: -0.01em; color: #fff; text-decoration: none; }
+.topbar .brand small { font-weight: 400; color: #b3b3b3; margin-left: 10px; font-size: 14px; letter-spacing: 0; }
+.topbar nav { display: flex; gap: 18px; flex-wrap: wrap; font-size: 14.5px; font-weight: 600; }
+.topbar nav a { color: #fff; text-decoration: none; border-bottom: 2px solid transparent; }
+.topbar nav a:hover { color: #fff; border-bottom-color: var(--scarlet); text-decoration: none; }
+
+/* page body: narrow measure for text and form pages, wide for data pages */
+.page { max-width: 720px; margin: 0 auto; padding: 28px 24px 48px; box-sizing: border-box; }
+.page.wide { max-width: 1180px; }
+@media (max-width: 480px) { .page { padding: 20px 16px 40px; } .topbar { padding: 10px 16px; } }
+
+h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; margin: 0 0 6px; }
+.subtitle { color: var(--muted); font-size: 17px; margin: 0 0 26px; }
+h3 { font-size: 19px; font-weight: 700; margin: 30px 0 10px; padding-bottom: 5px;
+  border-bottom: 2px solid var(--scarlet); display: inline-block; }
 p { margin: 10px 0 0; }
-a:link, a:visited { color: #1a4d8f; text-decoration: none; }
-a:hover, a:active { color: #b5451b; text-decoration: underline; }
-.code { font-family: "Courier New", Courier, monospace; font-size: 15px;
- background: #f2ecdd; color: #1a1a1a; padding: 0 3px; }
-.formats { margin-left: 8pt; }
-.working { margin-left: 1em; color: #888; visibility: hidden; }
-.secondary { color: #666; }
-.footer { margin-top: 40px; padding-top: 12px; border-top: 1px solid #ddd;
- text-align: center; font-size: 15px; color: #666; }
+a:link, a:visited { color: var(--scarlet-dark); text-decoration: none; }
+a:hover, a:active { color: #000; text-decoration: underline; text-decoration-color: var(--scarlet); }
+:focus-visible { outline: 2px solid var(--scarlet); outline-offset: 2px; }
+
+/* main page entries */
+.entry { border-left: 4px solid var(--scarlet); padding: 2px 0 2px 16px; margin: 22px 0; }
+.entry h2 { font-size: 21px; font-weight: 700; margin: 0 0 4px; line-height: 1.3; }
+.entry h2 a { color: var(--ink); }
+.entry h2 a:hover { color: var(--scarlet-dark); }
+.entry p { margin: 0; color: var(--ink-2); }
+
+/* inline code, coordinates, preformatted tables */
+.code { font-family: var(--mono); font-size: 0.92em; background: var(--panel); padding: 1px 5px;
+  border-radius: 2px; font-variant-numeric: lining-nums tabular-nums; }
+pre { font-family: var(--mono); font-size: 14.5px; line-height: 1.5; background: var(--panel-2);
+  border: 1px solid var(--rule); padding: 12px 14px; overflow-x: auto; margin: 8px 0 0;
+  font-variant-numeric: lining-nums tabular-nums; }
+
+/* data tables (class "data" on the monitoring pages, "main" on the CGI result pages) */
+.table-wrap { overflow-x: auto; margin-top: 12px; }
+table.data, table.main { border-collapse: collapse; width: 100%; font-size: 15.5px; }
+table.data th, table.main th { text-align: left; background: #000; color: #fff; font-weight: 600;
+  padding: 8px 10px; border-bottom: 3px solid var(--scarlet); white-space: nowrap; vertical-align: bottom; }
+table.data td, table.main td { padding: 7px 10px; border-bottom: 1px solid var(--rule); vertical-align: top;
+  text-align: left; }
+table.data tr:hover td, table.main tr:hover td { background: var(--panel-2); }
+table.data td a, table.main td a { color: var(--ink); text-decoration: underline;
+  text-decoration-color: var(--scarlet); text-underline-offset: 3px; }
+table.data td a:hover, table.main td a:hover { color: var(--scarlet-dark); }
+table.data .mono, table.main .mono { font-family: var(--mono); font-size: 14.5px; white-space: nowrap;
+  font-variant-numeric: lining-nums tabular-nums; }
+table.data .num, table.main .num { text-align: right; font-variant-numeric: lining-nums tabular-nums; }
+tr.skipped td { color: var(--muted); font-size: 90%; background: var(--panel-2); }
+
+/* key/value block on the source pages */
+dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 18px; margin: 14px 0 0; font-size: 16px; }
+dl.meta dt { color: var(--muted); font-size: 12.5px; letter-spacing: 0.07em; text-transform: uppercase; padding-top: 3px; }
+dl.meta dd { margin: 0; }
+@media (max-width: 480px) { dl.meta { grid-template-columns: 1fr; gap: 0; } dl.meta dd { margin-bottom: 8px; } }
+
+.notice { background: var(--panel-2); border-left: 4px solid #000; padding: 12px 16px; margin: 24px 0 0; }
+.notice p, .notice ul { margin: 8px 0 0; }
+.secondary { color: var(--muted); }
+.plot { margin: 8px 0 0; }
+.plot img { max-width: 100%; height: auto; display: block; border: 1px solid var(--rule); }
+ul li { margin: 4px 0; }
+
+/* forms */
+.form-grid { display: grid; grid-template-columns: max-content 1fr; gap: 12px 14px; align-items: center; margin: 18px 0 0; }
+.form-grid label { text-align: right; color: var(--ink-2); }
+@media (max-width: 480px) { .form-grid { grid-template-columns: 1fr; gap: 6px; } .form-grid label { text-align: left; } }
+input[type=text], input[type=number], input[type=date], select { font: inherit; font-size: 16px; padding: 7px 10px;
+  border: 1px solid #b3b3b3; border-radius: 2px; background: #fff; color: var(--ink); font-family: var(--mono);
+  font-variant-numeric: lining-nums tabular-nums; }
+input[type=text] { width: 100%; max-width: 34ch; box-sizing: border-box; }
+input[type=file] { font: inherit; }
+.btn, input[type=submit], button { font: inherit; font-size: 15.5px; font-weight: 600; padding: 8px 16px;
+  border: 1px solid #000; border-radius: 2px; background: #000; color: #fff; cursor: pointer; }
+.btn:hover, input[type=submit]:hover, button:hover { background: var(--scarlet); border-color: var(--scarlet); }
+.btn.secondary, button.secondary { background: #fff; color: var(--ink); }
+.btn.secondary:hover, button.secondary:hover { background: var(--panel); color: var(--ink); border-color: #000; }
+input[type=submit]:disabled, button:disabled { background: var(--muted); border-color: var(--muted); cursor: default; }
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.working { color: var(--muted); visibility: hidden; }
+.formats { margin-top: 18px; }
+.formats ul { margin: 6px 0 0; padding-left: 22px; }
+
+.footer { margin-top: 48px; padding-top: 14px; border-top: 1px solid var(--rule); color: var(--muted);
+  font-size: 14.5px; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
 .footer p { margin: 0; }

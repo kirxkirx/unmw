@@ -55,7 +55,9 @@ import time
 import urllib.parse
 
 import nmw_coord_lib as ncl
-from nmw_coord_lib import field_name_from_fits, html_escape, _PAGE_CSS
+from nmw_coord_lib import (field_name_from_fits, html_escape, _PAGE_CSS,
+                           MAIN_PAGE_PATH, page_top_html, page_title_html,
+                           page_end_html)
 from nmw_forced_phot_lib import _looks_like_fits, get_jd_and_atel_date
 
 TEMP_PARENT = 'uploads'                 # mirrors upload.py's upload_dir
@@ -626,10 +628,11 @@ RESULTS_PAGE_LOCAL_CSS = ("<style type='text/css'>"
 
 
 def results_page_head(title):
-    return ("<html><head><title>{}</title>\n{}\n{}\n</head><body>\n"
-            "<h2>{}</h2>\n".format(html_escape(title), _PAGE_CSS,
-                                   RESULTS_PAGE_LOCAL_CSS,
-                                   html_escape(title)))
+    return ("<html><head><title>{}</title>\n{}\n{}\n</head><body>\n{}{}".format(
+        html_escape(title), _PAGE_CSS, RESULTS_PAGE_LOCAL_CSS,
+        page_top_html(MAIN_PAGE_PATH, [('Main page', MAIN_PAGE_PATH),
+                                       ('Archival photometry', FORM_PAGE_PATH)]),
+        page_title_html(title)))
 
 
 def job_summary_html(job_id, request):
@@ -711,7 +714,7 @@ def write_failure_page(job_dir, job_id, request, error_text):
                          "failure:</p><pre>{}</pre>".format(
                              html_escape(tail)))
         parts.append(job_links_html(job_id, request or {}))
-        parts.append("</body></html>\n")
+        parts.append(page_end_html() + "\n")
         write_index_html_atomic(job_dir, '\n'.join(parts))
     except OSError:
         pass

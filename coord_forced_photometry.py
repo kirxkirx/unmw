@@ -61,7 +61,8 @@ import urllib.parse
 
 import nmw_coord_lib as ncl
 from nmw_coord_lib import (
-    html_escape, _PAGE_CSS, form_page_url, emit_redirect,
+    html_escape, _PAGE_CSS, main_page_url, page_top_html, page_title_html,
+    page_end_html, form_page_url, emit_redirect,
     emit_message_page, parse_coordinates, read_config_vars,
     acquire_concurrency_slot, run_sky2xy_scan, get_image_metadata,
     make_zoomout_thumbnail, make_zoomin_thumbnail,
@@ -363,7 +364,10 @@ def main():
               "</style>")
         print("</head><body>")
         print("<!-- {} -->".format(' ' * 4000))  # past Apache's CGI buffer
-        print("<h2>{}</h2>".format(html_escape(page_title)))
+        print(page_top_html(main_page_url(), [
+            ('Main page', main_page_url()),
+            ('Forced photometry', form_page_url())]))
+        print(page_title_html(page_title))
         print("<p>Position: <span class='code'>{} {}</span>; "
               "last {} days.</p>".format(html_escape(ra), html_escape(dec),
                                          window_days), flush=True)
@@ -380,7 +384,7 @@ def main():
                       html_escape(type(err).__name__), html_escape(err)))
             print("<br><a href='{}'>Search again</a>".format(
                 html_escape(search_again_url)))
-            print("</body></html>")
+            print(page_end_html())
             return
         covering_fields = set(field_name_from_fits(p) for p, _x, _y in matches)
         if sky2xy_truncated:
@@ -397,7 +401,7 @@ def main():
                   "specified sky position.</div>")
             print("<br><a href='{}'>Search again</a>".format(
                 html_escape(search_again_url)))
-            print("</body></html>")
+            print(page_end_html())
             return
         print("<p>Covering field(s): <b>{}</b></p>".format(
             html_escape(', '.join(sorted(covering_fields)))), flush=True)
@@ -416,7 +420,7 @@ def main():
                           html_escape(err)))
             print("<br><a href='{}'>Search again</a>".format(
                 html_escape(search_again_url)))
-            print("</body></html>")
+            print(page_end_html())
             return
         # Also consider the optional quarantine directory: an uploads-style
         # tree (img_* subdirectories) holding processed fields moved off
@@ -474,7 +478,7 @@ def main():
                   "found in the last {} days.</div>".format(window_days))
             print("<br><a href='{}'>Search again</a>".format(
                 html_escape(search_again_url)))
-            print("</body></html>")
+            print(page_end_html())
             return
         print("<p>Performing forced photometry on {} images; this will "
               "take a while...</p>".format(len(images)), flush=True)
@@ -498,7 +502,7 @@ def main():
                   "working copy of VaST; cannot measure.</div>")
             print("<br><a href='{}'>Search again</a>".format(
                 html_escape(search_again_url)))
-            print("</body></html>")
+            print(page_end_html())
             return
 
         # ---- Phase 1: run util/solve_plate_with_UCAC5 in parallel across
@@ -766,7 +770,7 @@ def main():
 
         print("<br><br><a href='{}'>Search again</a>".format(
             html_escape(search_again_url)))
-        print("</body></html>")
+        print(page_end_html())
     finally:
         if work_dir is not None:
             if os.environ.get('DEBUG_KEEP_WORK_DIR'):

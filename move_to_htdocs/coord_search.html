@@ -8,6 +8,12 @@
 </head>
 <body>
 
+<header class="topbar">
+<a class="brand" href="index.html"><span class="brand-name">NMW</span> <small>New Milky Way survey</small></a>
+<nav><a href="index.html">Main page</a></nav>
+</header>
+
+<main class="page">
 <h1>Reference images</h1>
 <p class="subtitle">Find fields covering a sky position</p>
 
@@ -22,18 +28,16 @@ and small zoom-in / zoom-out thumbnails so you can see at a glance
 whether the target falls near the centre of a field or close to its
 edge.</p>
 
-<table style="margin: 14px auto 0; border-spacing: 5pt;">
-<tr>
-  <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec.):</td>
-  <td style="padding: 0;">
-    <input type="text" name="coords" size="36" placeholder="17:45:37.199 -28:56:10.22">
+<div class="form-grid">
+  <label for="coords">Coordinates (R.A. Dec.)</label>
+  <div class="btn-row">
+    <input type="text" name="coords" id="coords" size="36" placeholder="17:45:37.199 -28:56:10.22">
     <input type="submit" id="coord-search-button" value="Search">
     <span id="coord-working-search" class="working">Working...</span>
-  </td>
-</tr>
-</table>
+  </div>
+</div>
 
-<p class="formats">
+<div class="formats">
 Accepted coordinate formats:
 <ul>
 <li>Sexagesimal with colons: <span class="code">17:45:37.199 -28:56:10.22</span></li>
@@ -41,15 +45,15 @@ Accepted coordinate formats:
 <li>Decimal degrees: <span class="code">266.4050 -28.9362</span></li>
 </ul>
 The Dec. sign may be <span class="code">-</span>, <span class="code">+</span>, or omitted for positive Dec.
-</p>
+</div>
 
 <!-- Secondary action: browse all reference images -->
-<p class="secondary" style="text-align: center; margin-top: 30px;">
+<p class="secondary" style="margin-top: 30px;">
 You can also list every reference image (field name, image size,
 scale, full-frame thumbnail) without specifying a position:
 </p>
-<p style="text-align: center;">
-<input type="submit" id="coord-list-all-button" value="Show all reference images">
+<p class="btn-row">
+<input type="submit" class="secondary" id="coord-list-all-button" value="Show all reference images">
 <span id="coord-working-listall" class="working">Working...</span>
 </p>
 
@@ -57,7 +61,9 @@ scale, full-frame thumbnail) without specifying a position:
 
 <div class="footer">
 <p><a href="index.html">Back to the main page</a></p>
+<p><span class="brand-name">NMW</span></p>
 </div>
+</main>
 
 <script type="text/javascript">
 (function () {

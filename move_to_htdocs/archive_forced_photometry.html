@@ -8,6 +8,12 @@
 </head>
 <body>
 
+<header class="topbar">
+<a class="brand" href="index.html"><span class="brand-name">NMW</span> <small>New Milky Way survey</small></a>
+<nav><a href="index.html">Main page</a><a href="../cgi-bin/unmw/archive_phot_status.py">Queue overview</a></nav>
+</header>
+
+<main class="page">
 <h1>Forced photometry on the archived images</h1>
 <p class="subtitle">Lightcurve at a sky position across the long-term image archive</p>
 
@@ -24,29 +30,16 @@ and aperture cutout, copy-paste ASCII table) when the job finishes.
 Results stay on the server at a stable URL; very old results may
 eventually be removed during server housekeeping.</p>
 
-<table style="margin: 14px auto 0; border-spacing: 5pt;">
-<tr>
-  <td style="text-align: right; padding: 0 10pt;">Coordinates (R.A. Dec.):</td>
-  <td style="padding: 0;">
-    <input type="text" name="coords" size="36" placeholder="19:20:11.64 +01:40:40.6">
-  </td>
-</tr>
-<tr>
-  <td style="text-align: right; padding: 0 10pt;">From date (UT, optional):</td>
-  <td style="padding: 0;">
-    <input type="date" name="date_from">
-  </td>
-</tr>
-<tr>
-  <td style="text-align: right; padding: 0 10pt;">To date (UT, optional):</td>
-  <td style="padding: 0;">
-    <input type="date" name="date_to">
-  </td>
-</tr>
-<tr>
-  <td style="text-align: right; padding: 0 10pt;">Band (optional):</td>
-  <td style="padding: 0;">
-    <select name="band">
+<div class="form-grid">
+  <label for="coords">Coordinates (R.A. Dec.)</label>
+  <div><input type="text" name="coords" id="coords" size="36" placeholder="19:20:11.64 +01:40:40.6"></div>
+  <label for="date_from">From date (UT, optional)</label>
+  <div><input type="date" name="date_from" id="date_from"></div>
+  <label for="date_to">To date (UT, optional)</label>
+  <div><input type="date" name="date_to" id="date_to"></div>
+  <label for="band">Band (optional)</label>
+  <div>
+    <select name="band" id="band">
       <option value="" selected>auto (from camera settings)</option>
       <option value="B">B</option>
       <option value="V">V</option>
@@ -58,18 +51,15 @@ eventually be removed during server housekeeping.</p>
       <option value="i">i</option>
       <option value="g">g</option>
     </select>
-  </td>
-</tr>
-<tr>
-  <td style="padding: 0;"></td>
-  <td style="padding: 0;">
+  </div>
+  <span></span>
+  <div class="btn-row">
     <input type="submit" id="archive-phot-button" value="Queue the job">
     <span id="archive-phot-working" class="working">Submitting...</span>
-  </td>
-</tr>
-</table>
+  </div>
+</div>
 
-<p class="formats">
+<div class="formats">
 Accepted coordinate formats:
 <ul>
 <li>Sexagesimal with colons: <span class="code">19:20:11.64 +01:40:40.6</span></li>
@@ -79,9 +69,9 @@ Accepted coordinate formats:
 The Dec. sign may be <span class="code">-</span>, <span class="code">+</span>, or omitted for positive Dec.
 Dates are compared against the observation time from the FITS headers (in UT);
 leave both date fields empty to measure the whole archive.
-</p>
+</div>
 
-<p class="secondary" style="text-align: center;">
+<p class="secondary">
 Submission itself takes up to a minute (the server checks which fields cover
 the position and reads the archive image dates); please be patient after
 pressing the button. You will then be taken to the job status page &mdash;
@@ -92,7 +82,9 @@ bookmark it. <a href="../cgi-bin/unmw/archive_phot_status.py">Queue overview</a>
 
 <div class="footer">
 <p><a href="index.html">Back to the main page</a></p>
+<p><span class="brand-name">NMW</span></p>
 </div>
+</main>
 
 <script type="text/javascript">
 (function () {

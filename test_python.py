@@ -1209,8 +1209,8 @@ def test_central_index_shows_rounded_coordinates_with_full_tooltip():
         nml.rebuild_central_index(sandbox, [entry], None)
         with open(os.path.join(root, 'index.html')) as fh:
             page = fh.read()
-        assert '<td class="code" title="12:34:56.789">12:34:56.79</td>' in page
-        assert '<td class="code" title="-12:34:56.78">-12:34:56.8</td>' in page
+        assert '<td class="mono" title="12:34:56.789">12:34:56.79</td>' in page
+        assert '<td class="mono" title="-12:34:56.78">-12:34:56.8</td>' in page
     finally:
         shutil.rmtree(sandbox, ignore_errors=True)
 
@@ -2121,7 +2121,7 @@ def test_central_index_counts_what_the_products_publish(tmp_path,
         page = fh.read()
     # one detection (12.0), one upper limit (13.0 above the threshold), the
     # excluded frame not counted
-    assert re.search(r'<td>1</td><td>1</td>', page)
+    assert re.search(r'<td class="num">1</td><td class="num">1</td>', page)
 
 
 def test_rewrite_measurement_status_matches_every_copy_of_a_frame(tmp_path):

@@ -129,9 +129,11 @@ cd /var/www/scan.sai.msu.ru/cgi-bin/unmw
 ln -s /home/NMW_web_upload uploads
 ````
  4. create the htdocs directory for the web interface pages and install them
-with `generate_htdocs.sh` (it adapts the main page to this host's
-configuration: the page title shows the survey name from
-`SURVEY_NAME_TO_DISPLAY` - NMW by default, the archival photometry link is
+with `generate_htdocs.sh` (it adapts the pages to this host's
+configuration: the black band at the top of every page and the main page
+title show the survey name from `SURVEY_NAME_TO_DISPLAY` - NMW by default
+(the CGI result pages and the monitoring pages read the same setting), the
+archival photometry link is
 hidden when `IMAGE_ARCHIVE_DIR` is not set, and the manual upload page link
 is hidden - and the upload page itself is not installed - unless
 `SHOW_MANUAL_UPLOAD_LINK=yes`; set `HTDOCS_DIR` in 'local_config.sh' -

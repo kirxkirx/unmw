@@ -1733,25 +1733,63 @@ def _render_recent_plot(vast_dir, source_dir, entry, detections,
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+# The monitoring pages live at uploads/monitoring/index.html and
+# uploads/monitoring/<source_id>/index.html under the htdocs directory
+# whose index.html is the main page (it links to uploads/ relatively), so
+# the way back to the main page is a fixed relative path.
+MAIN_PAGE_FROM_INDEX = '../../index.html'
+MAIN_PAGE_FROM_SOURCE = '../../../index.html'
+
+
+def _page_footer_html(links):
+    return ('<div class="footer"><p>{}</p><p>{}</p></div>\n'.format(
+        ' &middot; '.join('<a href="{}">{}</a>'.format(
+            html_escape(href), html_escape(label)) for label, href in links),
+        html_escape(ncl.survey_name())))
+
+
 def _write_source_page(source_dir, entry, ledger_rows, detections,
                        upperlimits, excluded, png_basename,
                        recent_png_basename, cameras,
                        vast_dir, page_message='', threshold=None):
     name = entry['name']
     title = 'Monitored source {}'.format(name)
-    parts = ['<html><head><title>{}</title>\n{}\n</head><body>\n'.format(
-        html_escape(title), ncl._PAGE_CSS)]
-    parts.append('<h2>{}</h2>\n'.format(html_escape(title)))
+    parts = ['<html><head><meta charset="utf-8">\n'
+             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+             '<title>{}</title>\n{}\n</head><body>\n'.format(
+                 html_escape(title), ncl._PAGE_CSS)]
+    parts.append(ncl.page_top_html(
+        MAIN_PAGE_FROM_SOURCE,
+        [('All monitored sources', '../index.html'),
+         ('Main page', MAIN_PAGE_FROM_SOURCE)]))
+    parts.append(ncl.page_title_html(name, 'Monitored source'))
     excluded_note = ''
     if excluded:
-        excluded_note = (' &middot; {} excluded from the'
+        excluded_note = (', {} excluded from the'
                          ' lightcurve'.format(len(excluded)))
-    parts.append('<p>Position: <span class="code">{} {}</span>'
-                 ' &middot; cameras: {} &middot; {} detections,'
-                 ' {} upper limits{}</p>\n'.format(
+    parts.append('<dl class="meta">\n'
+                 '<dt>Position</dt><dd><span class="code">{} {}</span></dd>\n'
+                 '<dt>Cameras</dt><dd>{}</dd>\n'
+                 '<dt>Measurements</dt><dd>{} detections,'
+                 ' {} upper limits{}</dd>\n'.format(
                      html_escape(entry['ra']), html_escape(entry['dec']),
-                     html_escape(' '.join(cameras) or 'none yet'),
+                     ' '.join('<span class="code">{}</span>'.format(
+                         html_escape(c)) for c in cameras) or 'none yet',
                      len(detections), len(upperlimits), excluded_note))
+    if detections or upperlimits:
+        all_jd = [r['jd_float'] for r in detections + upperlimits]
+        jd_min = min(all_jd)
+        jd_max = max(all_jd)
+        parts.append('<dt>Date range</dt><dd><span class="code">{}</span> .. '
+                     '<span class="code">{}</span> (UTC)</dd>\n'
+                     '<dt>JD range</dt><dd><span class="code">{:.5f}</span> .. '
+                     '<span class="code">{:.5f}</span></dd>\n'.format(
+                         html_escape(jd_to_atel_date(vast_dir,
+                                                     '{:.5f}'.format(jd_min))),
+                         html_escape(jd_to_atel_date(vast_dir,
+                                                     '{:.5f}'.format(jd_max))),
+                         jd_min, jd_max))
+    parts.append('</dl>\n')
     if threshold is not None:
         parts.append(
             '<p class="secondary"><b>Manual detection threshold:</b>'
@@ -1764,19 +1802,6 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
             ' (status <span class="code">{}</span> in the table below marks'
             ' the demoted measurements).</p>\n'.format(
                 threshold, html_escape(STATUS_BELOW_THRESHOLD)))
-    if detections or upperlimits:
-        all_jd = [r['jd_float'] for r in detections + upperlimits]
-        jd_min = min(all_jd)
-        jd_max = max(all_jd)
-        parts.append('<p>Date range: <span class="code">{}</span> .. '
-                     '<span class="code">{}</span> (UTC) &middot; '
-                     'JD <span class="code">{:.5f}</span> .. '
-                     '<span class="code">{:.5f}</span></p>\n'.format(
-                         html_escape(jd_to_atel_date(vast_dir,
-                                                     '{:.5f}'.format(jd_min))),
-                         html_escape(jd_to_atel_date(vast_dir,
-                                                     '{:.5f}'.format(jd_max))),
-                         jd_min, jd_max))
     # The last-30-days plot (when rendered) goes ABOVE the full-range plot;
     # both carry a heading so the reader knows which time span is which.
     for plot_file, plot_label in (
@@ -1796,8 +1821,9 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
         except OSError:
             plot_version = 0
         parts.append('<h3>{}</h3>\n'.format(html_escape(plot_label)))
-        parts.append('<p><img src="{}?v={}" style="max-width:100%"></p>\n'
-                     .format(html_escape(plot_file), plot_version))
+        parts.append('<div class="plot"><img src="{}?v={}" alt="{}"></div>\n'
+                     .format(html_escape(plot_file), plot_version,
+                             html_escape(plot_label)))
     parts.append('<p>Data files: <a href="{lc}">{lc}</a>'
                  ' (JD mag err camera field)'
                  ' &middot; <a href="{ul}">{ul}</a>'
@@ -1806,7 +1832,6 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                  ' incl. fainter-than records)</p>\n'.format(
                      lc=LIGHTCURVE_BASENAME, ul=UPPERLIMITS_BASENAME,
                      av=AAVSO_BASENAME))
-    parts.append('<p><a href="../index.html">All monitored sources</a></p>\n')
     from nmw_forced_phot_lib import wide_field_photometry_caveat_html
     parts.append(wide_field_photometry_caveat_html())
     # Per-installation note from local_config.sh (MONITORING_PAGE_MESSAGE),
@@ -1901,7 +1926,9 @@ def _write_source_page(source_dir, entry, ledger_rows, detections,
                 html_escape(err_text), html_escape(row['reason']),
                 html_escape(row['camera']), html_escape(row['basename'])))
         parts.append('</pre>\n')
-    parts.append('</body></html>\n')
+    parts.append(_page_footer_html([('All monitored sources', '../index.html'),
+                                    ('Main page', MAIN_PAGE_FROM_SOURCE)]))
+    parts.append(ncl.page_end_html() + '\n')
     _write_text_atomic(os.path.join(source_dir, 'index.html'), ''.join(parts))
 
 
@@ -1916,8 +1943,15 @@ def rebuild_central_index(uploads_dir, entries, vast_dir,
         return
     if excluded_frames is None:
         excluded_frames = excluded_frame_set(uploads_dir)
-    parts = ['<html><head><title>Monitored sources</title>\n{}\n</head>'
-             '<body>\n<h2>Monitored sources</h2>\n'.format(ncl._PAGE_CSS)]
+    parts = ['<html><head><meta charset="utf-8">\n'
+             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+             '<title>Monitored sources</title>\n{}\n</head><body>\n'.format(
+                 ncl._PAGE_CSS)]
+    parts.append(ncl.page_top_html(MAIN_PAGE_FROM_INDEX,
+                                   [('Main page', MAIN_PAGE_FROM_INDEX)]))
+    parts.append(ncl.page_title_html(
+        'Monitored sources',
+        'Lightcurves updated after every processed image of their fields'))
     activated = []
     pending = []
     for entry in entries:
@@ -1927,10 +1961,12 @@ def rebuild_central_index(uploads_dir, entries, vast_dir,
         else:
             pending.append(entry)
     if activated:
-        parts.append('<table border="1" cellpadding="4">\n'
-                     '<tr><th>Source</th><th>RA</th><th>Dec</th>'
-                     '<th>Detections</th><th>Upper limits</th>'
-                     '<th>Last date (UTC)</th><th>Last JD</th></tr>\n')
+        parts.append('<div class="table-wrap"><table class="data">\n'
+                     '<thead><tr><th>Source</th><th>RA</th><th>Dec</th>'
+                     '<th class="num">Detections</th>'
+                     '<th class="num">Upper limits</th>'
+                     '<th>Last date (UTC)</th><th>Last JD</th></tr></thead>\n'
+                     '<tbody>\n')
         for entry in sorted(activated, key=lambda e: e['name'].lower()):
             source_dir = source_dir_path(uploads_dir, entry['source_id'])
             rows, _ = read_ledger(source_dir)
@@ -1947,10 +1983,10 @@ def rebuild_central_index(uploads_dir, entries, vast_dir,
             # Rounded coordinates keep the table tidy; the full-precision
             # list values stay in the tooltip and on the per-source page.
             parts.append('<tr><td><a href="{}/index.html">{}</a></td>'
-                         '<td class="code" title="{}">{}</td>'
-                         '<td class="code" title="{}">{}</td>'
-                         '<td>{}</td><td>{}</td><td class="code">{}</td>'
-                         '<td class="code">{}</td>'
+                         '<td class="mono" title="{}">{}</td>'
+                         '<td class="mono" title="{}">{}</td>'
+                         '<td class="num">{}</td><td class="num">{}</td>'
+                         '<td class="mono">{}</td><td class="mono">{}</td>'
                          '</tr>\n'.format(
                              html_escape(entry['source_id']),
                              html_escape(entry['name']),
@@ -1960,7 +1996,7 @@ def rebuild_central_index(uploads_dir, entries, vast_dir,
                              html_escape(display_dec(entry['dec'])),
                              len(detections), len(upperlimits),
                              html_escape(last_date), last_jd))
-        parts.append('</table>\n')
+        parts.append('</tbody></table></div>\n')
     else:
         parts.append('<p>No sources are activated on this machine yet.</p>\n')
     if pending:
@@ -1976,7 +2012,9 @@ def rebuild_central_index(uploads_dir, entries, vast_dir,
         ' request on GitHub updating <a href="https://github.com/kirxkirx/'
         'nmw_calibration/blob/main/monitoring_list.txt">'
         'monitoring_list.txt</a>.</p>\n')
-    parts.append('</body></html>\n')
+    parts.append(_page_footer_html([('Back to the main page',
+                                     MAIN_PAGE_FROM_INDEX)]))
+    parts.append(ncl.page_end_html() + '\n')
     _write_text_atomic(os.path.join(root, 'index.html'), ''.join(parts))
 
 

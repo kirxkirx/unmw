@@ -40,7 +40,8 @@ import urllib.parse
 
 import nmw_coord_lib as ncl
 from nmw_coord_lib import (
-    html_escape, _PAGE_CSS, emit_redirect, emit_message_page,
+    html_escape, _PAGE_CSS, main_page_url, page_top_html, page_title_html,
+    page_end_html, emit_redirect, emit_message_page,
     read_config_vars, acquire_concurrency_slot,
 )
 import nmw_archive_phot_lib as apl
@@ -92,13 +93,17 @@ def _render_page(title, body_html, refresh_seconds=None, status_line=None):
           "p.secondary { color: #666; font-style: italic; }"
           "</style>")
     print("</head><body>")
-    print("<h2>{}</h2>".format(html_escape(title)))
+    print(page_top_html(main_page_url(), [
+        ('Main page', main_page_url()),
+        ('Queue overview', _overview_url()),
+        ('Submit a new job', DEFAULT_FORM_PATH)]))
+    print(page_title_html(title))
     print(body_html)
     print("<br><a href='{}'>Queue overview</a> &middot; "
           "<a href='{}'>Submit a new job</a>".format(
               html_escape(_overview_url()),
               html_escape(DEFAULT_FORM_PATH)))
-    print("</body></html>")
+    print(page_end_html())
 
 
 def _progress_tail(job_dir):
