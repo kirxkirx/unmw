@@ -412,6 +412,88 @@ function wait_for_our_turn_to_start_processing {
  return 0
 }
 
+# btrfs can refuse writes (ENOSPC) while df still reports hundreds of GB free:
+# once the whole device is handed out to block groups and the metadata block
+# groups are nearly full, nothing can be created or renamed. The kernel
+# publishes the real figures under /sys/fs/btrfs (world-readable, so this
+# works as the web server user without root and without the btrfs command).
+# Prints a WARNING/ERROR line in the check_free_space() style and returns
+# 0 = OK, 1 = WARNING, 2 = ERROR. Anything that is not btrfs, or that cannot
+# be read (non-Linux, old kernel), passes silently - the classic df check
+# still applies. Same thresholds and messages as nmw_fs_check.py (used by
+# upload.py3); UNMW_BTRFS_SYSFS_ROOT overrides the sysfs root for tests.
+function check_btrfs_metadata_space() {
+    local dir_to_check="$1"
+    local sysfs_root="${UNMW_BTRFS_SYSFS_ROOT:-/sys/fs/btrfs}"
+    local fstype source devname fs_dir uuid_dir dev_dir kind n mountpoint
+    local device_bytes=0 allocated=0 meta_total meta_used global_rsv
+    local unallocated headroom
+    # a DUP metadata block group needs up to 2 x 1 GiB of unallocated space
+    local min_unallocated=$((2 * 1024 * 1024 * 1024))
+    # below this much reservable metadata space the next busy night fails
+    local min_headroom=$((1024 * 1024 * 1024))
+
+    if [ ! -d "$sysfs_root" ];then
+     return 0
+    fi
+    fstype=$(stat -f -c %T "$dir_to_check" 2>/dev/null) || return 0
+    if [ "$fstype" != "btrfs" ];then
+     return 0
+    fi
+    source=$(df -P "$dir_to_check" 2>/dev/null | awk 'NR==2 {print $1}')
+    mountpoint=$(df -P "$dir_to_check" 2>/dev/null | awk 'NR==2 {print $6}')
+    if [ -z "$source" ];then
+     return 0
+    fi
+    devname=$(basename "$(readlink -f "$source" 2>/dev/null || echo "$source")")
+    fs_dir=""
+    for uuid_dir in "$sysfs_root"/*/ ;do
+     if [ -d "$uuid_dir/devices/$devname" ];then
+      fs_dir="${uuid_dir%/}"
+      break
+     fi
+    done
+    if [ -z "$fs_dir" ];then
+     return 0
+    fi
+    # unallocated = size of all member devices - everything handed out to
+    # data, metadata and system block groups (DUP already counted twice)
+    for dev_dir in "$fs_dir"/devices/*/ ;do
+     n=$(cat "$dev_dir/size" 2>/dev/null) || return 0
+     case "$n" in ''|*[!0-9]*) return 0 ;; esac
+     device_bytes=$((device_bytes + n * 512))
+    done
+    for kind in data metadata system ;do
+     n=$(cat "$fs_dir/allocation/$kind/disk_total" 2>/dev/null) || return 0
+     case "$n" in ''|*[!0-9]*) return 0 ;; esac
+     allocated=$((allocated + n))
+    done
+    meta_total=$(cat "$fs_dir/allocation/metadata/total_bytes" 2>/dev/null) || return 0
+    meta_used=$(cat "$fs_dir/allocation/metadata/bytes_used" 2>/dev/null) || return 0
+    global_rsv=$(cat "$fs_dir/allocation/global_rsv_size" 2>/dev/null) || return 0
+    case "$meta_total$meta_used$global_rsv" in ''|*[!0-9]*) return 0 ;; esac
+    if [ "$device_bytes" -le 0 ];then
+     return 0
+    fi
+    unallocated=$((device_bytes - allocated))
+    if [ "$unallocated" -lt 0 ];then
+     unallocated=0
+    fi
+    headroom=$((meta_total - meta_used - global_rsv))
+    if [ "$headroom" -lt 0 ];then
+     headroom=0
+    fi
+    if [ "$unallocated" -ge "$min_unallocated" ];then
+     return 0
+    fi
+    if [ "$headroom" -lt "$min_headroom" ];then
+     echo "ERROR: server $HOSTNAME is out of disk space at $dir_to_check: btrfs metadata is exhausted ($((unallocated / 1024 / 1024)) MB unallocated, $((headroom / 1024 / 1024)) MB metadata headroom) although df reports free space - run 'btrfs balance start -dusage=50 $mountpoint' as root"
+     return 2
+    fi
+    echo "WARNING: server $HOSTNAME is low on disk space at $dir_to_check: btrfs has only $((unallocated / 1024 / 1024)) MB unallocated, metadata cannot grow beyond its $((headroom / 1024 / 1024)) MB headroom - run 'btrfs balance start -dusage=50 $mountpoint' as root"
+    return 1
+}
+
 # Note that the same function is found in util/transients/transient_factory_test31.sh
 function check_free_space() {
     # Check every directory passed as an argument (default: the current
@@ -428,6 +510,7 @@ function check_free_space() {
 
     local free_space_kb
     local overall_status=0
+    local btrfs_status
     local already_checked=""
     local dir_to_check
 
@@ -474,6 +557,13 @@ function check_free_space() {
             echo "WARNING: server $HOSTNAME is low on disk space, only $((free_space_kb / 1024)) MB free at $dir_to_check"
         else
             echo "ERROR: server $HOSTNAME is out of disk space, only $((free_space_kb / 1024)) MB free at $dir_to_check"
+            overall_status=1
+        fi
+
+        # btrfs metadata exhaustion is invisible to df (see the function above)
+        check_btrfs_metadata_space "$dir_to_check"
+        btrfs_status=$?
+        if [ "$btrfs_status" -eq 2 ];then
             overall_status=1
         fi
     done

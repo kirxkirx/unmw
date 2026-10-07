@@ -2461,3 +2461,208 @@ def test_sync_exclusions_migrates_then_applies_the_list(tmp_path, monkeypatch):
     assert any('Y.fits is excluded for this source only' in m
                for m in messages)
     assert rebuilt == []
+
+
+# ---------------------------------------------------------------------------
+# btrfs-aware free space check (nmw_fs_check.py and its bash twin in
+# autoprocess.sh): btrfs refuses writes once the device is fully allocated
+# and the metadata block groups fill up, while df still shows free space.
+# ---------------------------------------------------------------------------
+
+import subprocess
+import nmw_fs_check as nfc
+
+GIB = 1024 ** 3
+MIB = 1024 ** 2
+
+
+def _write_int(path, value):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as fh:
+        fh.write('{}\n'.format(value))
+
+
+def _fake_btrfs(sandbox, mount_dir, unallocated, metadata_used,
+                device='fakedev', device_size=2000 * GIB, metadata_total=10 * GIB,
+                global_rsv=512 * MIB, fstype='btrfs', drop=None):
+    """A fake /sys/fs/btrfs tree plus a mountinfo file that puts mount_dir
+    on /dev/<device>. Returns (sysfs_root, mountinfo_path)."""
+    sysfs_root = os.path.join(sandbox, 'sysfs')
+    fs_dir = os.path.join(sysfs_root, 'deadbeef-0000-4000-8000-000000000001')
+    _write_int(os.path.join(fs_dir, 'devices', device, 'size'), device_size // 512)
+    system_total = 8 * MIB
+    data_total = device_size - unallocated - 2 * metadata_total - 2 * system_total
+    _write_int(os.path.join(fs_dir, 'allocation', 'data', 'disk_total'), data_total)
+    _write_int(os.path.join(fs_dir, 'allocation', 'metadata', 'disk_total'), 2 * metadata_total)
+    _write_int(os.path.join(fs_dir, 'allocation', 'system', 'disk_total'), 2 * system_total)
+    _write_int(os.path.join(fs_dir, 'allocation', 'metadata', 'total_bytes'), metadata_total)
+    _write_int(os.path.join(fs_dir, 'allocation', 'metadata', 'bytes_used'), metadata_used)
+    _write_int(os.path.join(fs_dir, 'allocation', 'global_rsv_size'), global_rsv)
+    if drop:
+        os.remove(os.path.join(fs_dir, drop))
+    real_mount = os.path.realpath(mount_dir).replace(' ', '\\040')
+    mountinfo = os.path.join(sandbox, 'mountinfo')
+    with open(mountinfo, 'w') as fh:
+        fh.write('25 1 259:3 / / rw,relatime - ext4 /dev/root rw\n')
+        fh.write('36 25 0:38 / {} rw,noatime - {} /dev/{} rw,compress=zstd:3\n'
+                 .format(real_mount, fstype, device))
+    return sysfs_root, mountinfo
+
+
+def test_fs_check_passes_on_non_btrfs():
+    sandbox = tempfile.mkdtemp()
+    try:
+        mount = os.path.join(sandbox, 'mnt'); os.makedirs(mount)
+        sysfs_root, mountinfo = _fake_btrfs(sandbox, mount, unallocated=0,
+                                            metadata_used=10 * GIB, fstype='ext4')
+        status, message = nfc.btrfs_space_status(
+            os.path.join(mount, 'uploads'), sysfs_root, mountinfo, hostname='h')
+        assert status == 'OK' and 'skipped' in message and 'ext4' in message
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+def test_fs_check_healthy_btrfs_is_ok():
+    sandbox = tempfile.mkdtemp()
+    try:
+        mount = os.path.join(sandbox, 'mnt'); os.makedirs(mount)
+        sysfs_root, mountinfo = _fake_btrfs(sandbox, mount, unallocated=600 * GIB,
+                                            metadata_used=int(9.9 * GIB))
+        status, message = nfc.btrfs_space_status(mount, sysfs_root, mountinfo, hostname='h')
+        # metadata block groups nearly full is NORMAL while new ones can be allocated
+        assert status == 'OK' and 'unallocated' in message
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+def test_fs_check_no_unallocated_but_headroom_is_warning():
+    sandbox = tempfile.mkdtemp()
+    try:
+        mount = os.path.join(sandbox, 'mnt'); os.makedirs(mount)
+        sysfs_root, mountinfo = _fake_btrfs(sandbox, mount, unallocated=1 * MIB,
+                                            metadata_used=5 * GIB)
+        status, message = nfc.btrfs_space_status(mount, sysfs_root, mountinfo, hostname='h')
+        assert status == 'WARNING'
+        assert 'low on disk space' in message       # combine_reports.sh surfaces this phrase
+        assert 'btrfs balance start -dusage=50' in message
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+def test_fs_check_tau_2026_10_06_numbers_are_error():
+    # The real counters from tau at the moment renames started failing
+    sandbox = tempfile.mkdtemp()
+    try:
+        mount = os.path.join(sandbox, 'mnt'); os.makedirs(mount)
+        sysfs_root, mountinfo = _fake_btrfs(
+            sandbox, mount, device_size=2000397795328, unallocated=1048576,
+            metadata_total=10737418240, metadata_used=10195222528, global_rsv=536870912)
+        status, message = nfc.btrfs_space_status(mount, sysfs_root, mountinfo, hostname='tau')
+        assert status == 'ERROR'
+        assert message.startswith('ERROR: server tau is out of disk space at')
+        assert '1 MB unallocated' in message and '5 MB metadata headroom' in message
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+def test_fs_check_fails_open_when_counters_are_missing():
+    sandbox = tempfile.mkdtemp()
+    try:
+        mount = os.path.join(sandbox, 'mnt'); os.makedirs(mount)
+        # older kernel without the allocation/<kind>/disk_total files
+        sysfs_root, mountinfo = _fake_btrfs(sandbox, mount, unallocated=1 * MIB,
+                                            metadata_used=10 * GIB,
+                                            drop='allocation/data/disk_total')
+        status, message = nfc.btrfs_space_status(mount, sysfs_root, mountinfo, hostname='h')
+        assert status == 'OK' and 'skipped' in message
+        # no sysfs at all (non-Linux, or btrfs module not loaded)
+        status, message = nfc.btrfs_space_status(
+            mount, os.path.join(sandbox, 'nowhere'), mountinfo, hostname='h')
+        assert status == 'OK' and 'skipped' in message
+        # unreadable mountinfo
+        status, message = nfc.btrfs_space_status(
+            mount, sysfs_root, os.path.join(sandbox, 'nomountinfo'), hostname='h')
+        assert status == 'OK' and 'skipped' in message
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+def test_fs_check_mountinfo_longest_prefix_and_escapes():
+    sandbox = tempfile.mkdtemp()
+    try:
+        mount = os.path.join(sandbox, 'data disk'); os.makedirs(mount)
+        sysfs_root, mountinfo = _fake_btrfs(sandbox, mount, unallocated=1 * MIB,
+                                            metadata_used=10 * GIB)
+        found = nfc.find_mount(os.path.join(mount, 'sub', 'dir'), mountinfo)
+        assert found == (os.path.realpath(mount), 'btrfs', '/dev/fakedev')
+        # a path outside the fake mount falls through to the root line
+        assert nfc.find_mount(sandbox, mountinfo)[1] == 'ext4'
+        # the escaped mount point still resolves the sysfs figures
+        status, _ = nfc.btrfs_space_status(mount, sysfs_root, mountinfo, hostname='h')
+        assert status == 'ERROR'
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)
+
+
+def test_fs_check_worst_status_combination():
+    ok = ('OK', 'fine')
+    warn = ('WARNING', 'WARNING: low')
+    err = ('ERROR', 'ERROR: out')
+    assert nfc.worst_status(ok, ok) == ok
+    assert nfc.worst_status(ok, warn) == warn
+    assert nfc.worst_status(warn, ok) == warn
+    assert nfc.worst_status(warn, err) == err
+    assert nfc.worst_status(err, warn) == ('ERROR', 'ERROR: out; WARNING: low')
+
+
+def _run_bash_twin(sandbox, sysfs_root, directory, fstype):
+    """Run check_btrfs_metadata_space() from autoprocess.sh with stat and df
+    replaced by shims (the fake filesystem is not really mounted)."""
+    shims = os.path.join(sandbox, 'bin'); os.makedirs(shims, exist_ok=True)
+    with open(os.path.join(shims, 'stat'), 'w') as fh:
+        fh.write('#!/bin/sh\necho {}\n'.format(fstype))
+    with open(os.path.join(shims, 'df'), 'w') as fh:
+        fh.write('#!/bin/sh\necho "Filesystem 1024-blocks Used Available Capacity Mounted on"\n'
+                 'echo "/dev/fakedev 1 1 1 1% /mnt/fake"\n')
+    for name in ('stat', 'df'):
+        os.chmod(os.path.join(shims, name), 0o755)
+    script = ('source <(sed -n "/^function check_btrfs_metadata_space/,/^}/p" autoprocess.sh); '
+              'check_btrfs_metadata_space "$1"')
+    env = dict(os.environ, PATH=shims + os.pathsep + os.environ.get('PATH', ''),
+               UNMW_BTRFS_SYSFS_ROOT=sysfs_root, HOSTNAME='h')
+    proc = subprocess.run(['bash', '-c', script, 'bash', directory],
+                          capture_output=True, text=True, env=env,
+                          cwd=os.path.dirname(os.path.abspath(__file__)))
+    return proc.returncode, proc.stdout.strip()
+
+
+def test_fs_check_bash_twin_matches_python():
+    sandbox = tempfile.mkdtemp()
+    try:
+        mount = os.path.join(sandbox, 'mnt'); os.makedirs(mount)
+        # ERROR: the tau numbers
+        sysfs_root, _ = _fake_btrfs(
+            sandbox, mount, device_size=2000397795328, unallocated=1048576,
+            metadata_total=10737418240, metadata_used=10195222528, global_rsv=536870912)
+        code, out = _run_bash_twin(sandbox, sysfs_root, mount, 'btrfs')
+        assert code == 2, out
+        assert out.startswith('ERROR: server h is out of disk space at')
+        assert '1 MB unallocated, 5 MB metadata headroom' in out
+        assert "btrfs balance start -dusage=50 /mnt/fake" in out
+        # WARNING: no unallocated space, metadata still has headroom
+        shutil.rmtree(sysfs_root)
+        sysfs_root, _ = _fake_btrfs(sandbox, mount, unallocated=1 * MIB, metadata_used=5 * GIB)
+        code, out = _run_bash_twin(sandbox, sysfs_root, mount, 'btrfs')
+        assert code == 1 and 'low on disk space' in out
+        # OK: plenty unallocated -> silent
+        shutil.rmtree(sysfs_root)
+        sysfs_root, _ = _fake_btrfs(sandbox, mount, unallocated=600 * GIB, metadata_used=9 * GIB)
+        code, out = _run_bash_twin(sandbox, sysfs_root, mount, 'btrfs')
+        assert code == 0 and out == ''
+        # not btrfs -> silent pass even with the broken fake tree in place
+        shutil.rmtree(sysfs_root)
+        sysfs_root, _ = _fake_btrfs(sandbox, mount, unallocated=1 * MIB, metadata_used=10 * GIB)
+        code, out = _run_bash_twin(sandbox, sysfs_root, mount, 'ext4')
+        assert code == 0 and out == ''
+    finally:
+        shutil.rmtree(sandbox, ignore_errors=True)

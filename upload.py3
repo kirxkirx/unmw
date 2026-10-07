@@ -36,6 +36,17 @@ except ImportError:
 import re
 from typing import Tuple
 
+# btrfs can refuse writes (ENOSPC) while statvfs still reports hundreds of GB
+# free: once the device is fully allocated to block groups and the metadata
+# block groups fill up, nothing can be created or renamed. nmw_fs_check.py
+# reads the kernel's btrfs counters (world-readable sysfs, no root needed)
+# and passes on any other filesystem. It lives next to this script; the
+# classic statvfs check alone is used if it is not deployed.
+try:
+    from nmw_fs_check import btrfs_space_status, worst_status
+except ImportError:
+    btrfs_space_status = None
+
 
 # Constants for file validation
 MIN_FILE_SIZE = 2 * 1024 * 1024  # 2MB
@@ -128,11 +139,20 @@ def check_disk_space_status(directory: str) -> Tuple[str, str]:
     free_mb = free_kb // 1024
 
     if free_kb >= softlimit_kb:
-        return "OK", f"server {hostname} has sufficient free disk space available: {free_mb} MB at {directory}"
+        result = ("OK", f"server {hostname} has sufficient free disk space available: {free_mb} MB at {directory}")
     elif free_kb >= hardlimit_kb:
-        return "WARNING", f"WARNING: server {hostname} is low on disk space, only {free_mb} MB free at {directory}"
+        result = ("WARNING", f"WARNING: server {hostname} is low on disk space, only {free_mb} MB free at {directory}")
     else:
-        return "ERROR", f"ERROR: server {hostname} is out of disk space, only {free_mb} MB free at {directory}"
+        result = ("ERROR", f"ERROR: server {hostname} is out of disk space, only {free_mb} MB free at {directory}")
+
+    # The btrfs metadata check can only raise the severity (or add a note);
+    # it never masks the classic result and never breaks the endpoint.
+    if btrfs_space_status is not None:
+        try:
+            result = worst_status(result, btrfs_space_status(directory, hostname=hostname))
+        except Exception:
+            pass
+    return result
 
 
 def is_safe_filename(filename: str) -> bool:

@@ -111,6 +111,12 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # Hard limit: reject uploads and abort processing below this threshold
 # Default hard limit is 5 GB = 5 * 1024 * 1024 KB
 #export WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB=5242880
+# On btrfs the checks additionally read the kernel's block group accounting
+# (/sys/fs/btrfs, no root needed): when the device is fully allocated and the
+# metadata block groups are nearly full, writes fail with ENOSPC while df
+# still shows plenty of free space. That condition is reported as WARNING
+# (metadata cannot grow) or ERROR (uploads refused) with the fix to run; no
+# setting is needed and the check passes on any other filesystem.
 
 # How many candidates a single-field report may contain and still be included
 # in the combined report built by combine_reports.sh. A field over any of these
