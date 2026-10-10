@@ -49,7 +49,7 @@ command_exists() {
 # Pre-flight checks
 #################################
 
-for cmd in git grep sed; do
+for cmd in git grep sed python3; do
     if ! command_exists "$cmd"; then
         echo "ERROR: required command '$cmd' is not installed" >&2
         exit $EXIT_ERROR
@@ -60,20 +60,6 @@ if ! command_exists curl && ! command_exists wget; then
     echo "ERROR: neither curl nor wget is installed" >&2
     exit $EXIT_ERROR
 fi
-
-# Check that no other instances of this script are running (using lock file)
-LOCKFILE="/tmp/git_unmw_automated_update.lock"
-if [ -f "$LOCKFILE" ]; then
-    LOCK_PID=$(cat "$LOCKFILE" 2>/dev/null)
-    if [ -n "$LOCK_PID" ] && kill -0 "$LOCK_PID" 2>/dev/null; then
-        echo "Another instance of this script is already running (PID $LOCK_PID), exiting"
-        exit $EXIT_ALREADY_UPTODATE
-    fi
-    # Stale lock file — remove it
-    rm -f "$LOCKFILE"
-fi
-echo $$ > "$LOCKFILE"
-trap 'rm -f "$LOCKFILE"' EXIT
 
 #################################
 # Main logic
@@ -87,6 +73,17 @@ cd "$SCRIPT_DIR" || exit $EXIT_ERROR
 if [ ! -d .git ]; then
     echo "ERROR: $SCRIPT_DIR is not a git repository" >&2
     exit $EXIT_ERROR
+fi
+
+# Lock inside the trusted checkout, not at a predictable path in shared
+# /tmp. The inherited descriptor keeps the flock alive after Python exits;
+# closing it on script exit releases the lock even after a crash. Never
+# unlink the lock file while another process might be waiting on its inode.
+LOCKFILE="$SCRIPT_DIR/.git/unmw_automated_update.lock"
+exec 9>>"$LOCKFILE" || exit $EXIT_ERROR
+if ! python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)' 2>/dev/null; then
+    echo "Another updater is running, or its lock cannot be acquired"
+    exit $EXIT_ALREADY_UPTODATE
 fi
 
 # Determine the default branch (main or master)
@@ -152,37 +149,24 @@ if [ $? -ne 0 ] || [ -z "$STATUS_RESPONSE" ]; then
     exit $EXIT_ERROR
 fi
 
-# Total number of check runs reported for this commit
-TOTAL_COUNT=$(echo "$STATUS_RESPONSE" | grep -o '"total_count"[[:space:]]*:[[:space:]]*[0-9]*' | head -n 1 | grep -o '[0-9]*$')
-if [ -z "$TOTAL_COUNT" ]; then
-    TOTAL_COUNT=0
-fi
-
-if [ "$TOTAL_COUNT" -eq 0 ]; then
-    echo "No GitHub Actions check runs reported yet for commit $REMOTE_COMMIT"
-    echo "Tests have probably not been scheduled yet. Will try again later"
-    exit $EXIT_ERROR
-fi
-
-# Extract all check-run statuses (queued / in_progress / completed)
-STATUSES=$(echo "$STATUS_RESPONSE" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/"status"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/')
-# Extract all check-run conclusions (success / failure / cancelled / timed_out / action_required / skipped / neutral / stale)
-CONCLUSIONS=$(echo "$STATUS_RESPONSE" | grep -o '"conclusion"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/"conclusion"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/')
-
-# Are all check runs completed?
-N_NOT_COMPLETED=$(echo "$STATUSES" | grep -v '^completed$' | grep -v '^$' | wc -l)
-if [ "$N_NOT_COMPLETED" -gt 0 ]; then
-    echo "$N_NOT_COMPLETED of $TOTAL_COUNT GitHub Actions check runs are still running for commit $REMOTE_COMMIT"
-    echo "Will try again later"
-    exit $EXIT_ERROR
-fi
-
-# All check runs are completed; verify every conclusion is acceptable
-N_BAD=$(echo "$CONCLUSIONS" | grep -v -E '^(success|skipped|neutral)$' | grep -v '^$' | wc -l)
-if [ "$N_BAD" -gt 0 ]; then
-    BAD_LIST=$(echo "$CONCLUSIONS" | grep -v -E '^(success|skipped|neutral)$' | sort -u | tr '\n' ' ')
-    echo "ERROR: $N_BAD of $TOTAL_COUNT GitHub Actions check runs failed for commit $REMOTE_COMMIT (conclusions: $BAD_LIST)" >&2
-    echo "Will not update to this version" >&2
+# Reject malformed or incomplete API data before authorizing an update.
+# In particular, a page of 100 successful runs cannot establish that
+# every run passed when total_count is greater than 100.
+if ! TOTAL_COUNT=$(printf '%s\n' "$STATUS_RESPONSE" | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    runs = data["check_runs"]
+    if not isinstance(runs, list) or not runs or data["total_count"] != len(runs):
+        raise ValueError("Incomplete check list")
+    if not all(run["status"] == "completed" and run["conclusion"] in
+               ("success", "skipped", "neutral") for run in runs):
+        raise ValueError("Unsuccessful checks")
+    print(len(runs))
+except (ValueError, KeyError, TypeError):
+    sys.exit(1)
+'); then
+    echo "ERROR: CI checks are incomplete, unreadable, or not all successful" >&2
     exit $EXIT_ERROR
 fi
 
@@ -202,11 +186,12 @@ if [ -n "$LOCAL_TRACKED_CHANGES" ]; then
     git reset --hard --quiet
 fi
 
-# Pull the latest version
-echo "Pulling latest version..."
-git pull origin "$DEFAULT_BRANCH"
+# Deploy the exact commit whose checks were inspected. A second fetch in
+# git pull could pick up an untested commit pushed while we queried CI.
+echo "Updating to tested commit $REMOTE_COMMIT..."
+git merge --ff-only "$REMOTE_COMMIT"
 if [ $? -ne 0 ]; then
-    echo "ERROR: git pull failed" >&2
+    echo "ERROR: cannot fast-forward to the tested commit" >&2
     exit $EXIT_ERROR
 fi
 

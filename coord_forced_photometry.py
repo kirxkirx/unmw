@@ -42,7 +42,6 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 try:
     import cgi
-    import cgitb
 except ImportError:
     import sys
     sys.exit("Error: 'cgi' module not found. "
@@ -162,7 +161,7 @@ def list_recent_field_images(uploads_dir, covering_fields, window_days):
 
 
 def main():
-    cgitb.enable()
+    ncl.enable_cgi_error_logging()
     # Wall-clock start so the bottom of the page can report total and
     # per-image times.
     start_time = time.time()
@@ -183,7 +182,7 @@ def main():
             status_line="Status: 500 Internal Server Error")
         return
 
-    form = cgi.FieldStorage()
+    form = ncl.parse_cgi_form(cgi)
     raw_coords = (form.getfirst('coords', '') or '').strip()
     band_override = (form.getfirst('band', '') or '').strip()
     raw_window_days = (form.getfirst('window_days', '') or '').strip()

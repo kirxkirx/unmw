@@ -15,10 +15,8 @@ fi
 ##################################################################
 echo "Checking that non-CGI scripts refuse to run as CGI..."
 
-# autoprocess.sh is deliberately absent: it does not refuse but unsets the CGI
-# markers instead, because wrapper.sh (which is guarded) invokes it legitimately
-# from within a request. Its protection is wrapper.sh's guard plus that unset.
-NON_CGI_SCRIPTS="archive_phot_prune.sh wrapper.sh combine_reports.sh combine_results_comets.sh fastplot_wrapper.sh git_unmw_automated_update.sh generate_htdocs.sh filter_report.py archive_phot_worker.py monitoring_update.py"
+# upload.py strips CGI markers before launching wrapper.sh and autoprocess.sh.
+NON_CGI_SCRIPTS="autoprocess.sh archive_phot_prune.sh wrapper.sh combine_reports.sh combine_results_comets.sh fastplot_wrapper.sh git_unmw_automated_update.sh generate_htdocs.sh filter_report.py archive_phot_worker.py monitoring_update.py"
 CGI_GUARD_FAILURES=""
 for SCRIPT in $NON_CGI_SCRIPTS; do
  if [ ! -f "$SCRIPT" ]; then

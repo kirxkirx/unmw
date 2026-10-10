@@ -25,6 +25,7 @@ import glob
 import fcntl
 import urllib.parse
 import subprocess
+import shlex
 
 
 # --- Configuration ---
@@ -440,9 +441,10 @@ def send_redirect(url):
     print("Content-Type: text/html")
     print("")
     print("<html><head>")
-    print('<meta http-equiv="Refresh" content="0; url=%s">' % url)
+    safe_url = html_escape(url)
+    print('<meta http-equiv="Refresh" content="0; url=%s">' % safe_url)
     print("</head><body>")
-    print('<p>Redirecting to <a href="%s">%s</a>...</p>' % (url, url))
+    print('<p>Redirecting to <a href="%s">%s</a>...</p>' % (safe_url, safe_url))
     print("</body></html>")
 
 
@@ -552,9 +554,9 @@ def main():
             # URL_OF_DATA_PROCESSING_ROOT points to DATA_PROCESSING_ROOT
             # fastplot_dir is DATA_PROCESSING_ROOT/fastplot
             # So the URL is URL_OF_DATA_PROCESSING_ROOT/fastplot/
-            download_url = url_base + '/fastplot/' + cached
+            download_url = url_base + '/fastplot/' + urllib.parse.quote(cached, safe='')
         else:
-            download_url = '/uploads/fastplot/' + cached
+            download_url = '/uploads/fastplot/' + urllib.parse.quote(cached, safe='')
         send_redirect(download_url)
         return
 
@@ -624,9 +626,8 @@ def main():
     log_path = os.path.join(fastplot_dir, 'fastplot_%s.log' % candidate_id)
     try:
         # Use os.system with nohup to fully detach from Apache.
-        # The arguments are already validated (candidate_id is [a-zA-Z0-9_.-]+,
-        # safe_url is reconstructed from server-side config), so shell
-        # interpolation is safe here.
+        # Quote every argument, including deployment paths and URLs, so
+        # spaces and shell metacharacters in configuration stay literal.
         # "unset" strips the CGI request markers from the child's environment,
         # the same way kick_worker() does for archive_phot_worker.py. This is a
         # legitimate, already-validated invocation from inside a request, but
@@ -636,8 +637,9 @@ def main():
         # so this stays portable (busybox, FreeBSD, macOS).
         cmd = ('unset GATEWAY_INTERFACE REQUEST_METHOD QUERY_STRING '
                'CONTENT_LENGTH CONTENT_TYPE; '
-               'nohup "%s" "%s" "%s" > "%s" 2>&1 &'
-               % (wrapper_path, safe_url, candidate_id, log_path))
+               'nohup %s %s %s > %s 2>&1 &'
+               % tuple(shlex.quote(value) for value in
+                       (wrapper_path, safe_url, candidate_id, log_path)))
         os.system(cmd)
     except Exception as e:
         send_html(500, "Server Error",

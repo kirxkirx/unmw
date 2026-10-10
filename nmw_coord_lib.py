@@ -13,11 +13,15 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import fcntl
 import html
+import io
 import math
 import os
 import re
+import stat
 import string
 import subprocess
+import sys
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -42,6 +46,48 @@ COORDS_REGEX = re.compile(r'^[0-9 :+\-.\t]{3,80}$')
 
 
 # ---------- output helpers ----------
+
+def enable_cgi_error_logging():
+    """Unexpected failures must not publish stack frames or CGI secrets."""
+    def report_error(kind, value, tb):
+        print('Content-Type: text/html; charset=utf-8\n')
+        print('<html><body>Unable to complete the request. Please contact the server administrator.</body></html>')
+        sys.stdout.flush()
+        traceback.print_exception(kind, value, tb, file=sys.stderr)
+    sys.excepthook = report_error
+
+
+def parse_cgi_form(cgi_module):
+    """Parse the small text-only forms used by the coordinate/job pages.
+
+    Read at most 64 KiB before calling FieldStorage, including with missing
+    or forged request lengths. None of these pages accepts uploaded files.
+    """
+    max_bytes = 64 * 1024
+    try:
+        method = os.environ.get('REQUEST_METHOD', 'GET')
+        if method not in ('GET', 'POST', 'HEAD'):
+            raise ValueError('Unsupported request method')
+        if len(os.environ.get('QUERY_STRING', '')) > max_bytes:
+            raise ValueError('Query string is too large')
+        body = b''
+        if method == 'POST':
+            raw = os.environ.get('CONTENT_LENGTH', '')
+            if not re.fullmatch(r'[0-9]{1,10}', raw) or int(raw) > max_bytes:
+                raise ValueError('Invalid or oversized request body')
+            body = sys.stdin.buffer.read(int(raw))
+            if len(body) != int(raw):
+                raise ValueError('Incomplete request body')
+        form = cgi_module.FieldStorage(fp=io.BytesIO(body), max_num_fields=100)
+        for part in form.list or []:
+            if getattr(part, 'filename', None) is not None or getattr(part, 'list', None) is not None:
+                raise ValueError('This form accepts text fields only')
+        return form
+    except (ValueError, TypeError, EOFError):
+        print('Status: 400 Bad Request')
+        print('Content-Type: text/html; charset=utf-8\n')
+        print('<html><body>Invalid request. Please submit the text fields from the input form.</body></html>')
+        raise SystemExit(1)
 
 def html_escape(s):
     return html.escape(str(s), quote=True)
@@ -220,7 +266,7 @@ def parse_coordinates(raw):
     Returns (ra, dec) ready to pass as separate arguments to sky2xy.
     Raises ValueError on any problem.
     """
-    if raw is None:
+    if not isinstance(raw, str):
         raise ValueError("no coordinate string supplied")
     s = raw.strip()
     if not s:
@@ -299,6 +345,19 @@ def read_config_vars(*var_names):
 
 # ---------- concurrency limit ----------
 
+def open_lock_file(path):
+    """Open a lock without truncation or following a planted symlink."""
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                 0o600)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid != os.geteuid():
+            raise OSError('Unsafe lock file')
+        return os.fdopen(fd, 'r+')
+    except BaseException:
+        os.close(fd)
+        raise
+
 def acquire_concurrency_slot(prefix='coord_search', max_concurrent=MAX_CONCURRENT,
                              lock_dir=LOCK_DIR):
     """Try to acquire one of max_concurrent exclusive flock slots.
@@ -318,7 +377,7 @@ def acquire_concurrency_slot(prefix='coord_search', max_concurrent=MAX_CONCURREN
     for i in range(1, max_concurrent + 1):
         path = os.path.join(lock_dir, '{}_slot_{}.lock'.format(prefix, i))
         try:
-            fd = open(path, 'w')
+            fd = open_lock_file(path)
         except OSError:
             continue
         try:

@@ -248,6 +248,93 @@ The lightweight `start_unmw_here_with_sthttpd.sh` development server does
 not support authentication - this section applies to production Apache
 installations only.
 
+# Log of suspicious upload file names
+
+`upload.py` keeps a log of the suspicious file names it is sent, outside the
+web-served trees:
+
+- the name of every file part of the request, also of one under another
+  field name or inside a nested multipart part, that has a directory part,
+  a leading dot, `..`, special or control characters, more than 255
+  characters or an extension other than `.zip`/`.rar`;
+- every member of the uploaded archive that is a symlink, has an absolute or
+  `..` path, a hidden directory or one with shell or Windows special
+  characters, a file name with a leading dot, `..`, special or control
+  characters, or an extension other than `.fit`/`.fits`/`.fts`.
+
+The members of an archive rejected before its contents are checked (too
+small, or not the archive its name says), or that cannot be listed as the
+archive its name says, are listed by what the file contains: a RAR archive,
+also a self-extracting one, and a ZIP archive. Without the optional Python
+`rarfile` module, RAR archives are inspected with the installed `rar` or
+`unrar` binary. A tolerant technical-listing parser can preserve suspicious
+names for the log, including line breaks; if its output cannot be trusted
+or exceeds the inspection limits, the log says so. This forensic parser
+is separate from the stricter validation described below. A rejected
+upload is deleted, and the access log never sees the names inside a request
+body, so this log is their only record. One line per name; every value is a
+single-quoted Python string literal with quotes, control characters and
+non-ASCII characters escaped (`ast.literal_eval` reads one back), so the log
+is safe to `cat`:
+````
+2026-10-08 22:26:15 -0500 addr='203.0.113.7' user='-' agent='curl/8.5.0' upload='web_upload_160654NDljrTaa' archive='x_reboot.zip' member='shell.php' problems='not a .fit, .fits or .fts image' result='rejected: Symlink in archive is not allowed: link.fits'
+````
+At most 100 names of one upload get a line each: a last `more=` line counts
+the rest by problem, the members past the first 4000 of an oversized
+archive, which are never examined, and anything else worth noting. A value
+is cut at 256 characters of its escaped form, marked by `...` after the
+closing quote. The members are not listed for an upload over the 2 GB file
+limit, nor for one whose name is longer than 255 characters (that name
+itself is logged). Requests declaring more than 2 GB plus 1 MiB for
+multipart headers and fields are rejected before their bodies are parsed;
+their filenames are therefore unavailable to this log. ZIP directory
+metadata is limited to 16 MiB and actual member records are counted before
+Python builds its in-memory directory, including when an archive reports
+a false count. Upload POSTs must use `multipart/form-data`; multipart
+headers and preambles are limited to 64 KiB in total so malformed input
+cannot make the parser buffer a file-sized header in memory.
+
+One absolute, drive-qualified, or parent-traversal (`..` component) member
+rejects the **entire archive**, including when that member is an empty
+directory. Both `/` and `\` separators are checked. Ordinary relative
+subdirectories remain supported; suspicious members are not silently removed.
+
+`rarfile` is not required. Without it, validation cross-checks exact member
+names from the native bare and technical listings and reads member types and
+sizes from the latter. It rejects links/redirections, encrypted or split
+inputs, missing or ambiguous metadata, and inconsistent listings. It applies
+the same 4000-member, 32 GiB expanded-size, and 200:1 compression-ratio limits.
+Directory entries count towards the member limit but not the required two
+FITS images. Each native listing is bounded to 16 MiB, 64 KiB per line, and
+120 seconds; comments, user configuration and password input are disabled.
+An installed UTF-8 locale is required for native validation: the plain C
+locale can silently drop Unicode characters from a listing.
+The wrapper reuses these validation rules before starting processing. These
+are metadata checks, not an extraction sandbox or a substitute for patched
+native archive tools and server resource limits.
+
+The default location is `unmw_suspicious_filenames.txt` in
+`UNMW_CGITB_LOGDIR`, or in `/tmp` when that is unset. That does not last
+(reboots, systemd's PrivateTmp), and in a `/tmp` shared with other local
+users anyone can block the file by creating it first, so set
+`SUSPICIOUS_FILENAMES_LOG` in `local_config.sh` to a private location in a
+directory the web server user can write (see `local_config.sh_example`). A
+location inside the checkout, the uploads tree or the data directories
+behind it, `HTDOCS_DIR` or the web server's `DOCUMENT_ROOT` is refused. The
+log is created with mode 0600 and renamed to `<log>.1` when it would grow
+past 64 MB; if its directory does not let the web server user do that,
+logging stops at 64 MB. Problems writing the log are reported in the Apache
+error log; the development servers of this repository put such a note into
+the HTTP response (sthttpd) or into their own web-served log instead.
+
+Upload error pages escape client-supplied text and retain the
+`UNMW_STATUS:ERROR` marker used by camera clients. Unexpected errors go to
+the server error log; the upload, coordinate-search and photometry CGIs do
+not display traceback pages. Coordinate and job-status forms accept text
+fields only, with a 64 KiB request-body limit. These application checks
+complement the web server's request-size and timeout configuration; they
+do not limit concurrent connections or a proxy's own buffering.
+
 # An overly-detailed and ugly example installation on a fresh AlmaLinux 9
 ````
 # The following commands should be executed as root

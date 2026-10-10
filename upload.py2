@@ -9,7 +9,16 @@
 # emergency fallback and is denied web access in .htaccess. Do not wire it into
 # any form or ScriptAlias without understanding the reduced validation.
 #
-import cgi, os
+import os
+import sys
+
+# This obsolete handler is denied by .htaccess, but that file may be ignored
+# by the server. Refuse a web invocation before parsing or writing anything.
+if os.environ.get('GATEWAY_INTERFACE') or os.environ.get('REQUEST_METHOD'):
+    sys.stdout.write('Content-Type: text/plain\n\nERROR: this script must not be run as CGI\n')
+    sys.exit(1)
+
+import cgi
 import cgitb; cgitb.enable()
 
 # For JobID generation

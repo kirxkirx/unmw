@@ -9,114 +9,54 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 import os
 import sys
+
+if os.environ.get('GATEWAY_INTERFACE') or os.environ.get('REQUEST_METHOD'):
+    sys.stdout.write('Content-Type: text/plain\n\nERROR: this script must not be run as CGI\n')
+    sys.exit(1)
+
 import tempfile
 import zipfile
 import re
 import pytest
 import shutil
+import errno
+import importlib.machinery
+import importlib.util
+import io
+import stat
+import types
 
 # Import functions from filter_report.py
 from filter_report import is_asteroid, is_variable_star, is_ast_or_vs, filter_report
 
-# Import functions from upload.py3 by reading the file and extracting functions
-# (avoiding the cgi import which was removed in Python 3.13)
-# We extract the pure functions that don't depend on cgi
-
-# Constants from upload.py3
-MIN_FILE_SIZE = 2 * 1024 * 1024  # 2MB
-MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
-ALLOWED_EXTENSIONS = {'.zip', '.rar'}
-ALLOWED_IMAGE_EXTENSIONS = {'.fit', '.fits', '.fts'}
-MIN_IMAGE_FILES = 2
-
-# Try to import archive handling libraries
-try:
-    HAVE_ZIPFILE = True
-except ImportError:
-    HAVE_ZIPFILE = False
-
-try:
-    import rarfile
-    HAVE_RARFILE = True
-except ImportError:
-    HAVE_RARFILE = False
-
-
-def is_safe_filename(filename: str) -> bool:
-    """
-    Check if filename is safe - no path traversal, no special chars
-    """
-    # Remove any directory components, keep just filename
-    filename = os.path.basename(filename)
-
-    # Check for suspicious patterns
-    dangerous_patterns = [
-        r'\.\.',           # Path traversal
-        r'^\..*$',         # Hidden files
-        r'[<>:"|?*]',     # Windows special chars
-        r'[;&|`$]',       # Shell special chars
-        r'[^\w\-\.]'      # Only allow alphanumeric, dash, dot
-    ]
-
-    return all(not re.search(pattern, filename) for pattern in dangerous_patterns)
-
-
-def validate_archive_size(filesize: int) -> bool:
-    """
-    Validate archive file size is within acceptable range
-    """
-    return MIN_FILE_SIZE <= filesize <= MAX_FILE_SIZE
-
-
-def check_archive_contents(filepath: str):
-    """
-    Validate archive contents without extracting.
-    Directories are allowed; only file extensions are checked.
-    """
-    ext = os.path.splitext(filepath)[1].lower()
-    image_files = []
-
-    # If neither library is available, perform basic size and MIME checks only
-    if ext == '.zip' and not HAVE_ZIPFILE:
-        return True, "Warning: zipfile module not available, skipping detailed archive validation"
-    elif ext == '.rar' and not HAVE_RARFILE:
-        return True, "Warning: rarfile module not available, skipping detailed archive validation"
-
+def _load_upload_py3():
+    """Test the deployed source, including on Python without legacy-cgi."""
+    stand_ins = {}
+    for name in ('cgi', 'cgitb'):
+        try:
+            __import__(name)
+        except ImportError:
+            stand_ins[name] = types.ModuleType(name)
+    if 'cgi' in stand_ins:
+        stand_ins['cgi'].FieldStorage = object
+    sys.modules.update(stand_ins)
     try:
-        if ext == '.zip' and HAVE_ZIPFILE:
-            with zipfile.ZipFile(filepath) as zf:
-                filelist = zf.namelist()
-        elif ext == '.rar' and HAVE_RARFILE:
-            with rarfile.RarFile(filepath) as rf:
-                filelist = rf.namelist()
-        else:
-            return False, f"Unsupported archive type: {ext}"
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'upload.py3')
+        loader = importlib.machinery.SourceFileLoader('unmw_upload_py3', path)
+        module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+        loader.exec_module(module)
+        return module
+    finally:
+        for name in stand_ins:
+            sys.modules.pop(name, None)
 
-        # Check each entry in the archive
-        for fname in filelist:
-            if fname.endswith('/'):  # Skip directories
-                continue
 
-            if not is_safe_filename(fname):
-                return False, f"Unsafe filename in archive: {fname}"
-
-            file_ext = os.path.splitext(fname)[1].lower()
-            if file_ext in ALLOWED_IMAGE_EXTENSIONS:
-                image_files.append(fname)
-            else:
-                return False, f"Unrecognized file extension in archive: {fname} {file_ext}"
-
-        if len(image_files) < MIN_IMAGE_FILES:
-            return False, f"Not enough image files found. Minimum required: {MIN_IMAGE_FILES}"
-
-        return True, ""
-
-    except Exception as e:
-        if ext == '.zip' and isinstance(e, zipfile.BadZipFile):
-            return False, f"Invalid ZIP format: {str(e)}"
-        elif ext == '.rar' and HAVE_RARFILE and isinstance(e, rarfile.BadRarFile):
-            return False, f"Invalid RAR format: {str(e)}"
-        return False, f"Error checking archive: {str(e)}"
+up = _load_upload_py3()
+is_safe_filename = up.is_safe_filename
+validate_archive_size = up.validate_archive_size
+check_archive_contents = up.check_archive_contents
+MIN_FILE_SIZE = up.MIN_FILE_SIZE
+MAX_FILE_SIZE = up.MAX_FILE_SIZE
 
 
 class TestIsAsteroid:
@@ -233,15 +173,11 @@ class TestIsSafeFilename:
         assert is_safe_filename("test-file.fit") is True
 
     def test_path_traversal(self):
-        """Should return False for path traversal in basename only"""
-        # Note: the function strips directory via os.path.basename first,
-        # so "../etc/passwd" becomes "passwd" which is safe.
-        # Path traversal is only detected if ".." appears in the basename itself
+        """Reject parent components even outside the basename."""
         assert is_safe_filename("..") is False
         assert is_safe_filename("..hidden") is False
-        # These get stripped to just the basename which is safe
-        assert is_safe_filename("../etc/passwd") is True  # becomes "passwd"
-        assert is_safe_filename("foo/../bar") is True  # becomes "bar"
+        assert is_safe_filename("../etc/passwd") is False
+        assert is_safe_filename("foo/../bar") is False
 
     def test_hidden_files(self):
         """Should return False for hidden files"""
@@ -261,10 +197,9 @@ class TestIsSafeFilename:
         assert is_safe_filename("file:name") is False
         assert is_safe_filename("file?name") is False
 
-    def test_strips_directory(self):
-        """Should check only basename, ignoring directory part"""
-        # The function strips directory, so these should be evaluated as just the basename
-        assert is_safe_filename("/path/to/good_file.fits") is True
+    def test_relative_directories_only(self):
+        assert is_safe_filename("/path/to/good_file.fits") is False
+        assert is_safe_filename("path/to/good_file.fits") is True
 
 
 class TestValidateArchiveSize:
@@ -385,6 +320,14 @@ class TestCheckArchiveContents:
 
 class TestFilterReport:
     """Tests for filter_report function"""
+
+    @pytest.fixture(autouse=True)
+    def report_directory(self, tmp_path, monkeypatch):
+        # filter_report writes both HTML and a JSON sibling. Keep all of
+        # them in pytest's managed directory, including when a test fails.
+        original = tempfile.NamedTemporaryFile
+        monkeypatch.setattr(tempfile, 'NamedTemporaryFile',
+                            lambda *args, **kwargs: original(*args, dir=str(tmp_path), **kwargs))
 
     def test_filter_classifies_asteroids(self):
         """Asteroids should be in output wrapped in transient-asteroid class"""
@@ -2666,3 +2609,1567 @@ def test_fs_check_bash_twin_matches_python():
         assert code == 0 and out == ''
     finally:
         shutil.rmtree(sandbox, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Suspicious filename log (upload.py3): every suspicious upload or archive
+# member name is appended, escaped, to a log that is never inside a
+# web-served directory. All upload tests use the real upload.py3.
+# ---------------------------------------------------------------------------
+
+FITS_STUB = b'SIMPLE  = T' + b' ' * 2870
+
+
+def _write_zip(path, names, symlinks=(), payload=FITS_STUB,
+               compression=zipfile.ZIP_STORED):
+    with zipfile.ZipFile(path, 'w', compression=compression) as zf:
+        for name in names:
+            zf.writestr(name, payload)
+        for name in symlinks:
+            info = zipfile.ZipInfo(name)
+            info.external_attr = 0o120777 << 16
+            zf.writestr(info, 'target')
+
+
+def _logged_names(found):
+    return [name for _, name, _ in found.entries]
+
+
+@pytest.fixture
+def suspicious_log(tmp_path, monkeypatch):
+    """Point the suspicious filename log at a private temporary file, keep
+    the developer's environment and local_config.sh out of the way and give
+    the request a client address."""
+    log = tmp_path / 'private' / 'suspicious_filenames.txt'
+    log.parent.mkdir()
+    monkeypatch.setattr(up, '_parse_config_value', lambda config_path, var_name: None)
+    for var in ('HTDOCS_DIR', 'DATA_PROCESSING_ROOT', 'IMAGE_DATA_ROOT', 'DOCUMENT_ROOT',
+                'REMOTE_USER', 'HTTP_USER_AGENT'):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv('UNMW_CGITB_LOGDIR', str(log.parent))
+    monkeypatch.setenv('SUSPICIOUS_FILENAMES_LOG', str(log))
+    monkeypatch.setenv('REMOTE_ADDR', '203.0.113.7')
+    # a refused location would send the test lines to a shared log instead
+    assert up.suspicious_filenames_log_path() == (os.path.realpath(str(log)), '')
+    return log
+
+
+def _log_lines(log):
+    return log.read_text().splitlines() if log.exists() else []
+
+
+def test_upload_name_problems():
+    assert up.upload_name_problems('2025-01-07_Vul8_183150_Stas.rar') == []
+    assert up.upload_name_problems('NMW__NovaVul24_Stas__WebCheck__NotReal.zip') == []
+    assert up.upload_name_problems('../../x.zip') == ['path traversal', 'directory part']
+    assert up.upload_name_problems('/etc/x.zip') == ['absolute path', 'directory part']
+    assert up.upload_name_problems('shell.php') == ['not a .zip or .rar name']
+    assert 'hidden file' in up.upload_name_problems('.htaccess.zip')
+    assert 'shell special characters' in up.upload_name_problems('x;reboot.zip')
+    assert 'control or invisible characters' in up.upload_name_problems('x\n.zip')
+    # a name longer than NAME_MAX (255) cannot even be saved
+    assert up.upload_name_problems('a' * 251 + '.zip') == []
+    assert 'longer than 255 characters' in up.upload_name_problems('a' * 252 + '.zip')
+
+
+def test_member_problems():
+    assert up.member_problems('image1.fits') == []
+    assert up.member_problems('night/image1.fts') == []
+    assert up.member_problems('My Images/image1.fts') == []   # a space in a directory is fine
+    assert up.member_problems('night/', is_dir=True) == []
+    # Rejected even though extraction currently flattens paths.
+    assert up.member_problems('../image1.fits') == ['path traversal']
+    assert up.member_problems('/tmp/image1.fits') == ['absolute path']
+    assert up.member_problems('../../', is_dir=True) == ['path traversal']
+    assert 'path traversal' in up.member_problems('..\\..\\image1.fits')
+    assert up.member_problems('$(reboot)/image1.fits') == ['shell special characters in a directory name']
+    assert up.member_problems('.ssh/image1.fits') == ['hidden directory']
+    assert up.member_problems('a<b>/', is_dir=True) == ['Windows special characters in a directory name']
+    assert up.member_problems('link_dir/', is_dir=True, is_symlink=True) == ['symlink']
+    assert up.member_problems('evil.php') == ['not a .fit, .fits or .fts image']
+    assert up.member_problems('image1.fits', is_symlink=True) == ['symlink']
+    assert up.member_problems('\x1b[2Jx.fits') == [
+        'control or invisible characters',
+        'characters other than letters, digits, underscore, dash and dot']
+    assert up.member_problems('a/./b/../c/.../x.fits') == ['path traversal', 'hidden directory']
+    assert up.is_safe_filename('data_2024.fts') and not up.is_safe_filename('../etc/passwd')
+    assert not up.is_safe_filename('..hidden') and not up.is_safe_filename('file;rm')
+
+
+def test_check_archive_contents_logs_every_suspicious_member(tmp_path):
+    archive = str(tmp_path / 'x.zip')
+    _write_zip(archive, ['ok1.fits', 'bad;name.fits', 'ok2.fits', 'evil.php',
+                         '../escape.fits', '.hidden.fits', 'night/'])
+    found = up.SuspiciousFilenames()
+    valid, message = up.check_archive_contents(archive, found)
+    # Whole-path checks, like symlink checks, precede basename checks...
+    assert (valid, message) == (False, 'Unsafe path in archive: ../escape.fits')
+    # ...but every suspicious member is recorded, not only that one
+    assert _logged_names(found) == ['bad;name.fits', 'evil.php', '../escape.fits', '.hidden.fits']
+
+
+def test_check_archive_contents_rejects_and_logs_parent_paths(tmp_path):
+    archive = str(tmp_path / 'x.zip')
+    _write_zip(archive, ['ok1.fits', '../../ok2.fits', '$(id)/ok3.fits'])
+    found = up.SuspiciousFilenames()
+    assert up.check_archive_contents(archive, found) == (False, 'Unsafe path in archive: ../../ok2.fits')
+    assert found.entries == [('member', '../../ok2.fits', ['path traversal']),
+                             ('member', '$(id)/ok3.fits', ['shell special characters in a directory name'])]
+    # the optional collector does not have to be passed
+    assert up.check_archive_contents(archive) == (False, 'Unsafe path in archive: ../../ok2.fits')
+
+
+def test_check_archive_contents_symlink_verdict_kept_and_all_logged(tmp_path):
+    archive = str(tmp_path / 'x.zip')
+    _write_zip(archive, ['ok1.fits', 'evil.php', 'ok2.fits'], symlinks=['link.fits', 'link2.fits'])
+    found = up.SuspiciousFilenames()
+    valid, message = up.check_archive_contents(archive, found)
+    assert (valid, message) == (False, 'Symlink in archive is not allowed: link.fits')
+    assert _logged_names(found) == ['evil.php', 'link.fits', 'link2.fits']
+    assert ('member', 'link2.fits', ['symlink']) in found.entries
+
+
+def test_check_archive_contents_empty_member_name_after_a_symlink(tmp_path):
+    # Before Python 3.11 ZipInfo.is_dir() raises on an empty name; the
+    # verdict must stay the symlink one and the names must still be logged
+    archive = str(tmp_path / 'x.zip')
+    with zipfile.ZipFile(archive, 'w') as zf:
+        for name in ('image1.fits', 'image2.fits', 'evil.php'):
+            zf.writestr(name, FITS_STUB)
+        info = zipfile.ZipInfo('link.fits')
+        info.external_attr = 0o120777 << 16
+        zf.writestr(info, 'target')
+        zf.writestr(zipfile.ZipInfo(''), b'x')
+    found = up.SuspiciousFilenames()
+    valid, message = up.check_archive_contents(archive, found)
+    assert (valid, message) == (False, 'Symlink in archive is not allowed: link.fits')
+    assert _logged_names(found) == ['evil.php', 'link.fits', '']
+
+
+def test_check_archive_contents_bomb_verdict_kept_and_names_logged(tmp_path):
+    archive = str(tmp_path / 'x.zip')
+    _write_zip(archive, ['ok1.fits', 'ok2.fits', 'x|y.fits'], payload=b'\0' * (1024 * 1024),
+               compression=zipfile.ZIP_DEFLATED)
+    found = up.SuspiciousFilenames()
+    valid, message = up.check_archive_contents(archive, found)
+    assert valid is False and message.startswith('Suspicious compression ratio')
+    assert _logged_names(found) == ['x|y.fits']
+
+
+def test_check_archive_contents_too_many_members_logs_the_first_ones(tmp_path, suspicious_log):
+    archive = str(tmp_path / 'x.zip')
+    names = ['image%04d.fits' % i for i in range(up.MAX_ARCHIVE_MEMBERS + 5)]
+    names[10] = 'evil.php'
+    names[up.MAX_ARCHIVE_MEMBERS + 2] = 'late.php'   # past the limit: never examined
+    _write_zip(archive, names, payload=b'x')
+    found = up.SuspiciousFilenames()
+    assert up.check_archive_contents(archive, found) == (
+        False, 'Too many files in archive: 4005 (maximum 4000)')
+    assert _logged_names(found) == ['evil.php'] and found.unexamined == 5
+    up.log_suspicious_filenames(found, (False, 'Too many files in archive: 4005 (maximum 4000)', '', ''))
+    lines = _log_lines(suspicious_log)
+    assert len(lines) == 2
+    assert "more='5 more archive members not examined'" in lines[1]
+
+
+@pytest.mark.skipif(shutil.which('rar') is None, reason='needs the rar binary')
+@pytest.mark.parametrize('backend', ['rarfile', 'rar binary'])
+def test_check_archive_contents_logs_suspicious_rar_members(tmp_path, monkeypatch, backend):
+    if backend == 'rarfile' and not up.HAVE_RARFILE:
+        pytest.skip('the rarfile module is not installed')
+    monkeypatch.setattr(up, 'HAVE_RARFILE', backend == 'rarfile')
+    src = tmp_path / 'src'
+    src.mkdir()
+    names = ['a.fits', 'b.fits', 'x;y.fits', ' lead.fits', 'c.fits\nd.fits']
+    for name in names:
+        (src / name).write_bytes(FITS_STUB)
+    os.symlink('/etc/passwd', str(src / 'link.fits'))
+    archive = str(tmp_path / 'x.rar')
+    subprocess.run(['rar', 'a', '-ep', '-ol', archive] + names + ['link.fits'],
+                   cwd=str(src), check=True, stdout=subprocess.DEVNULL)
+    found = up.SuspiciousFilenames()
+    valid, message = up.check_archive_contents(archive, found)
+    assert valid is False   # the message depends on the backend, as before
+    # the rar binary's bare listing hides the symlink, the leading space and
+    # the line break; the log must show the real names all the same
+    problems = {name: found_problems for _, name, found_problems in found.entries}
+    assert set(problems) == {'x;y.fits', ' lead.fits', 'c.fits\nd.fits', 'link.fits'}
+    assert problems['link.fits'] == ['symlink']
+    assert 'control or invisible characters' in problems['c.fits\nd.fits']
+
+
+@pytest.mark.skipif(shutil.which('rar') is None, reason='needs the rar binary')
+def test_rar_technical_listing_ignores_the_archive_comment(tmp_path):
+    (tmp_path / 'a.fits').write_bytes(FITS_STUB)
+    (tmp_path / 'comment.txt').write_text('hello\n        Name: forged.php\n        Type: File\n')
+    archive = str(tmp_path / 'x.rar')
+    subprocess.run(['rar', 'a', '-ep', '-zcomment.txt', archive, 'a.fits'],
+                   cwd=str(tmp_path), check=True, stdout=subprocess.DEVNULL)
+    assert up.rar_members_via_binary(archive) == ([('a.fits', False, False)], True)
+
+
+def test_suspicious_filename_log_lines_are_escaped_and_private(suspicious_log, monkeypatch):
+    monkeypatch.setenv('HTTP_USER_AGENT', 'probe\n\x1b[2J')
+    found = up.SuspiciousFilenames()
+    found.archive = 'evil.zip'
+    found.upload_dir = 'uploads/web_upload_1abcdefgh/'
+    found.note('upload_name', '../evil\n.zip', up.upload_name_problems('../evil\n.zip'))
+    member = '\x1b]0;owned\x07x.fits'
+    found.note('member', member, up.member_problems(member))
+    up.log_suspicious_filenames(found, (False, 'Unsafe filename in archive: ' + member, '', ''))
+    data = suspicious_log.read_bytes()
+    assert stat.S_IMODE(os.stat(str(suspicious_log)).st_mode) == 0o600
+    # one line per name, nothing but printable ASCII in them
+    assert all(32 <= byte < 127 for byte in data.replace(b'\n', b''))
+    lines = data.decode('ascii').splitlines()
+    assert len(lines) == 2
+    assert re.match(r'\d{4}-\d\d-\d\d \d\d:\d\d:\d\d [+-]\d{4} ', lines[0])
+    assert "addr='203.0.113.7' user='-' agent='probe\\n\\x1b[2J'" in lines[0]
+    assert "upload='web_upload_1abcdefgh' archive='evil.zip'" in lines[0]
+    assert "upload_name='../evil\\n.zip' problems='path traversal; control or invisible" in lines[0]
+    assert "member='\\x1b]0;owned\\x07x.fits'" in lines[1]
+    assert lines[1].endswith("result='rejected: Unsafe filename in archive: \\x1b]0;owned\\x07x.fits'")
+    # the next upload appends
+    up.log_suspicious_filenames(found, (True, 'File uploaded and validated successfully', '', ''))
+    lines = _log_lines(suspicious_log)
+    assert len(lines) == 4 and lines[3].endswith("result='accepted'")
+
+
+def test_suspicious_filename_log_values_cannot_pass_for_other_fields(suspicious_log, monkeypatch):
+    monkeypatch.setenv('HTTP_USER_AGENT', "Mozilla/5.0' addr='192.0.2.66' result='accepted")
+    found = up.SuspiciousFilenames()
+    found.note('member', "x' result='accepted.php", ['not a .fit, .fits or .fts image'])
+    up.log_suspicious_filenames(found, (False, 'x', '', ''))
+    line = suspicious_log.read_text()
+    assert "addr='192.0.2.66'" not in line and "result='accepted" not in line
+    assert "agent='Mozilla/5.0\\' addr=\\'192.0.2.66\\' result=\\'accepted'" in line
+    # every value is a Python string literal
+    import ast
+    assert ast.literal_eval(line.split(' member=')[1].split(' problems=')[0]) == "x' result='accepted.php"
+
+
+def test_suspicious_filename_log_cuts_overlong_values_after_escaping(suspicious_log):
+    found = up.SuspiciousFilenames()
+    found.note('member', 'a' * 5000 + '.php', ['not a .fit, .fits or .fts image'])
+    found.note('member', '\U0001f600' * 5000 + '.php', ['not a .fit, .fits or .fts image'])
+    up.log_suspicious_filenames(found, (False, 'x', '', ''))
+    lines = _log_lines(suspicious_log)
+    assert "member='" + 'a' * up.MAX_LOGGED_VALUE_CHARS + "'..." in lines[0]
+    # an escape sequence is never split, and the line does not grow with it
+    assert "member='" + '\\U0001f600' * (up.MAX_LOGGED_VALUE_CHARS // 10) + "'..." in lines[1]
+    assert all(len(line) < 900 for line in lines)
+
+
+def test_suspicious_filename_log_counts_the_names_past_the_per_upload_limit(tmp_path, suspicious_log):
+    archive = str(tmp_path / 'x.zip')
+    _write_zip(archive, ['image1.fits', 'image2.fits'] + ['bad;%03d.fits' % i for i in range(150)])
+    found = up.SuspiciousFilenames()
+    result = up.check_archive_contents(archive, found)
+    up.log_suspicious_filenames(found, result + ('', ''))
+    lines = _log_lines(suspicious_log)
+    assert len(lines) == up.MAX_LOGGED_NAMES_PER_UPLOAD + 1
+    assert "member='bad;099.fits'" in lines[-2]
+    assert ("more='50 more suspicious names (shell special characters x50, "
+            "characters other than letters, digits, underscore, dash and dot x50)'") in lines[-1]
+
+
+def test_nothing_is_logged_without_suspicious_names(suspicious_log):
+    up.log_suspicious_filenames(up.SuspiciousFilenames(), (True, '', '', ''))
+    assert not suspicious_log.exists()
+
+
+def test_suspicious_filename_log_never_inside_web_served_dirs(tmp_path, monkeypatch):
+    here = os.path.dirname(os.path.abspath(up.__file__))
+    private = tmp_path / 'private'
+    private.mkdir()
+    default = os.path.join(os.path.realpath(str(private)), 'unmw_suspicious_filenames.txt')
+    monkeypatch.setenv('UNMW_CGITB_LOGDIR', str(private))
+    for var in ('HTDOCS_DIR', 'DATA_PROCESSING_ROOT', 'IMAGE_DATA_ROOT', 'DOCUMENT_ROOT'):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setattr(up, '_parse_config_value', lambda config_path, var_name: None)
+    # an uploads symlink in the current directory, as in the CGI directory
+    data_root = tmp_path / 'NMW_web_upload'
+    data_root.mkdir()
+    monkeypatch.chdir(str(tmp_path))
+    os.symlink(str(data_root), 'uploads')
+    htdocs = tmp_path / 'htdocs'
+    (htdocs / 'unmw').mkdir(parents=True)
+    other_data = tmp_path / 'other_data'
+    other_data.mkdir()
+    monkeypatch.setenv('HTDOCS_DIR', str(htdocs / 'unmw'))
+    monkeypatch.setenv('DOCUMENT_ROOT', str(htdocs))
+    monkeypatch.setenv('DATA_PROCESSING_ROOT', str(other_data))
+    for configured in ('suspicious.txt',                    # relative: inside the checkout
+                       'uploads/suspicious.txt',
+                       os.path.join(here, 'suspicious.txt'),
+                       str(data_root / 'suspicious.txt'),   # the uploads symlink target
+                       str(tmp_path / 'uploads' / 'x.txt'),
+                       str(htdocs / 'unmw' / 'suspicious.txt'),
+                       str(htdocs / 'suspicious.txt'),      # DOCUMENT_ROOT
+                       str(other_data / 'logs' / 'x.txt')):
+        monkeypatch.setenv('SUSPICIOUS_FILENAMES_LOG', configured)
+        path, complaint = up.suspicious_filenames_log_path()
+        assert path == default, configured
+        assert 'inside a web-served directory' in complaint
+    # a private location is used as given
+    monkeypatch.setenv('SUSPICIOUS_FILENAMES_LOG', str(tmp_path / 'logs' / 'x.txt'))
+    assert up.suspicious_filenames_log_path() == (os.path.join(os.path.realpath(str(tmp_path)), 'logs', 'x.txt'), '')
+    # unset: the cgitb log directory; if that is web-served, /tmp
+    monkeypatch.delenv('SUSPICIOUS_FILENAMES_LOG')
+    assert up.suspicious_filenames_log_path() == (default, '')
+    monkeypatch.setenv('UNMW_CGITB_LOGDIR', str(data_root))
+    path, complaint = up.suspicious_filenames_log_path()
+    assert path == os.path.join(os.path.realpath('/tmp'), 'unmw_suspicious_filenames.txt')
+    assert complaint
+
+
+def test_suspicious_filename_log_location_check_compares_directories_not_names(tmp_path, monkeypatch):
+    # A bind mount gives the data directory a second name that realpath()
+    # cannot see through; without realpath() a symlink does the same here
+    data_root = tmp_path / 'data'
+    data_root.mkdir()
+    os.symlink(str(data_root), str(tmp_path / 'mounted'))
+    published = up._directory_ids([str(data_root)])
+    assert up._inside(str(tmp_path / 'mounted' / 'logs' / 'x.txt'), published)
+    assert not up._inside(str(tmp_path / 'elsewhere' / 'x.txt'), published)
+
+
+def test_suspicious_filename_log_settings_with_variables(tmp_path, monkeypatch):
+    here = os.path.dirname(os.path.abspath(up.__file__))
+    monkeypatch.setattr(up, '_parse_config_value', lambda config_path, var_name: None)
+    monkeypatch.setenv('LOGS', str(tmp_path))
+    monkeypatch.setenv('SUSPICIOUS_FILENAMES_LOG', '$LOGS/x.txt')
+    assert up._config_path('SUSPICIOUS_FILENAMES_LOG', here) == (str(tmp_path / 'x.txt'), '')
+    monkeypatch.setenv('DATA_PROCESSING_ROOT', '$PWD/uploads')
+    assert up._config_path('DATA_PROCESSING_ROOT', here) == (os.path.join(here, 'uploads'), '')
+    monkeypatch.setenv('HTDOCS_DIR', '$WEB_ROOT_NOT_SET/htdocs/unmw')
+    path, complaint = up._config_path('HTDOCS_DIR', here)
+    assert path == '' and 'give it as an absolute path' in complaint
+
+
+def test_suspicious_filename_log_refuses_symlinks_fifos_links_and_planted_files(suspicious_log, monkeypatch, capsys):
+    found = up.SuspiciousFilenames()
+    found.note('member', 'x.php', ['not a .fit, .fits or .fts image'])
+    target = suspicious_log.parent / 'target.txt'
+    target.write_text('')
+    os.symlink(str(target), str(suspicious_log))
+    up.log_suspicious_filenames(found, (False, 'x', '', ''))
+    assert target.read_text() == ''
+    err = capsys.readouterr().err
+    assert 'cannot write the suspicious filename log' in err
+    assert '1 line(s) not logged' in err
+    assert 'x.php' not in err   # no client-supplied text in the error log
+    # a FIFO with no reader must not hang the upload
+    os.unlink(str(suspicious_log))
+    os.mkfifo(str(suspicious_log))
+    up.log_suspicious_filenames(found, (False, 'x', '', ''))
+    assert 'cannot write the suspicious filename log' in capsys.readouterr().err
+    # a hard link to another file
+    os.unlink(str(suspicious_log))
+    os.link(str(target), str(suspicious_log))
+    up.log_suspicious_filenames(found, (False, 'x', '', ''))
+    assert 'more than one hard link' in capsys.readouterr().err
+    assert target.read_text() == ''
+    # a file planted by another user (simulated: we are not its owner)
+    os.unlink(str(suspicious_log))
+    suspicious_log.write_text('')
+    if os.stat(str(suspicious_log)).st_uid != 0:
+        monkeypatch.setattr(up.os, 'geteuid', lambda: os.stat(str(suspicious_log)).st_uid + 1)
+        up.log_suspicious_filenames(found, (False, 'x', '', ''))
+        assert 'owned by another user' in capsys.readouterr().err
+        assert suspicious_log.read_text() == ''
+
+
+def test_suspicious_filename_log_rotates_at_its_size_limit(suspicious_log, monkeypatch):
+    monkeypatch.setattr(up, 'MAX_SUSPICIOUS_FILENAMES_LOG_BYTES', 1000)
+    old = b'x' * 900 + b'\n'
+    suspicious_log.write_bytes(old)
+    os.chmod(str(suspicious_log), 0o600)
+    found = up.SuspiciousFilenames()
+    found.note('member', 'x.php', ['not a .fit, .fits or .fts image'])
+    up.log_suspicious_filenames(found, (False, 'x', '', ''))
+    assert (suspicious_log.parent / (suspicious_log.name + '.1')).read_bytes() == old
+    lines = _log_lines(suspicious_log)
+    assert len(lines) == 1 and "member='x.php'" in lines[0]
+    # the next upload appends to the new log
+    up.log_suspicious_filenames(found, (False, 'x', '', ''))
+    assert len(_log_lines(suspicious_log)) == 2
+
+
+def test_suspicious_filename_log_ends_a_cut_off_line_first(suspicious_log):
+    cut = b"2026-10-08 22:26:15 -0500 addr='127.0.0.1' user='-' agent='a' upload='u' archive='a' member='b;"
+    suspicious_log.write_bytes(cut)
+    os.chmod(str(suspicious_log), 0o600)
+    found = up.SuspiciousFilenames()
+    found.note('member', 'x.php', ['not a .fit, .fits or .fts image'])
+    up.log_suspicious_filenames(found, (False, 'x', '', ''))
+    data = suspicious_log.read_bytes()
+    assert data.startswith(cut + b'\n')
+    assert data.count(b'\n') == 2 and b"member='x.php'" in data.splitlines()[1]
+
+
+def test_suspicious_filename_log_counts_the_lines_a_failed_write_lost(suspicious_log, monkeypatch, capsys):
+    found = up.SuspiciousFilenames()
+    for name in ('a.php', 'b.php', 'c.php'):
+        found.note('member', name, ['not a .fit, .fits or .fts image'])
+    real_write = os.write
+
+    def disk_fills_up(fd, data):
+        if b"member='" not in data:
+            return real_write(fd, data)
+        if not os.fstat(fd).st_size:
+            return real_write(fd, data[:data.index(b'\n') + 1] + data[data.index(b'\n') + 1:][:10])
+        raise OSError(errno.ENOSPC, 'No space left on device')
+    monkeypatch.setattr(up.os, 'write', disk_fills_up)
+    up.log_suspicious_filenames(found, (False, 'x', '', ''))
+    assert 'No space left on device; 2 line(s) not logged' in capsys.readouterr().err
+
+
+class _FakeFileItem:
+    def __init__(self, filename, data, name='file'):
+        self.name = name
+        self.filename = filename
+        self.file = io.BytesIO(data)
+
+
+class _FakeForm:
+    """What the handler uses of cgi.FieldStorage: .list and form['name']"""
+    def __init__(self, *parts):
+        self.list = list(parts)
+
+    def __getitem__(self, name):
+        parts = [part for part in self.list if part.name == name]
+        if not parts:
+            raise KeyError(name)
+        return parts[0] if len(parts) == 1 else parts
+
+
+def _upload_archive(tmp_path, names, big=True):
+    """A ZIP archive with the given members, over the 2MB minimum upload
+    size unless big is False."""
+    archive = tmp_path / 'upload_source.zip'
+    with zipfile.ZipFile(str(archive), 'w') as zf:
+        zf.writestr('image1.fits', os.urandom(up.MIN_FILE_SIZE) if big else FITS_STUB)
+        for name in names:
+            zf.writestr(name, FITS_STUB)
+    return archive.read_bytes()
+
+
+@pytest.fixture
+def uploads(tmp_path):
+    directory = tmp_path / 'uploads'
+    directory.mkdir()
+    return directory
+
+
+def test_secure_upload_handler_logs_the_upload_name_and_every_member(tmp_path, uploads, suspicious_log):
+    data = _upload_archive(tmp_path, ['image2.fits', '$(reboot).fits', '../../escape.fits'])
+    form = _FakeForm(_FakeFileItem('../evil name.zip', data))
+    ok, message, dirname, saved = up.secure_upload_handler(form, str(uploads))
+    assert (ok, message) == (False, 'Unsafe path in archive: ../../escape.fits')
+    assert os.listdir(str(uploads)) == []   # the rejected upload is gone...
+    lines = _log_lines(suspicious_log)   # ...but not its trace
+    assert len(lines) == 3
+    assert "archive='evil_name.zip' upload_name='../evil name.zip'" in lines[0]
+    assert "member='$(reboot).fits' problems='shell special characters" in lines[1]
+    assert "member='../../escape.fits' problems='path traversal'" in lines[2]
+    assert all("result='rejected: Unsafe path in archive: ../../escape.fits'" in line
+               for line in lines)
+    assert all(re.search(r"upload='web_upload_\d+[A-Za-z]{8}'", line) for line in lines)
+
+
+def test_secure_upload_handler_logs_the_members_of_a_small_probe(tmp_path, uploads, suspicious_log):
+    data = _upload_archive(tmp_path, ['../../etc/cron.d/x.fits', 'shell.php'], big=False)
+    form = _FakeForm(_FakeFileItem('probe.zip', data))
+    ok, message, _, _ = up.secure_upload_handler(form, str(uploads))
+    assert (ok, message) == (False, 'File size (0.0MB) outside allowed range')
+    assert os.listdir(str(uploads)) == []
+    lines = _log_lines(suspicious_log)
+    assert len(lines) == 2
+    assert "member='../../etc/cron.d/x.fits' problems='path traversal'" in lines[0]
+    assert "member='shell.php'" in lines[1]
+
+
+def test_secure_upload_handler_logs_the_members_of_a_disguised_archive(tmp_path, uploads, suspicious_log):
+    form = _FakeForm(_FakeFileItem('evil.php', _upload_archive(tmp_path, ['image2.fits', 'x;y.fits'])))
+    ok, message, _, _ = up.secure_upload_handler(form, str(uploads))
+    assert (ok, message) == (False, 'Invalid file extension: .php')
+    lines = _log_lines(suspicious_log)
+    assert len(lines) == 2
+    assert "upload_name='evil.php' problems='not a .zip or .rar name'" in lines[0]
+    assert "member='x;y.fits'" in lines[1]
+
+
+def test_secure_upload_handler_logs_every_file_part(tmp_path, uploads, suspicious_log):
+    # two 'file' parts make form['file'] a list, and the handler fails...
+    form = _FakeForm(_FakeFileItem('../../etc/cron.d/x.zip', b'x'), _FakeFileItem('shell.php', b'x'))
+    ok, message, _, _ = up.secure_upload_handler(form, str(uploads))
+    assert not ok and message == 'Please upload exactly one archive'
+    lines = _log_lines(suspicious_log)   # ...after noting both names
+    assert len(lines) == 2
+    assert "upload_name='../../etc/cron.d/x.zip'" in lines[0] and "upload_name='shell.php'" in lines[1]
+    # a file part under another field name is noted too
+    form = _FakeForm(_FakeFileItem('../x.zip', b'x', name='upload'))
+    assert up.secure_upload_handler(form, str(uploads))[:2] == (False, "No file uploaded")
+    assert "upload_name='../x.zip'" in _log_lines(suspicious_log)[2]
+
+
+def test_secure_upload_handler_with_a_real_multipart_request(tmp_path, uploads, suspicious_log):
+    if not hasattr(up.cgi.FieldStorage, 'read_multi'):
+        pytest.skip('no cgi module (legacy-cgi) in this Python')
+    body = (b'--B\r\nContent-Disposition: form-data; name="file"; filename="../a.zip"\r\n'
+            b'Content-Type: application/zip\r\n\r\nPK\r\n'
+            b'--B\r\nContent-Disposition: form-data; name="file"; filename="shell.php"\r\n'
+            b'Content-Type: application/octet-stream\r\n\r\nx\r\n--B--\r\n')
+    environ = {'REQUEST_METHOD': 'POST', 'CONTENT_TYPE': 'multipart/form-data; boundary=B',
+               'CONTENT_LENGTH': str(len(body))}
+    form = up.cgi.FieldStorage(fp=io.BytesIO(body), environ=environ)
+    ok, message, _, _ = up.secure_upload_handler(form, str(uploads))
+    assert not ok
+    lines = _log_lines(suspicious_log)
+    assert len(lines) == 2
+    assert "upload_name='../a.zip'" in lines[0] and "upload_name='shell.php'" in lines[1]
+
+
+def test_secure_upload_handler_logs_accepted_uploads_too(tmp_path, uploads, suspicious_log):
+    form = _FakeForm(_FakeFileItem('my images.zip', _upload_archive(tmp_path, ['image2.fits'])))
+    ok, message, dirname, saved = up.secure_upload_handler(form, str(uploads))
+    assert ok, message
+    assert os.path.basename(saved) == 'my_images.zip'
+    lines = _log_lines(suspicious_log)
+    assert len(lines) == 1
+    assert "archive='my_images.zip' upload_name='my images.zip'" in lines[0]
+    assert lines[0].endswith("result='accepted'")
+
+
+def test_secure_upload_handler_logs_nothing_for_a_clean_upload(tmp_path, uploads, suspicious_log):
+    form = _FakeForm(_FakeFileItem('2025-01-07_Vul8_183150_Stas.zip',
+                                   _upload_archive(tmp_path, ['image2.fits'])))
+    ok, message, dirname, saved = up.secure_upload_handler(form, str(uploads))
+    assert ok, message
+    assert not suspicious_log.exists()
+
+
+def test_secure_upload_handler_logs_even_if_the_handler_raises(tmp_path, suspicious_log, monkeypatch):
+    def exploding(form, upload_dir, found):
+        found.note('upload_name', '../x.zip', up.upload_name_problems('../x.zip'))
+        raise RuntimeError('boom')
+    monkeypatch.setattr(up, '_handle_upload', exploding)
+    with pytest.raises(RuntimeError):
+        up.secure_upload_handler(_FakeForm(), str(tmp_path))
+    assert "result='rejected: Upload error: unexpected exception'" in suspicious_log.read_text()
+
+
+def test_member_problems_directory_checks_match_a_per_directory_check():
+    # The directory patterns run over the whole directory part at once; the
+    # result must be what checking each directory name separately gives
+    import random
+    rng = random.Random(1)
+    alphabet = ['a', 'b', '.', '/', '\\', ';', '$', '|', '<', '?', ' ', '..', '\n']
+
+    def per_directory(name, is_dir):
+        parts = re.split(r'[/\\]', name)
+        found = set()
+        for part in parts if is_dir else parts[:-1]:
+            if part in ('', '.', '..'):
+                continue
+            if part.startswith('.'):
+                found.add('hidden directory')
+            if re.search(r'[<>:"|?*]', part):
+                found.add('Windows special characters in a directory name')
+            if re.search(r'[;&|`$]', part):
+                found.add('shell special characters in a directory name')
+        return found
+    for _ in range(20000):
+        name = ''.join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
+        is_dir = rng.random() < 0.3
+        got = set(problem for problem in up.member_problems(name, is_dir)
+                  if 'directory' in problem)
+        assert got == per_directory(name, is_dir), (name, is_dir)
+
+
+def test_member_problems_cost_does_not_grow_with_the_directory_count():
+    import time
+    start = time.time()
+    for _ in range(10):
+        up.member_problems('a/' * 32000 + 'x.fits')
+    assert time.time() - start < 1.0
+
+
+def _rar(tmp_path, names, symlinks=(), sfx=None):
+    """A RAR archive of FITS stubs and symlinks (name, target), made by the rar
+    binary; a self-extracting one with sfx, the path of an SFX module"""
+    src = tmp_path / 'rar_src'
+    src.mkdir()
+    for name in names:
+        (src / name).write_bytes(FITS_STUB)
+    for name, target in symlinks:
+        os.symlink(target, str(src / name))
+    archive = str(tmp_path / ('x.sfx' if sfx else 'x.rar'))
+    command = ['rar', 'a', '-ep', '-ol'] + (['-sfx' + sfx] if sfx else []) + [archive]
+    subprocess.run(command + list(names) + [name for name, _ in symlinks],
+                   cwd=str(src), check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return archive
+
+
+needs_rar = pytest.mark.skipif(shutil.which('rar') is None, reason='needs the rar binary')
+
+
+@needs_rar
+@pytest.mark.parametrize('symlinks', [
+    # a target imitating a 'Type:' line (a second Type line)
+    [('hide.fits', '/etc/passwd\n        Type: File')],
+    # a target imitating a whole member
+    [('poison.fits', '/x\n\n        Name: injected.php\n        Type: File')],
+    # a name imitating a 'Type:' line, balanced by a 'Name:' line in the target
+    [('img1.fits\n        Type: File', '/etc/passwd\n        Name: Type: File')],
+    [('shell.php\n        Type: Directory', 'x\n\n        Name: Type: Directory\n        Type: File')],
+])
+def test_rar_technical_listing_cannot_be_forged(tmp_path, monkeypatch, symlinks):
+    # The production backend: no rarfile, the rar binary lists the archive
+    monkeypatch.setattr(up, 'HAVE_RARFILE', False)
+    archive = _rar(tmp_path, ['a.fits', 'b.fits'], symlinks=symlinks)
+    found = up.SuspiciousFilenames()
+    up.check_archive_contents(archive, found)
+    # the listing is not trusted, and the log says so; what is logged are the
+    # names of the bare listing the verdict saw, never a forged member
+    assert len(found.remarks) == 1 and 'disagree' in found.remarks[0]
+    bare = up.rar_member_names_via_binary(archive)
+    assert all(name in bare for name in _logged_names(found))
+    assert 'injected.php' not in _logged_names(found)
+
+
+@needs_rar
+def test_rar_technical_listing_trusted_for_an_honest_archive(tmp_path, monkeypatch):
+    monkeypatch.setattr(up, 'HAVE_RARFILE', False)
+    archive = _rar(tmp_path, ['a.fits', 'b.fits', ' lead.fits', 'c.fits\nd.fits'],
+                   symlinks=[('link.fits', '/etc/passwd'), ('nl.fits', 'x\ny')])
+    found = up.SuspiciousFilenames()
+    up.check_archive_contents(archive, found)
+    assert found.remarks == []
+    problems = dict((name, found_problems) for _, name, found_problems in found.entries)
+    assert problems['link.fits'] == ['symlink'] and problems['nl.fits'] == ['symlink']
+    assert ' lead.fits' in problems and 'c.fits\nd.fits' in problems
+
+
+def test_rar_technical_listing_parser_bounds_and_header():
+    head = [b'Archive: x.rar\n', b'Details: RAR 5\n', b'\n']
+
+    def member(name, kind=b'File'):
+        return [b'        Name: ' + name + b'\n', b'        Type: ' + kind + b'\n', b'\n']
+    lines = head + member(b'a.fits') + member(b'sub', b'Directory') + member(b'l.fits', b'Unix symbolic link')
+    assert up._parse_rar_technical_listing(iter(lines), 'Archive: x.rar') == (
+        [['a.fits', False, False], ['sub', True, False], ['l.fits', False, True]], True)
+    # no 'Archive:' line naming the file: not understood, no verdict on it
+    assert up._parse_rar_technical_listing(iter(lines), 'Archive: y.rar') is None
+    # a name of countless line breaks stops being read
+    flood = head + [b'        Name: a.fits\n'] + [b'\n'] * (20 * up.MAX_ARCHIVE_MEMBERS + 5)
+    assert up._parse_rar_technical_listing(iter(flood), 'Archive: x.rar')[1] is False
+
+
+def test_rar_technical_listing_stops_after_the_member_limit(monkeypatch):
+    monkeypatch.setattr(up, 'MAX_ARCHIVE_MEMBERS', 3)
+    lines = [b'Archive: x.rar\n', b'Details: RAR 5\n', b'\n']
+    for i in range(10):
+        lines += [b'        Name: m%d.fits\n' % i, b'        Type: File\n', b'\n']
+    members, regular = up._parse_rar_technical_listing(iter(lines), 'Archive: x.rar')
+    assert [name for name, _, _ in members] == ['m0.fits', 'm1.fits', 'm2.fits'] and not regular
+
+
+def test_rar_technical_listing_skipped_for_an_oversized_archive(monkeypatch):
+    def must_not_run(filepath):
+        raise AssertionError('rar lt run for an archive the verdict rejects anyway')
+    monkeypatch.setattr(up, 'rar_members_via_binary', must_not_run)
+    filelist = ['image%04d.fits' % i for i in range(up.MAX_ARCHIVE_MEMBERS + 3)]
+    filelist[5] = 'evil.php'
+    found = up.SuspiciousFilenames()
+    up.note_archive_members(found, 'x.rar', filelist=filelist)
+    assert _logged_names(found) == ['evil.php'] and found.unexamined == 3
+    assert found.remarks == ['too many members to read their types: symlink members cannot be told']
+
+
+@needs_rar
+def test_secure_upload_handler_logs_a_zip_uploaded_as_rar(tmp_path, uploads, suspicious_log, monkeypatch):
+    # The rar binary lists nothing for ZIP data: list it as what it is
+    monkeypatch.setattr(up, 'HAVE_RARFILE', False)
+    monkeypatch.setattr(up, 'validate_archive_type', lambda filepath: (True, ''))   # no python-magic
+    form = _FakeForm(_FakeFileItem('night.rar', _upload_archive(tmp_path, ['image2.fits', '../../x.fits'])))
+    ok, message, _, _ = up.secure_upload_handler(form, str(uploads))
+    assert not ok and message.startswith('Cannot validate RAR archive:')
+    assert "member='../../x.fits'" in suspicious_log.read_text()
+
+
+@needs_rar
+def test_rejected_archive_listed_as_rar_and_as_zip(tmp_path, monkeypatch):
+    monkeypatch.setattr(up, 'HAVE_RARFILE', False)
+    # a small RAR probe whose last member is a ZIP with innocent names
+    decoy = tmp_path / 'zz.zip'
+    _write_zip(str(decoy), ['a.fits', 'b.fits'])
+    (tmp_path / 'rar_src').mkdir()
+    shutil.copy(str(decoy), str(tmp_path / 'rar_src' / 'zz.zip'))
+    (tmp_path / 'rar_src' / 'shell.php').write_bytes(b'x')
+    archive = str(tmp_path / 'probe.rar')
+    subprocess.run(['rar', 'a', '-ep', '-m0', archive, 'shell.php', 'zz.zip'],
+                   cwd=str(tmp_path / 'rar_src'), check=True, stdout=subprocess.DEVNULL)
+    assert zipfile.is_zipfile(archive)
+    found = up.SuspiciousFilenames()
+    up.note_rejected_archive_members(found, archive)
+    assert 'shell.php' in _logged_names(found)
+
+
+@needs_rar
+def test_rejected_rar_after_a_long_prefix_is_listed(tmp_path, monkeypatch):
+    # rar finds an archive up to 4 MiB into a file (a self-extractor stub)
+    monkeypatch.setattr(up, 'HAVE_RARFILE', False)
+    archive = _rar(tmp_path, ['a.fits', 'x;y.fits'])
+    padded = tmp_path / 'padded.rar'
+    padded.write_bytes(b'\0' * 1500000 + open(archive, 'rb').read())
+    found = up.SuspiciousFilenames()
+    up.note_rejected_archive_members(found, str(padded))
+    assert _logged_names(found) == ['x;y.fits']
+
+
+def test_rejected_archive_not_listed_again_as_what_was_tried(tmp_path, monkeypatch):
+    # The content check already ran the rar binary on a .rar upload
+    def must_not_run(filepath):
+        raise AssertionError('listed again')
+    monkeypatch.setattr(up, 'HAVE_RARFILE', False)
+    monkeypatch.setattr(up, 'rar_member_names_via_binary', must_not_run)
+    probe = tmp_path / 'x.rar'
+    probe.write_bytes(b'Rar!\x1a\x07\x01\x00 corrupt')
+    up.note_rejected_archive_members(up.SuspiciousFilenames(), str(probe), tried='.rar')
+
+
+@needs_rar
+def test_rejected_self_extracting_rar_is_listed(tmp_path, monkeypatch):
+    monkeypatch.setattr(up, 'HAVE_RARFILE', False)
+    module = os.path.join(os.path.dirname(os.path.realpath(shutil.which('rar'))), 'default.sfx')
+    if not os.path.isfile(module):
+        pytest.skip('no self-extractor module next to the rar binary')
+    archive = _rar(tmp_path, ['a.fits', 'x;y.fits'], sfx=module)
+    assert not open(archive, 'rb').read(6).startswith(b'Rar!')
+    found = up.SuspiciousFilenames()
+    up.note_rejected_archive_members(found, archive)
+    assert _logged_names(found) == ['x;y.fits']
+
+
+def test_secure_upload_handler_with_a_nested_multipart_part(tmp_path, uploads, suspicious_log):
+    if not hasattr(up.cgi.FieldStorage, 'read_multi'):
+        pytest.skip('no cgi module (legacy-cgi) in this Python')
+    body = (b'--B\r\nContent-Disposition: form-data; name="file"\r\n'
+            b'Content-Type: multipart/mixed; boundary=C\r\n\r\n'
+            b'--C\r\nContent-Disposition: file; filename="../../etc/cron.d/evil.zip"\r\n'
+            b'Content-Type: application/zip\r\n\r\nPK\r\n'
+            b'--C\r\nContent-Disposition: file; filename="shell.php"\r\n'
+            b'Content-Type: text/plain\r\n\r\nx\r\n--C--\r\n--B--\r\n')
+    environ = {'REQUEST_METHOD': 'POST', 'CONTENT_TYPE': 'multipart/form-data; boundary=B',
+               'CONTENT_LENGTH': str(len(body))}
+    form = up.cgi.FieldStorage(fp=io.BytesIO(body), environ=environ)
+    ok, message, _, _ = up.secure_upload_handler(form, str(uploads))
+    assert not ok
+    lines = _log_lines(suspicious_log)
+    assert len(lines) == 2
+    assert "upload_name='../../etc/cron.d/evil.zip'" in lines[0] and "upload_name='shell.php'" in lines[1]
+
+
+def test_suspicious_filename_log_remarks_are_logged_without_names(suspicious_log):
+    found = up.SuspiciousFilenames()
+    found.remarks.append('the two listings disagree')
+    up.log_suspicious_filenames(found, (True, '', '', ''))
+    lines = _log_lines(suspicious_log)
+    assert len(lines) == 1 and "more='the two listings disagree' result='accepted'" in lines[0]
+
+
+def test_suspicious_filename_log_appends_to_a_write_only_log(suspicious_log):
+    suspicious_log.write_bytes(b'')
+    os.chmod(str(suspicious_log), 0o200)
+    found = up.SuspiciousFilenames()
+    found.note('member', 'x.php', ['not a .fit, .fits or .fts image'])
+    up.log_suspicious_filenames(found, (False, 'x', '', ''))
+    os.chmod(str(suspicious_log), 0o600)
+    assert "member='x.php'" in suspicious_log.read_text()
+
+
+def test_suspicious_filename_log_settings_refer_to_other_settings(tmp_path, monkeypatch):
+    here = os.path.dirname(os.path.abspath(up.__file__))
+    settings = {'IMAGE_DATA_ROOT': str(tmp_path / 'data'), 'DATA_PROCESSING_ROOT': '$IMAGE_DATA_ROOT',
+                'WEB_ROOT': str(tmp_path / 'web'), 'HTDOCS_DIR': '${WEB_ROOT}/unmw'}
+    monkeypatch.setattr(up, '_parse_config_value', lambda config_path, var_name: settings.get(var_name))
+    for var in settings:
+        monkeypatch.delenv(var, raising=False)
+    assert up._config_path('DATA_PROCESSING_ROOT', here) == (str(tmp_path / 'data'), '')
+    assert up._config_path('HTDOCS_DIR', here) == (str(tmp_path / 'web' / 'unmw'), '')
+    # bash quoting, as in local_config.sh_example, and $PWD in a referenced setting
+    settings.update({'HTDOCS_DIR': '"$WEB_ROOT"/unmw', 'WEB_ROOT': '$PWD/../htdocs',
+                     # what _parse_config_value() leaves of '"/var/log/x.txt" # comment'
+                     'SUSPICIOUS_FILENAMES_LOG': '/var/log/x.txt"'})
+    assert up._config_path('HTDOCS_DIR', here) == (os.path.join(here, '..', 'htdocs', 'unmw'), '')
+    assert up._config_path('SUSPICIOUS_FILENAMES_LOG', here) == ('/var/log/x.txt', '')
+
+
+@pytest.mark.parametrize('filename', ['.', '..', 'x/', '/', 'a' * 252 + '.zip', 'a' * 300 + '.zip'])
+def test_upload_invalid_basename_leaves_no_debris(filename, uploads, suspicious_log):
+    result = up.secure_upload_handler(_FakeForm(_FakeFileItem(filename, b'x')), str(uploads))
+    assert not result[0]
+    assert result[2:] == ('', '')
+    assert not list(uploads.iterdir())
+    assert str(uploads) not in result[1]
+
+
+def test_upload_255_character_name_is_supported(tmp_path, uploads, suspicious_log):
+    filename = 'a' * 251 + '.zip'
+    form = _FakeForm(_FakeFileItem(filename, _upload_archive(tmp_path, ['b.fits'])))
+    result = up.secure_upload_handler(form, str(uploads))
+    assert result[0], result[1]
+    assert os.path.basename(result[3]) == filename
+
+
+def test_upload_directory_collision_preserves_existing_data(uploads, monkeypatch, suspicious_log):
+    monkeypatch.setattr(up.secrets, 'choice', lambda alphabet: 'a')
+    collision = uploads / ('web_upload_%daaaaaaaa' % os.getpid())
+    collision.mkdir()
+    sentinel = collision / 'night.zip'
+    sentinel.write_bytes(b'existing upload')
+    result = up.secure_upload_handler(_FakeForm(_FakeFileItem('night.zip', b'x')), str(uploads))
+    assert not result[0]
+    assert sentinel.read_bytes() == b'existing upload'
+
+
+@pytest.mark.parametrize('suffix,payload', [('.rar', b'PK\x03\x04data'),
+                                          ('.zip', b'Rar!\x1a\x07\x01\x00'),
+                                          ('.zip', b'not an archive')])
+def test_archive_type_checks_content_without_magic(tmp_path, suffix, payload):
+    path = tmp_path / ('night' + suffix)
+    path.write_bytes(payload)
+    assert up.validate_archive_type(str(path))[0] is False
+
+
+def test_empty_zip_member_is_a_validation_error(tmp_path):
+    path = tmp_path / 'empty-name.zip'
+    with zipfile.ZipFile(str(path), 'w') as archive:
+        archive.writestr(zipfile.ZipInfo(''), b'x')
+    assert up.check_archive_contents(str(path)) == (False, 'Empty filename in archive')
+
+
+def test_symlink_cannot_hide_behind_directory_name(tmp_path):
+    path = tmp_path / 'directory-link.zip'
+    _write_zip(str(path), ['a.fits', 'b.fits'], symlinks=['link.fits/'])
+    assert up.check_archive_contents(str(path)) == (
+        False, 'Symlink in archive is not allowed: link.fits/')
+
+
+@pytest.fixture
+def upload_request(uploads, monkeypatch, suspicious_log):
+    monkeypatch.chdir(uploads.parent)
+    monkeypatch.setenv('REQUEST_METHOD', 'POST')
+    monkeypatch.setenv('CONTENT_TYPE', 'multipart/form-data; boundary=nmwtest')
+    monkeypatch.setattr(up, 'check_disk_space_status', lambda directory: ('OK', ''))
+    real_open = open
+    monkeypatch.setattr(up, 'open',
+                        lambda path, *args, **kwargs: io.StringIO('0 0 0 1/1 1')
+                        if path == '/proc/loadavg' else real_open(path, *args, **kwargs),
+                        raising=False)
+
+    def request(body=b'', content_length=None):
+        stream = io.BytesIO(body)
+        monkeypatch.setattr(up.sys, 'stdin', types.SimpleNamespace(buffer=stream))
+        monkeypatch.setenv('CONTENT_LENGTH', str(len(body)) if content_length is None else content_length)
+        return stream
+    return request
+
+
+def test_upload_response_escapes_malicious_member(tmp_path, upload_request, monkeypatch, capsys):
+    attack = '<img src=x onerror=alert(1)>.fits'
+    form = _FakeForm(_FakeFileItem('night.zip', _upload_archive(tmp_path, [attack])))
+    monkeypatch.setattr(up.cgi, 'FieldStorage', lambda **kwargs: form)
+    upload_request()
+    with pytest.raises(SystemExit):
+        up.main()
+    response = capsys.readouterr().out
+    assert 'UNMW_STATUS:ERROR' in response
+    assert attack not in response
+    assert '&lt;img src=x onerror=alert(1)&gt;.fits' in response
+
+
+@pytest.mark.parametrize('length,status', [('', 411), ('-1', 400), ('invalid', 400),
+                                         ('9' * 21, 400), (str(up.MAX_REQUEST_SIZE + 1), 413)])
+def test_upload_request_limit_precedes_parsing(upload_request, monkeypatch, capsys, length, status):
+    stream = upload_request(b'body must not be read', content_length=length)
+    monkeypatch.setattr(up.cgi, 'FieldStorage', lambda **kwargs: pytest.fail('parsed oversized request'))
+    with pytest.raises(SystemExit):
+        up.main()
+    assert stream.tell() == 0
+    response = capsys.readouterr().out
+    assert 'Status: %d' % status in response
+    assert 'UNMW_STATUS:ERROR' in response
+
+
+@pytest.mark.parametrize('method', ['read', 'readline'])
+def test_request_stream_never_reads_past_declared_length(method):
+    raw = io.BytesIO(b'1234567890')
+    stream = up.LimitedRequestBody(raw, 5)
+    assert getattr(stream, method)() == b'12345'
+    assert getattr(stream, method)(100) == b''
+    assert raw.tell() == 5
+
+
+@pytest.mark.parametrize('content_type', ['', 'text/plain', 'application/zip',
+                                         'application/x-www-form-urlencoded'])
+def test_upload_rejects_non_multipart_without_reading(upload_request, monkeypatch, capsys, content_type):
+    stream = upload_request(b'must not be parsed')
+    monkeypatch.setenv('CONTENT_TYPE', content_type)
+    monkeypatch.setattr(up.cgi, 'FieldStorage', lambda **kwargs: pytest.fail('parsed non-multipart body'))
+    with pytest.raises(SystemExit):
+        up.main()
+    assert stream.tell() == 0
+    assert '415 Unsupported Media Type' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('headers', [b'x' * (up.MAX_MULTIPART_HEADER_BYTES + 1),
+                                   b'X: y\r\n' * (up.MAX_MULTIPART_HEADER_BYTES // 6 + 1)])
+def test_multipart_header_memory_is_bounded(upload_request, capsys, headers):
+    if not hasattr(up.cgi.FieldStorage, 'read_multi'):
+        pytest.skip('needs legacy-cgi')
+    stream = upload_request(b'--nmwtest\r\n' + headers + b'\r\n\r\nignored')
+    with pytest.raises(SystemExit):
+        up.main()
+    assert stream.tell() <= up.MAX_MULTIPART_HEADER_BYTES + 1
+    assert 'UNMW_STATUS:ERROR Invalid upload request' in capsys.readouterr().out
+
+
+def test_multipart_parser_cannot_read_whole_large_body():
+    raw = io.BytesIO(b'x' * (up.MAX_MULTIPART_HEADER_BYTES + 1))
+    stream = up.LimitedRequestBody(raw, len(raw.getvalue()))
+    with pytest.raises(ValueError, match='oversized read'):
+        stream.read()
+    assert raw.tell() == 0
+
+
+def test_unexpected_upload_error_is_generic(upload_request, monkeypatch, capsys):
+    def broken_parser(**kwargs):
+        raise RuntimeError('secret /srv/private/<script>')
+    monkeypatch.setattr(up.cgi, 'FieldStorage', broken_parser)
+    upload_request()
+    with pytest.raises(SystemExit):
+        up.main()
+    response = capsys.readouterr()
+    assert 'UNMW_STATUS:ERROR Unable to handle the upload' in response.out
+    assert 'secret' not in response.out and '/srv/private' not in response.out
+    assert 'secret' in response.err
+
+
+def test_real_multipart_request_is_bounded(upload_request, monkeypatch, capsys):
+    if not hasattr(up.cgi.FieldStorage, 'read_multi'):
+        pytest.skip('needs legacy-cgi')
+    monkeypatch.setenv('CONTENT_TYPE', 'multipart/form-data; boundary=nmwtest')
+    body = (b'--nmwtest\r\nContent-Disposition: form-data; name="file"; filename="x.zip"'
+            b'\r\n\r\nx\r\n--nmwtest--\r\n')
+    raw = upload_request(body + b'excess data', content_length=str(len(body)))
+    with pytest.raises(SystemExit):
+        up.main()
+    assert raw.tell() <= len(body)
+    assert 'UNMW_STATUS:ERROR File size' in capsys.readouterr().out
+
+
+def test_zip_member_limit_cannot_be_bypassed_by_forged_count(tmp_path, monkeypatch):
+    archive = tmp_path / 'many.zip'
+    _write_zip(str(archive), ['a%d.fits' % i for i in range(up.MAX_ARCHIVE_MEMBERS + 1)], payload=b'x')
+    data = bytearray(archive.read_bytes())
+    end = data.rfind(b'PK\x05\x06')
+    import struct
+    struct.pack_into('<HH', data, end + 8, 1, 1)
+    archive.write_bytes(data)
+    # The costly ZipFile constructor must never be reached.
+    monkeypatch.setattr(up.zipfile, 'ZipFile', lambda *args, **kwargs: pytest.fail('unbounded parser'))
+    valid, message = up.check_archive_contents(str(archive))
+    assert not valid and 'Too many files' in message
+
+
+def test_zip_metadata_limit_also_applies_to_rejected_archive_logging(tmp_path, monkeypatch):
+    archive = tmp_path / 'large-directory.zip'
+    _write_zip(str(archive), ['a.fits', 'b.fits'])
+    monkeypatch.setattr(up, 'MAX_ZIP_DIRECTORY_BYTES', 10)
+    monkeypatch.setattr(up.zipfile, 'ZipFile', lambda *args, **kwargs: pytest.fail('unbounded parser'))
+    found = up.SuspiciousFilenames()
+    assert not up.check_archive_contents(str(archive), found)[0]
+    up.note_rejected_archive_members(found, str(archive))
+    assert found.members_examined
+    assert 'metadata limit' in found.remarks[0]
+
+
+def test_zip64_directory_preflight(tmp_path, monkeypatch):
+    archive = tmp_path / 'zip64.zip'
+    monkeypatch.setattr(zipfile, 'ZIP64_LIMIT', 20)
+    _write_zip(str(archive), ['a.fits', 'b.fits'])
+    assert up.check_archive_contents(str(archive)) == (True, '')
+
+
+@pytest.mark.parametrize('name', [
+    '../escape.fits', 'night/../escape.fits', '/escape.fits', '//host/share/a.fits',
+    'C:/night/a.fits', 'C:a.fits', r'C:\night\a.fits', r'\night\a.fits',
+    r'..\escape.fits', r'night\..\a.fits', r'\\host\share\a.fits',
+    '../', 'night/../', '/empty/', 'C:/empty/', r'..\empty/',
+])
+def test_unsafe_zip_path_rejects_entire_upload(tmp_path, uploads, suspicious_log, name):
+    # Two good images remain: deleting only the bad member would be a bug.
+    data = _upload_archive(tmp_path, ['image2.fits', name])
+    result = up.secure_upload_handler(_FakeForm(_FakeFileItem('night.zip', data)), str(uploads))
+    assert result[0] is False and 'Unsafe path in archive:' in result[1]
+    assert result[2:] == ('', '')
+    assert not list(uploads.iterdir())
+    assert 'path traversal' in suspicious_log.read_text() or 'absolute path' in suspicious_log.read_text()
+
+
+@pytest.mark.parametrize('name', ['night/a.fits', './night/a.fits', 'night/./a.fits',
+                                 'night..old/a.fits', 'night/', 'night..old/'])
+def test_safe_relative_zip_paths_still_work(tmp_path, name):
+    archive = tmp_path / 'night.zip'
+    _write_zip(str(archive), ['a.fits', 'b.fits', name])
+    assert up.check_archive_contents(str(archive)) == (True, '')
+
+
+def _technical_listing(filepath, records):
+    lines = ['Archive: ' + os.path.abspath(str(filepath)), 'Details: RAR 5', '']
+    for record in records:
+        lines.extend('        %s: %s' % (key, value) for key, value in record)
+        lines.append('')
+    return [(line + '\n').encode('utf-8') for line in lines]
+
+
+def _rar_fields(name, kind='File', size=100, packed=100):
+    return [('Name', name), ('Type', kind), ('Size', str(size)), ('Packed size', str(packed))]
+
+
+@pytest.mark.parametrize('case', ['valid', 'directory', 'symlink', 'hardlink', 'copy',
+                                 'encrypted', 'negative_size', 'missing_size', 'duplicate_size',
+                                 'duplicate_type', 'mismatch', 'blank_name', 'line_injection',
+                                 'expansion', 'ratio', 'zero_packed'])
+def test_rar_binary_validates_types_sizes_and_unambiguous_names(monkeypatch, case):
+    monkeypatch.setattr(up, 'HAVE_RARFILE', False)
+    records = [_rar_fields('a.fits'), _rar_fields('b.fits')]
+    if case == 'directory':
+        records += [_rar_fields('night', 'Directory', 0, 0)]
+    elif case in ('symlink', 'hardlink', 'copy'):
+        records += [_rar_fields('link.fits', {'symlink': 'Unix symbolic link',
+                                             'hardlink': 'Hard link', 'copy': 'File reference'}[case])]
+    elif case == 'encrypted':
+        records[0] += [('Flags', 'encrypted')]
+    elif case == 'negative_size':
+        records[0][2] = ('Size', '-1')
+    elif case == 'missing_size':
+        records[0].pop(2)
+    elif case in ('duplicate_size', 'duplicate_type'):
+        records[0].append(records[0][2 if case == 'duplicate_size' else 1])
+    elif case == 'blank_name':
+        records[0][0] = ('Name', '')
+    elif case == 'line_injection':
+        records[0][0] = ('Name', 'a.fits\n        Type: File\n        Size: 1')
+    elif case == 'expansion':
+        records[0][2] = ('Size', str(up.MAX_UNCOMPRESSED_BYTES + 1))
+    elif case == 'ratio':
+        records[0][2] = ('Size', '1000000')
+    elif case == 'zero_packed':
+        records = [_rar_fields('a.fits', size=1000, packed=0), _rar_fields('b.fits', size=1000, packed=0)]
+    bare = [(record[0][1] + '\n').encode('utf-8') for record in records]
+    if case == 'mismatch':
+        bare[0] = b'different.fits\n'
+    technical = _technical_listing('night.rar', records)
+    # Real tools split injected newlines into separate output lines.
+    technical = b''.join(technical).splitlines(keepends=True)
+    monkeypatch.setattr(up, '_rar_listing_lines', lambda path, mode: bare if mode == 'lb' else technical)
+    result = up.check_archive_contents('night.rar')
+    assert result[0] is (case in ('valid', 'directory')), result
+
+
+@pytest.mark.parametrize('scenario', ['bytes', 'line', 'members', 'timeout', 'exit_error'])
+def test_native_rar_listing_is_bounded_and_reaped(monkeypatch, scenario):
+    real_popen = subprocess.Popen
+    processes = []
+    monkeypatch.setattr(up, 'MAX_RAR_LISTING_BYTES', 100)
+    monkeypatch.setattr(up, 'MAX_RAR_LISTING_LINE_BYTES', 40)
+    monkeypatch.setattr(up, 'MAX_ARCHIVE_MEMBERS', 10)
+    monkeypatch.setattr(up, 'RAR_LISTING_TIMEOUT', 0.15 if scenario == 'timeout' else 2)
+    monkeypatch.setenv('RAR', '-x*')
+    monkeypatch.setenv('RARINISWITCHES', '-x*')
+    payload = {'bytes': b'a' * 30 + b'\n', 'line': b'a' * 41,
+               'members': b'\n', 'timeout': b'', 'exit_error': b'a.fits\n'}[scenario]
+    repeats = {'bytes': 4, 'line': 1, 'members': 11, 'timeout': 1, 'exit_error': 1}[scenario]
+    code = ('import sys,time; sys.stdout.buffer.write(%r * %d); sys.stdout.flush(); '
+            '%s' % (payload, repeats, 'sys.exit(7)' if scenario == 'exit_error' else 'time.sleep(10)'))
+
+    def spawn(command, **kwargs):
+        assert '-cfg-' in command and '-c-' in command and '-p-' in command and '-scf' in command
+        assert command[-2] == '--' and os.path.isabs(command[-1])
+        assert kwargs['stdin'] == subprocess.DEVNULL
+        assert kwargs['env']['LC_ALL'] == up._rar_utf8_locale()
+        assert kwargs['env']['LANGUAGE'] == 'C'
+        assert 'RAR' not in kwargs['env'] and 'RARINISWITCHES' not in kwargs['env']
+        process = real_popen([sys.executable, '-c', code], **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(up.subprocess, 'Popen', spawn)
+    expected = {'bytes': 'metadata limit', 'line': 'metadata limit', 'members': 'member or line limit',
+                'timeout': 'failed or timed out', 'exit_error': 'failed or timed out'}[scenario]
+    with pytest.raises(up.RarValidationError, match=expected):
+        up._rar_listing_lines('night.rar', 'lb')
+    assert len(processes) == 1 and processes[0].poll() is not None
+
+
+@needs_rar
+@pytest.mark.parametrize('backend', ['binary', 'rarfile'])
+@pytest.mark.parametrize('prefix', ['../', '/absolute/', 'night/../', 'C:/night/'])
+def test_real_rar_unsafe_paths_reject_archive(tmp_path, monkeypatch, backend, prefix):
+    if backend == 'rarfile' and not up.HAVE_RARFILE:
+        pytest.skip('rarfile is optional')
+    monkeypatch.setattr(up, 'HAVE_RARFILE', backend == 'rarfile')
+    for name in ('a.fits', 'b.fits'):
+        (tmp_path / name).write_bytes(FITS_STUB)
+    archive = tmp_path / 'paths.rar'
+    subprocess.run(['rar', 'a', '-idq', '-m0', '-ap' + prefix, str(archive), 'a.fits', 'b.fits'],
+                   cwd=str(tmp_path), check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = up.check_archive_contents(str(archive))
+    assert result[0] is False and 'Unsafe path' in result[1], result
+
+
+@needs_rar
+@pytest.mark.parametrize('backend', ['binary', 'rarfile'])
+def test_real_rar_directories_and_sizes(tmp_path, monkeypatch, backend):
+    if backend == 'rarfile' and not up.HAVE_RARFILE:
+        pytest.skip('rarfile is optional')
+    monkeypatch.setattr(up, 'HAVE_RARFILE', backend == 'rarfile')
+    (tmp_path / 'night').mkdir()
+    for name in ('a.fits', 'b.fits'):
+        (tmp_path / 'night' / name).write_bytes(FITS_STUB)
+    archive = tmp_path / 'directory.rar'
+    subprocess.run(['rar', 'a', '-idq', '-m0', str(archive), 'night'], cwd=str(tmp_path), check=True)
+    assert up.check_archive_contents(str(archive)) == (True, '')
+    monkeypatch.setattr(up, 'MAX_UNCOMPRESSED_BYTES', len(FITS_STUB))
+    assert 'Archive expands to' in up.check_archive_contents(str(archive))[1]
+    monkeypatch.setattr(up, 'MAX_UNCOMPRESSED_BYTES', 32 * 1024 ** 3)
+    monkeypatch.setattr(up, 'MAX_ARCHIVE_MEMBERS', 2)
+    assert up.check_archive_contents(str(archive))[0] is False  # directory counts too
+
+
+@needs_rar
+def test_native_validation_works_with_only_unrar(tmp_path, monkeypatch):
+    unrar = shutil.which('unrar')
+    if unrar is None:
+        pytest.skip('needs the unrar binary')
+    archive = _rar(tmp_path, ['a.fits', 'b.fits'])
+    monkeypatch.setattr(up, 'HAVE_RARFILE', False)
+    real_popen = subprocess.Popen
+
+    def without_rar(command, **kwargs):
+        if command[0] == 'rar':
+            raise FileNotFoundError('rar is unavailable')
+        assert command[0] == 'unrar'
+        return real_popen([unrar] + command[1:], **kwargs)
+
+    monkeypatch.setattr(up.subprocess, 'Popen', without_rar)
+    assert up.check_archive_contents(archive) == (True, '')
+
+
+@needs_rar
+@pytest.mark.parametrize('backend', ['binary', 'rarfile'])
+@pytest.mark.parametrize('case', ['symlink', 'hardlink', 'encrypted', 'ratio', 'unsafe_empty_dir',
+                                 'invisible_unicode'])
+def test_real_rar_rejects_unsafe_metadata(tmp_path, monkeypatch, backend, case):
+    if backend == 'rarfile' and not up.HAVE_RARFILE:
+        pytest.skip('rarfile is optional')
+    monkeypatch.setattr(up, 'HAVE_RARFILE', backend == 'rarfile')
+    payload = b'\0' * 65536 if case == 'ratio' else FITS_STUB
+    for name in ('a.fits', 'b.fits'):
+        (tmp_path / name).write_bytes(payload)
+    members = ['a.fits', 'b.fits']
+    switches = ['-m5'] if case == 'ratio' else ['-m0']
+    if case == 'invisible_unicode':
+        (tmp_path / 'x\u200b.fits').write_bytes(payload)
+        members.append('x\u200b.fits')
+    elif case == 'symlink':
+        os.symlink('a.fits', str(tmp_path / 'link.fits'))
+        members.append('link.fits')
+        switches.append('-ol')
+    elif case == 'hardlink':
+        os.link(str(tmp_path / 'a.fits'), str(tmp_path / 'link.fits'))
+        members.append('link.fits')
+        switches.append('-oh')
+    elif case == 'encrypted':
+        switches.append('-pfixture-password')
+    archive = tmp_path / 'metadata.rar'
+    subprocess.run(['rar', 'a', '-idq'] + switches + [str(archive)] + members,
+                   cwd=str(tmp_path), check=True)
+    if case == 'unsafe_empty_dir':
+        (tmp_path / 'empty').mkdir()
+        subprocess.run(['rar', 'a', '-idq', '-ap../', str(archive), 'empty'],
+                       cwd=str(tmp_path), check=True)
+    found = up.SuspiciousFilenames()
+    result = up.check_archive_contents(str(archive), found)
+    assert result[0] is False, result
+    if case == 'unsafe_empty_dir':
+        assert 'Unsafe path' in result[1], result
+    elif case == 'ratio':
+        assert 'compression ratio' in result[1], result
+    elif case == 'hardlink':
+        assert 'link.fits' in _logged_names(found)
+
+
+@needs_rar
+@pytest.mark.parametrize('backend', ['binary', 'rarfile'])
+def test_stored_rar4_compatibility(tmp_path, monkeypatch, backend):
+    if backend == 'rarfile' and not up.HAVE_RARFILE:
+        pytest.skip('rarfile is optional')
+    import struct
+    import zlib
+    monkeypatch.setattr(up, 'HAVE_RARFILE', backend == 'rarfile')
+
+    def header(data):
+        return struct.pack('<H', zlib.crc32(data) & 0xffff) + data
+
+    # Minimal stored RAR4 fixture: marker, archive header, two ordinary file
+    # headers/data and end marker. Modern rar cannot create RAR4 itself.
+    data = b'Rar!\x1a\x07\0' + header(struct.pack('<BHH6s', 0x73, 0, 13, b'\0' * 6))
+    for name in (b'a.fits', b'b.fits'):
+        size = len(FITS_STUB)
+        file_header = struct.pack('<BHHIIBIIBBHI', 0x74, 0x8000, 32 + len(name),
+                                  size, size, 3, zlib.crc32(FITS_STUB), 0, 20, 0x30,
+                                  len(name), 0o100644) + name
+        data += header(file_header) + FITS_STUB
+    data += header(struct.pack('<BHH', 0x7b, 0x4000, 7))
+    archive = tmp_path / 'stored-rar4.rar'
+    archive.write_bytes(data)
+    assert up.check_archive_contents(str(archive)) == (True, '')
+
+
+def test_native_rar_requires_a_lossless_locale(monkeypatch):
+    def only_ascii(category, value=None):
+        if value in (None, 'C'):
+            return 'C'
+        raise up.locale.Error('unavailable')
+    monkeypatch.setattr(up.locale, 'setlocale', only_ascii)
+    monkeypatch.setattr(up.locale, 'nl_langinfo', lambda item: 'ANSI_X3.4-1968')
+    monkeypatch.setattr(up.subprocess, 'Popen', lambda *args, **kwargs: pytest.fail('lossy locale used'))
+    with pytest.raises(up.RarValidationError, match='UTF-8 locale is required'):
+        up._rar_listing_lines('night.rar', 'lb')
+
+
+@needs_rar
+@pytest.mark.parametrize('unsafe', [False, True])
+def test_wrapper_uses_native_metadata_without_rarfile(tmp_path, unsafe):
+    import time
+    repo = os.path.dirname(__file__)
+    (tmp_path / 'night').mkdir()
+    for name in ('a.fits', 'b.fits'):
+        (tmp_path / 'night' / name).write_bytes(FITS_STUB)
+    archive = tmp_path / 'night.rar'
+    args = ['rar', 'a', '-idq', '-m0'] + (['-ap../'] if unsafe else [])
+    subprocess.run(args + [str(archive), 'night'], cwd=str(tmp_path), check=True)
+    # Force ImportError in a fresh interpreter: this is not just a patched
+    # boolean in an otherwise rarfile-enabled Python process.
+    blocked = tmp_path / 'blocked_imports'
+    blocked.mkdir()
+    (blocked / 'rarfile.py').write_text('raise ImportError("rarfile intentionally unavailable")\n')
+    stub = tmp_path / 'autoprocess.sh'
+    stub.write_text('#!/bin/sh\nprintf started > invoked\n')
+    stub.chmod(0o700)
+    env = os.environ.copy()
+    for key in ('GATEWAY_INTERFACE', 'REQUEST_METHOD'):
+        env.pop(key, None)
+    env['UNMW_UPLOAD_PYTHON'] = sys.executable
+    env['PYTHONPATH'] = str(blocked)
+    result = subprocess.run(['bash', os.path.join(repo, 'wrapper.sh'), str(archive)],
+                            cwd=str(tmp_path), env=env, capture_output=True, text=True, timeout=10)
+    assert (result.returncode == 0) is (not unsafe), result.stdout + result.stderr
+    if not unsafe:
+        # The real wrapper intentionally backgrounds processing.
+        deadline = time.monotonic() + 2
+        while not (tmp_path / 'invoked').exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+    assert (tmp_path / 'invoked').exists() is (not unsafe)
+
+
+def test_wrapper_keeps_complete_filenames(tmp_path):
+    # "bad.fits " used to become "bad.fits" in awk and launch processing.
+    # The stub makes even that regression harmless and observable.
+    wrapper = os.path.join(os.path.dirname(__file__), 'wrapper.sh')
+    archive = tmp_path / 'night.zip'
+    _write_zip(str(archive), ['a.fits', 'bad.fits '])
+    stub = tmp_path / 'autoprocess.sh'
+    stub.write_text('#!/bin/sh\nprintf started > invoked\n')
+    stub.chmod(0o700)
+    env = os.environ.copy()
+    for key in ('GATEWAY_INTERFACE', 'REQUEST_METHOD'):
+        env.pop(key, None)
+    result = subprocess.run(['bash', wrapper, str(archive)], cwd=str(tmp_path),
+                            env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode != 0
+    assert not (tmp_path / 'invoked').exists()
+
+
+@pytest.mark.parametrize('marker', ['GATEWAY_INTERFACE', 'REQUEST_METHOD'])
+def test_autoprocess_refuses_direct_cgi_before_sourcing_config(tmp_path, marker):
+    script = tmp_path / 'autoprocess.sh'
+    shutil.copyfile(os.path.join(os.path.dirname(__file__), 'autoprocess.sh'), str(script))
+    (tmp_path / 'local_config.sh').write_text('touch config_was_sourced\n')
+    env = os.environ.copy()
+    env[marker] = 'CGI/1.1' if marker == 'GATEWAY_INTERFACE' else 'GET'
+    result = subprocess.run(['bash', str(script), '/must/not/be/processed'],
+                            cwd=str(tmp_path), env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 1
+    assert 'must not be run as CGI' in result.stdout
+    assert not (tmp_path / 'config_was_sourced').exists()
+
+
+def test_autoprocess_stages_without_overwriting_shared_archive(tmp_path):
+    script = tmp_path / 'autoprocess.sh'
+    shutil.copyfile(os.path.join(os.path.dirname(__file__), 'autoprocess.sh'), str(script))
+    data = tmp_path / 'data'
+    data.mkdir()
+    incoming = tmp_path / 'incoming'
+    incoming.mkdir()
+    archive = incoming / 'same-night.zip'
+    _write_zip(str(archive), ['a.fits', 'b.fits'])
+    sentinel = data / archive.name
+    sentinel.write_bytes(b'previous archive must survive')
+    vast = tmp_path / 'vast'
+    (vast / 'util' / 'transients').mkdir(parents=True)
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    for path, body in [(vast / 'vast', 'echo VaST'),
+                       (vast / 'util' / 'transients' / 'transient_factory_test31.sh', 'exit 99'),
+                       (bin_dir / 'unzip', 'echo stopped-before-extraction; exit 99')]:
+        path.write_text('#!/bin/sh\n' + body + '\n')
+        path.chmod(0o700)
+    env = os.environ.copy()
+    for key in ('GATEWAY_INTERFACE', 'REQUEST_METHOD'):
+        env.pop(key, None)
+    env.update(IMAGE_DATA_ROOT=str(data), DATA_PROCESSING_ROOT=str(data),
+               VAST_REFERENCE_COPY=str(vast), URL_OF_DATA_PROCESSING_ROOT='http://unused.test/uploads',
+               AUTOPROCESS_NO_WAIT='yes', WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB='1',
+               WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB='1',
+               PATH=str(bin_dir) + os.pathsep + env['PATH'])
+    result = subprocess.run(['bash', str(script), str(archive)], cwd=str(tmp_path),
+                            env=env, capture_output=True, text=True, timeout=15)
+    assert result.returncode != 0
+    assert 'stopped-before-extraction' in result.stdout, result.stdout + result.stderr
+    assert sentinel.read_bytes() == b'previous archive must survive'
+    staged = list(data.glob('img_same-night_*/*.zip'))
+    assert len(staged) == 1
+    assert staged[0].read_bytes() == archive.read_bytes()
+
+
+def test_lock_files_never_truncate_or_follow_links(tmp_path):
+    import nmw_coord_lib as ncl
+    victim = tmp_path / 'victim'
+    victim.write_bytes(b'precious')
+    link = tmp_path / 'link.lock'
+    link.symlink_to(victim)
+    with pytest.raises(OSError):
+        ncl.open_lock_file(str(link))
+    hardlink = tmp_path / 'hardlink.lock'
+    os.link(str(victim), str(hardlink))
+    with pytest.raises(OSError):
+        ncl.open_lock_file(str(hardlink))
+    assert victim.read_bytes() == b'precious'
+    regular = tmp_path / 'regular.lock'
+    regular.write_text('old marker')
+    with ncl.open_lock_file(str(regular)) as fh:
+        assert fh.read() == 'old marker'
+
+
+@pytest.mark.parametrize('length', ['', '-1', '65537', 'huge'])
+def test_coordinate_forms_bound_body_before_reading(monkeypatch, capsys, length):
+    import nmw_coord_lib as ncl
+    monkeypatch.setenv('REQUEST_METHOD', 'POST')
+    monkeypatch.setenv('CONTENT_LENGTH', length)
+    raw = io.BytesIO(b'not read')
+    monkeypatch.setattr(sys, 'stdin', types.SimpleNamespace(buffer=raw))
+    with pytest.raises(SystemExit):
+        ncl.parse_cgi_form(up.cgi)
+    assert raw.tell() == 0
+    assert '400 Bad Request' in capsys.readouterr().out
+
+
+def test_coordinate_forms_reject_file_parts_and_accept_text(monkeypatch, capsys):
+    if not hasattr(up.cgi.FieldStorage, 'read_multi'):
+        pytest.skip('needs legacy-cgi')
+    import nmw_coord_lib as ncl
+    monkeypatch.setenv('REQUEST_METHOD', 'POST')
+    monkeypatch.setenv('CONTENT_TYPE', 'multipart/form-data; boundary=nmw')
+    monkeypatch.delenv('QUERY_STRING', raising=False)
+    body = (b'--nmw\r\nContent-Disposition: form-data; name="coords"; filename="probe"'
+            b'\r\n\r\n12 34\r\n--nmw--\r\n')
+    monkeypatch.setenv('CONTENT_LENGTH', str(len(body)))
+    monkeypatch.setattr(sys, 'stdin', types.SimpleNamespace(buffer=io.BytesIO(body)))
+    with pytest.raises(SystemExit):
+        ncl.parse_cgi_form(up.cgi)
+    assert '400 Bad Request' in capsys.readouterr().out
+    body = body.replace(b'; filename="probe"', b'')
+    monkeypatch.setenv('CONTENT_LENGTH', str(len(body)))
+    monkeypatch.setattr(sys, 'stdin', types.SimpleNamespace(buffer=io.BytesIO(body)))
+    assert ncl.parse_cgi_form(up.cgi).getfirst('coords') == '12 34'
+
+
+def test_cgi_exception_handler_never_displays_traceback(monkeypatch, capsys):
+    import nmw_coord_lib as ncl
+    monkeypatch.setattr(sys, 'excepthook', sys.excepthook)
+    ncl.enable_cgi_error_logging()
+    try:
+        raise ValueError('private /srv/path <script>')
+    except ValueError:
+        sys.excepthook(*sys.exc_info())
+    captured = capsys.readouterr()
+    assert 'Unable to complete the request' in captured.out
+    assert 'private' not in captured.out and '<script>' not in captured.out
+    assert 'private' in captured.err
+
+
+def test_existing_suspicious_log_permissions_are_tightened(suspicious_log):
+    suspicious_log.write_text('previous\n')
+    suspicious_log.chmod(0o644)
+    up._append_private_log(str(suspicious_log), b'next\n')
+    assert stat.S_IMODE(suspicious_log.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize('api_response,can_deploy', [
+    ('{"total_count":1,"check_runs":[{"status":"completed","conclusion":"success"}]}', True),
+    ('{"total_count":1,"check_runs":[]}', False),
+    ('{"total_count":101,"check_runs":[{"status":"completed","conclusion":"success"}]}', False),
+    ('{"total_count":1,"check_runs":[{"status":"completed","conclusion":null}]}', False),
+    ('{"total_count":1,"check_runs":[{"status":"in_progress","conclusion":"success"}]}', False),
+    ('{"total_count":1,"check_runs":[{"status":"completed","conclusion":"failure"}]}', False),
+    ('not JSON', False),
+])
+def test_updater_uses_exact_tested_commit(tmp_path, api_response, can_deploy):
+    source = os.path.join(os.path.dirname(__file__), 'git_unmw_automated_update.sh')
+    with open(source) as fh:
+        script = fh.read()
+    updater = tmp_path / 'update.sh'
+    updater.write_text(script)
+    (tmp_path / '.git').mkdir()
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    fake_git = bin_dir / 'git'
+    fake_git.write_text('''#!/bin/sh
+case "$1" in
+ symbolic-ref) echo refs/remotes/origin/main ;;
+ rev-parse) if [ "$2" = HEAD ]; then echo old_commit; else echo tested_commit; fi ;;
+ fetch|status) exit 0 ;;
+ merge) printf '%s\\n' "$@" > deployed_command ;;
+ pull) echo untested_commit > deployed_command ;;
+ *) exit 99 ;;
+esac
+''')
+    fake_curl = bin_dir / 'curl'
+    import shlex
+    fake_curl.write_text("#!/bin/sh\nprintf '%s\\n' " + shlex.quote(api_response) + '\n')
+    for executable in (fake_git, fake_curl):
+        executable.chmod(0o700)
+    env = os.environ.copy()
+    for name in ('GATEWAY_INTERFACE', 'REQUEST_METHOD'):
+        env.pop(name, None)
+    env['PATH'] = str(bin_dir) + os.pathsep + env['PATH']
+    result = subprocess.run(['bash', str(updater)], cwd=str(tmp_path), env=env,
+                            capture_output=True, text=True, timeout=5)
+    if can_deploy:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (tmp_path / 'deployed_command').read_text().splitlines() == ['merge', '--ff-only', 'tested_commit']
+    else:
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert not (tmp_path / 'deployed_command').exists()
+
+
+def test_legacy_upload_handler_refuses_cgi_before_imports(tmp_path):
+    # Python 2 is intentionally not installed. Its guard uses shared Python
+    # 2/3 syntax, so execute the actual prefix up to the first CGI import.
+    source = os.path.join(os.path.dirname(__file__), 'upload.py2')
+    with open(source) as fh:
+        prefix = fh.read().split('\nimport cgi\n', 1)[0]
+    env = os.environ.copy()
+    env['GATEWAY_INTERFACE'] = 'CGI/1.1'
+    result = subprocess.run([sys.executable, '-c', prefix], cwd=str(tmp_path),
+                            env=env, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 1
+    assert 'must not be run as CGI' in result.stdout
+    assert not list(tmp_path.iterdir())
+
+
+def test_updater_refuses_held_checkout_lock(tmp_path):
+    import fcntl
+    source = os.path.join(os.path.dirname(__file__), 'git_unmw_automated_update.sh')
+    updater = tmp_path / 'update.sh'
+    shutil.copyfile(source, str(updater))
+    (tmp_path / '.git').mkdir()
+    lock_path = tmp_path / '.git' / 'unmw_automated_update.lock'
+    lock_path.write_text('existing lock file\n')
+    env = os.environ.copy()
+    for name in ('GATEWAY_INTERFACE', 'REQUEST_METHOD'):
+        env.pop(name, None)
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    for name in ('git', 'curl'):
+        executable = bin_dir / name
+        executable.write_text('#!/bin/sh\nexit 99\n')
+        executable.chmod(0o700)
+    env['PATH'] = str(bin_dir) + os.pathsep + env['PATH']
+    with lock_path.open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        result = subprocess.run(['bash', str(updater)], cwd=str(tmp_path), env=env,
+                                capture_output=True, text=True, timeout=5)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'Another updater is running' in result.stdout
+    assert 'New version available' not in result.stdout
+    assert lock_path.read_text() == 'existing lock file\n'
+
+
+@pytest.mark.parametrize('case', ['accepted', 'bad_member', 'missing_wrapper'])
+def test_upload_cgi_subprocess(tmp_path, case):
+    if not hasattr(up.cgi.FieldStorage, 'read_multi'):
+        pytest.skip('needs legacy-cgi')
+    if os.getloadavg()[1] > 50:
+        pytest.skip('host exceeds the real CGI emergency load threshold')
+    script = tmp_path / 'upload.py'
+    shutil.copyfile(up.__file__, str(script))
+    (tmp_path / 'uploads').mkdir()
+    private = tmp_path / 'private'
+    private.mkdir()
+    if case == 'accepted':
+        wrapper = tmp_path / 'wrapper.sh'
+        wrapper.write_text('''#!/bin/sh
+[ -z "${GATEWAY_INTERFACE:-}${REQUEST_METHOD:-}" ] || exit 17
+printf '%s\\n' 'http://example.invalid/results/' > "$(dirname -- "$1")/results_url.txt"
+''')
+        wrapper.chmod(0o700)
+    attack = '<img src=x onerror=alert(1)>.fits'
+    names = [attack] if case == 'bad_member' else ['b.fits']
+    data = _upload_archive(tmp_path, names)
+    body = (b'--nmw\r\nContent-Disposition: form-data; name="file"; filename="night;name.zip"'
+            b'\r\nContent-Type: application/zip\r\n\r\n' + data + b'\r\n--nmw--\r\n')
+    env = os.environ.copy()
+    env.update(REQUEST_METHOD='POST', GATEWAY_INTERFACE='CGI/1.1',
+               CONTENT_TYPE='multipart/form-data; boundary=nmw', CONTENT_LENGTH=str(len(body)),
+               WARN_ON_LOW_DISK_SPACE_SOFTLIMIT_KB='1', WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB='1',
+               SUSPICIOUS_FILENAMES_LOG=str(private / 'names.log'))
+    # It must be outside the copied CGI's published directory.
+    env['SUSPICIOUS_FILENAMES_LOG'] = str(tmp_path.parent / (tmp_path.name + '-names.log'))
+    try:
+        result = subprocess.run([sys.executable, str(script)], cwd=str(tmp_path), env=env,
+                                input=body, capture_output=True, timeout=10)
+        output = result.stdout.decode('utf-8')
+        assert output.startswith('Content-Type: text/html')
+        if case == 'accepted':
+            assert result.returncode == 0, output + result.stderr.decode()
+            assert 'UNMW_STATUS:OK' in output
+            assert 'http://example.invalid/results/' in output
+            assert len(list((tmp_path / 'uploads').glob('*/night_name.zip'))) == 1
+        else:
+            assert result.returncode == 1
+            assert 'UNMW_STATUS:ERROR' in output
+            assert not list((tmp_path / 'uploads').iterdir())
+            assert str(tmp_path) not in output
+            assert attack not in output
+            if case == 'bad_member':
+                assert '&lt;img src=x onerror=alert(1)&gt;.fits' in output
+    finally:
+        if os.path.exists(env['SUSPICIOUS_FILENAMES_LOG']):
+            os.unlink(env['SUSPICIOUS_FILENAMES_LOG'])

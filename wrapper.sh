@@ -64,7 +64,7 @@ check_and_update_path "/usr/local/bin"
 
 
 # Verify the file type using the `file` tool
-FILE_TYPE=$(file --mime-type -b "$INPUT_FILE")
+FILE_TYPE=$(file --mime-type -b -- "$INPUT_FILE")
 
 if [[ "$INPUT_FILE" =~ \.zip$ ]]; then
     if [[ "$FILE_TYPE" != "application/zip" ]]; then
@@ -81,38 +81,14 @@ else
     exit 1
 fi
 
-# Function to list the contents of a rar file using either `rar` or `unrar`
-list_rar_contents() {
-    # actually | grep ' ..:.. ' supposed to leave only the lines with time stamps - that's the ones containing files
-    if command -v rar &>/dev/null; then
-        rar l "$1" | grep ' ..:.. ' | awk '{print $NF}' | grep -vE '^Volume|^Name|^Size' | sed '/^$/d'
-    elif command -v unrar &>/dev/null; then
-        unrar l "$1" | grep ' ..:.. ' | awk '{print $NF}' | grep -vE '^Volume|^Name|^Size' | sed '/^$/d'
-    else
-        echo "Error: Neither rar nor unrar is available to list the archive contents."
-        exit 1
-    fi
-}
-
-# Check the file contents
-if [[ "$INPUT_FILE" =~ \.zip$ ]]; then
-    CONTENTS="$(unzip -l "$INPUT_FILE" | awk '{print $NF}' | grep -v "^$" | tail -n +4 | head -n -2)"
-elif [[ "$INPUT_FILE" =~ \.rar$ ]]; then
-    CONTENTS="$(list_rar_contents "$INPUT_FILE")"
-else
-    echo "Error: Unsupported file format."
-    exit 1
-fi
-
-# Remove directories from the contents
-FILES_ONLY="$(echo "$CONTENTS" | grep -v '/$')"
-
-# Filter and count the valid extensions
-VALID_FILES_COUNT=$(echo "$FILES_ONLY" | grep -c -E '\.(fts|fit|fits)$')
-INVALID_FILES_COUNT=$(echo "$FILES_ONLY" | grep -c -vE '\.(fts|fit|fits)$')
-
-if [[ "$VALID_FILES_COUNT" -lt 2 || "$INVALID_FILES_COUNT" -gt 0 ]]; then
-    echo "Error: Archive must contain only .fts, .fit, or .fits files and at least two of them.  VALID_FILES_COUNT=$VALID_FILES_COUNT INVALID_FILES_COUNT=$INVALID_FILES_COUNT"
+# Reuse the CGI's whole-archive checks instead of a name-only shell parser.
+# This preserves RAR directory metadata and enforces path/link/size limits
+# when the wrapper is invoked directly as well. The CGI supplies its own
+# interpreter so a virtualenv is not lost when PATH is adjusted above.
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)" || exit 1
+if ! "${UNMW_UPLOAD_PYTHON:-python3}" -B "$SCRIPT_DIR/upload.py3" --validate-archive "$INPUT_FILE" >/dev/null; then
+    # Never echo member names into the CGI's already-started HTML response.
+    echo "Error: Archive failed validation."
     exit 1
 fi
 

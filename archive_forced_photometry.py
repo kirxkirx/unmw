@@ -41,7 +41,6 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 try:
     import cgi
-    import cgitb
 except ImportError:
     import sys
     sys.exit("Error: 'cgi' module not found. "
@@ -131,7 +130,7 @@ def _parse_date_field(raw, label):
 
 
 def main():
-    cgitb.enable()
+    ncl.enable_cgi_error_logging()
 
     # cwd = the directory of this script (even if reached via a symlink), so
     # ./local_config.sh and uploads/ resolve correctly.
@@ -146,7 +145,7 @@ def main():
             status_line="Status: 500 Internal Server Error")
         return
 
-    form = cgi.FieldStorage()
+    form = ncl.parse_cgi_form(cgi)
     raw_coords = (form.getfirst('coords', '') or '').strip()
     band_override = (form.getfirst('band', '') or '').strip()
     raw_date_from = (form.getfirst('date_from', '') or '').strip()

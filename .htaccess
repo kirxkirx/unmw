@@ -13,7 +13,7 @@
 #       Require all granted
 #   </Directory>
 #
-# "Limit" is what permits the Require directives below; "Options=ExecCGI" is
+# "AuthConfig" is what permits the Require directives below; "Options=ExecCGI" is
 # what permits the Options line further down. Granting more than that is not
 # needed here.
 #
@@ -43,7 +43,12 @@ Options +ExecCGI
 
 # The archival-photometry queue worker and the importable helper modules
 # are not CGI entry points - forbid direct web access to them
-<FilesMatch "^(archive_phot_worker\.py|nmw_coord_lib\.py|nmw_forced_phot_lib\.py|nmw_archive_phot_lib\.py|monitoring_update\.py|nmw_monitoring_lib\.py)$">
+<FilesMatch "^(archive_phot_worker\.py|nmw_coord_lib\.py|nmw_forced_phot_lib\.py|nmw_archive_phot_lib\.py|nmw_frame_quality_lib\.py|nmw_fs_check\.py|monitoring_update\.py|nmw_monitoring_lib\.py)$">
+    Require all denied
+</FilesMatch>
+
+# These files carry deployment settings, private notes, or repository data.
+<FilesMatch "^(local_config\.sh.*|HANDOFF\.md|\.git.*|\.env.*)$">
     Require all denied
 </FilesMatch>
 

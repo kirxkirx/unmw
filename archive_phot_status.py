@@ -28,7 +28,6 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 try:
     import cgi
-    import cgitb
 except ImportError:
     import sys
     sys.exit("Error: 'cgi' module not found. "
@@ -368,7 +367,7 @@ def _show_job(job_id, job_dir, script_dir, cfg, max_running):
 
 
 def main():
-    cgitb.enable()
+    ncl.enable_cgi_error_logging()
     script_dir = os.path.dirname(os.path.realpath(__file__))
     try:
         os.chdir(script_dir)
@@ -380,7 +379,7 @@ def main():
             status_line="Status: 500 Internal Server Error")
         return
 
-    form = cgi.FieldStorage()
+    form = ncl.parse_cgi_form(cgi)
     job_id = (form.getfirst('job', '') or '').strip()
     check_updates = (form.getfirst('check_updates', '') or '').strip()
 

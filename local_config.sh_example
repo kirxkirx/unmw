@@ -33,6 +33,31 @@ export URL_OF_DATA_PROCESSING_ROOT="http://scan.sai.msu.ru/unmw/uploads"
 # recommended way to password-protect it with Apache.
 #export SHOW_MANUAL_UPLOAD_LINK=yes
 
+# Log of suspicious file names sent to the upload endpoint (upload.py): the
+# names of file parts of an upload request and of members of the uploaded
+# archive that look like an attack or a broken client - one line per name
+# with the time, client address, HTTP user, user agent, the problems found
+# and whether the upload was accepted or rejected. See "Log of suspicious
+# upload file names" in README.md for what exactly is logged and the format.
+# It must not be readable over the web, so a path inside this directory, the
+# uploads tree or the data directories behind it, HTDOCS_DIR or the web
+# server's DOCUMENT_ROOT is refused (with a note in the web server error
+# log) and the default is used instead: the file
+# unmw_suspicious_filenames.txt in UNMW_CGITB_LOGDIR (the directory for the
+# cgitb crash reports, set with Apache SetEnv) or, if that is unset, /tmp.
+# /tmp is cleared on reboot, under systemd Apache may get a private /tmp
+# that is emptied whenever Apache restarts (PrivateTmp=true, as httpd has
+# on RHEL/AlmaLinux), and in a /tmp shared with other local users anyone can
+# block the file by creating it first - so point this to a directory outside
+# the web-served trees that only the web server user can write, e.g.
+#   install -d -o apache -g apache -m 750 /var/log/unmw
+# The value may use $PWD, environment variables and the other settings of
+# this file. The log is created with mode 0600 and renamed to <file>.1 when
+# it would grow past 64 MB, so the two together stay near 128 MB at most;
+# the renaming needs the directory to be writable by the web server user,
+# otherwise logging stops at 64 MB.
+#export SUSPICIOUS_FILENAMES_LOG="/var/log/unmw/suspicious_filenames.txt"
+
 export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 
 # Long-term image archive for the archival forced photometry queue

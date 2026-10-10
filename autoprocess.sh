@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 
+# Uploads enter through upload.py -> wrapper.sh, which already strips the
+# CGI markers. Direct CGI execution must never source deployment settings
+# or process a request-supplied filesystem path.
+if [ -n "${GATEWAY_INTERFACE:-}" ] || [ -n "${REQUEST_METHOD:-}" ]; then
+    printf 'Content-Type: text/plain\n\nERROR: this script must not be run as CGI\n'
+    exit 1
+fi
+
 # shellcheck disable=SC2086,SC2181,SC2002,SC2162,SC2012,SC2009,SC2126,SC1091
 
 #################################
@@ -28,11 +36,7 @@ fi
 # monitoring pre-factory prep hook never ran on production.
 UNMW_SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 
-# This script is a batch job, never a CGI endpoint, but on production it is
-# spawned by the upload CGI and inherits the CGI environment. Strip the CGI
-# request markers so guarded helpers (monitoring_update.py) do not mistake
-# this pipeline for a web request - the same markers that
-# nmw_archive_phot_lib.py kick_worker() strips for archive_phot_worker.py.
+# Clear any remaining request metadata before launching batch helpers.
 unset GATEWAY_INTERFACE REQUEST_METHOD QUERY_STRING CONTENT_LENGTH CONTENT_TYPE
 
 
@@ -691,6 +695,7 @@ if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
   echo "ERROR: input $INPUT_ZIP_ARCHIVE is a directory, not a ZIP archive"  | tee -a "$AUTOPROCESS_LOG"
   exit 1
  fi
+ ABSOLUTE_INPUT_ARCHIVE=$(readlink -f -- "$INPUT_ZIP_ARCHIVE")
 fi
 
 if [ ! -d "$IMAGE_DATA_ROOT" ];then
@@ -826,13 +831,6 @@ echo "Done sleeping" | tee -a "$AUTOPROCESS_LOG"
 UNIXSEC_STOP_WAITLOAD=$(date +%s)
 ###########################################################################
 
-# moved from above
-if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
- if [ "$PATH_TO_ZIP_ARCHIVE" != "$IMAGE_DATA_ROOT" ];then
-  cp -vf "$INPUT_ZIP_ARCHIVE" "$IMAGE_DATA_ROOT"
- fi
-fi
-
 echo "Changing directory to $IMAGE_DATA_ROOT"  | tee -a "$AUTOPROCESS_LOG"
 cd "$IMAGE_DATA_ROOT" || exit 1
 #
@@ -879,7 +877,13 @@ fi
 mkdir "$VAST_RESULTS_DIR_FILENAME"
 
 if [ $INPUT_DIR_NOT_ZIP_ARCHIVE -eq 0 ];then
- mv -v "$ZIP_ARCHIVE_FILENAME" "$LOCAL_PATH_TO_IMAGES" | tee -a "$AUTOPROCESS_LOG"
+ # Stage directly in this run's unique image directory. Copying first to
+ # IMAGE_DATA_ROOT/<client basename> let concurrent same-named uploads
+ # overwrite one another before mv, and could overwrite an existing file.
+ if ! cp -v -- "$ABSOLUTE_INPUT_ARCHIVE" "$ABSOLUTE_PATH_TO_IMAGES/$ZIP_ARCHIVE_FILENAME"; then
+  echo "ERROR: cannot stage the uploaded archive" | tee -a "$AUTOPROCESS_LOG"
+  exit 1
+ fi
 
  echo "Changing directory to $ABSOLUTE_PATH_TO_IMAGES"  | tee -a "$AUTOPROCESS_LOG"
  cd "$ABSOLUTE_PATH_TO_IMAGES" || exit 1

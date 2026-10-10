@@ -506,7 +506,7 @@ def worker_slots_locked(max_running):
         path = os.path.join(lock_dir,
                             '{}_slot_{}.lock'.format(WORKER_SLOT_PREFIX, i))
         try:
-            fh = open(path, 'w')
+            fh = ncl.open_lock_file(path)
         except OSError:
             continue
         try:
@@ -525,7 +525,7 @@ def acquire_claim_lock():
     the lock file cannot be created/opened -- callers decide whether that
     is fatal (worker) or degrades gracefully (CGIs)."""
     path = os.path.join(archive_lock_dir(), CLAIM_LOCK_BASENAME)
-    fh = open(path, 'w')
+    fh = ncl.open_lock_file(path)
     fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
     return fh
 

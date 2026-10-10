@@ -26,7 +26,6 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 try:
     import cgi
-    import cgitb
 except ImportError:
     import sys
     sys.exit("Error: 'cgi' module not found. "
@@ -193,7 +192,7 @@ LIST_ALL_TABLE_COLS = 6
 # ---------- main ----------
 
 def main():
-    cgitb.enable()
+    ncl.enable_cgi_error_logging()
     request_start = time.time()
 
     # Make our cwd the directory containing this script, even if it was
@@ -211,7 +210,7 @@ def main():
         )
         return
 
-    form = cgi.FieldStorage()
+    form = ncl.parse_cgi_form(cgi)
 
     # The landing page sets a hidden 'action' field via JS click handlers
     # on each submit button: 'search' for coord-search, 'list_all' for
