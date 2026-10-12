@@ -596,6 +596,10 @@ does not copy deployment configuration, monitoring registries or credentials.
 It uses a dummy observer code, no AAVSO submission hooks, loopback-only test
 servers, and a 60-minute overall deadline. The self-test will refuse a direct
 invocation outside this private copy.
+Its disposable sthttpd build explicitly uses the test Python and RAR tool paths.
+An HTTP CGI preflight checks the selected interpreter, required Python imports
+and native RAR executable before building VaST or downloading scientific data;
+the optional `rarfile` module is not required by this check.
 The testing script relies on external services for plate solving and accessing
 the [UCAC5](https://cdsarc.cds.unistra.fr/viz-bin/Cat?I/340) catalog, which is fine for testing but might be too slow or
 unreliable for production. After initial testing, users are encouraged to

@@ -320,8 +320,141 @@ fi
 cd "uploads" || exit 1
 UPLOADS_DIR="$PWD"
 
+######## Prepare the test server before expensive science work
+
+# Function to clean up (kill the server) on script exit
+cleanup() {
+ cd "$SCRIPTDIR" || exit 1
+ #
+ if [ -f "$UPLOADS_DIR/custom_http_server.log" ];then
+  echo "____________ cleanup ____________"
+  echo "Stopping the Python HTTP server..."
+  kill $PYTHON_HTTP_SERVER_PID 2>/dev/null
+  echo "Logs of the Python HTTP server..."
+  cat "$UPLOADS_DIR/custom_http_server.log"
+  echo "________________________________"
+ fi
+ #
+ if [ -f "$UPLOADS_DIR/sthttpd_http_server.log" ];then
+  echo "Stopping the sthttpd HTTP server..."
+  kill $STHTTPD_SERVER_PID $(cat "$UPLOADS_DIR/sthttpd_http_server.pid") 2>/dev/null
+  echo "Logs of the sthttpd HTTP server..."
+  cat "$UPLOADS_DIR/sthttpd_http_server.log"
+  if [ -f "$UPLOADS_DIR/sthttpd_http_server.pid" ];then
+   rm -fv "$UPLOADS_DIR/sthttpd_http_server.pid"
+  fi
+  echo "________________________________"
+ fi
+}
+
+# Trap script exit signals to ensure cleanup is executed
+trap cleanup EXIT INT TERM
+
+
+# Go back to the work directory
+cd "$SCRIPTDIR" || exit 1
+
+echo "Let's test with sthttpd HTTP server"
+
+if [ ! -d sthttpd ];then
+ echo "Get sthttpd"
+ git init sthttpd && git -C sthttpd remote add origin https://github.com/blueness/sthttpd.git && git -C sthttpd fetch --depth 1 origin "$UNMW_TEST_STHTTPD_REVISION" && git -C sthttpd checkout --detach FETCH_HEAD
+ if [ $? -ne 0 ];then
+  echo "$0 test error: cannot git clone sthttpd"
+  exit 1
+ fi
+ cd sthttpd || exit 1
+ git rev-parse HEAD > "$UPLOADS_DIR/sthttpd-revision.txt"
+ # sthttpd replaces CGI PATH with a compiled default. Point this disposable
+ # build at the selected test venv and private RAR tools, not system installs.
+ python3 "$SCRIPTDIR/tests/science_cgi.py" configure src/thttpd.h || exit 1
+ ./autogen.sh || exit 1
+ # Detect WSL and disable mmap if running under it
+ # WSL2 has known issues with mmap that cause zero-byte responses
+ # See: https://github.com/microsoft/WSL/issues/10103
+ if grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null; then
+  echo "Detected WSL - building sthttpd with mmap disabled"
+  CFLAGS="-UHAVE_MMAP" ./configure || exit 1
+ else
+  ./configure || exit 1
+ fi
+ make || exit 1
+ if [ ! -x src/thttpd ];then
+  echo "$0 test error: src/thttpd was not created"
+  exit 1
+ fi
+fi
+
+echo "Run sthttpd"
+# Go back to the work directory
+cd "$SCRIPTDIR" || exit 1
+
+# Debug: Check CGI script setup before starting sthttpd
+echo "DEBUG: Pre-sthttpd CGI diagnostics..."
+echo "DEBUG: Current directory: $PWD"
+echo "DEBUG: Files in current directory:"
+ls -la upload.py upload.py3 2>&1
+echo "DEBUG: File types:"
+file upload.py upload.py3
+echo "DEBUG: Symlink target:"
+readlink -f upload.py
+echo "DEBUG: First line (shebang) of upload.py3:"
+head -n1 upload.py3
+echo "DEBUG: Checking if python3 is in PATH:"
+which python3
+echo "DEBUG: Checking upload.py3 permissions:"
+stat upload.py3
+echo "DEBUG: Checking if upload.py3 is executable:"
+if [ -x upload.py3 ]; then
+ echo "DEBUG: upload.py3 IS executable"
+else
+ echo "DEBUG: upload.py3 is NOT executable - fixing..."
+ chmod +x upload.py3
+fi
+echo "DEBUG: End of pre-sthttpd diagnostics"
+
+# Run the server - it will run in the background
+if [ ! -x sthttpd/src/thttpd ];then
+ echo "$0 test error: sthttpd/src/thttpd was not found"
+ exit 1
+fi
+# by default, sthttpd will not pass UNMW_FREE_PORT to cgi scripts
+# So actually our only hope is that UNMW_FREE_PORT=8080
+# It will also not pass REFERENCE_IMAGES that we set above and that works well with Python HTTP server
+# Will have to hardcode REFERENCE_IMAGES to local_config.sh_for_test
+if [ "$UNMW_FREE_PORT" != "8080" ];then
+ echo "$0 test error: the port 8080 needed for the sthttpd test is not free"
+ exit 1
+fi
+# Use "**.py" pattern to match all Python scripts as CGI (more flexible for testing)
+#
+# WSL2 Bug Workaround:
+# When thttpd runs as root, it normally switches to the "nobody" user for security
+# before executing CGI scripts. On WSL2, this user-switching mechanism is broken:
+# the CGI script executes but its output is silently lost - the server logs show
+# "200 25000" (success with bytes sent) but curl receives 0 bytes. This appears
+# to be a WSL2-specific issue with process credentials or IPC after setuid/setgid.
+# The fix is to use "-u root" to prevent user switching, keeping the server running
+# as root throughout. This is acceptable for testing but should not be used in
+# production. See also: IPv6 and mmap workarounds earlier in this script.
+STHTTPD_EXTRA_ARGS=""
+if grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null; then
+ echo "Detected WSL - running sthttpd without user switching to fix CGI execution"
+ STHTTPD_EXTRA_ARGS="-u root"
+fi
+sthttpd/src/thttpd -nos -h 127.0.0.1 -p "$UNMW_FREE_PORT" -d "$PWD" -c "**.py" $STHTTPD_EXTRA_ARGS -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
+STHTTPD_SERVER_PID=$!
+# STHTTPD_SERVER_PID=$! will work only if the process was started in the background with &
+echo "sthttpd PID after starting it is $STHTTPD_SERVER_PID"
+# Nice try, but thttpd will change its PID
+
+# Verify the actual CGI interpreter, imports and native RAR tool over HTTP.
+# A shell-only `which python3`/`rar` check cannot catch a reset CGI environment.
+python3 "$SCRIPTDIR/tests/science_cgi.py" check "$SCRIPTDIR" "$UNMW_FREE_PORT" || exit 1
+
 # This is always a fresh private test tree. Fetch the recorded revision, not
 # the moving upstream HEAD (which made old test results irreproducible).
+cd "$UPLOADS_DIR" || exit 1
 git init vast || exit 1
 cd vast || exit 1
 git remote add origin https://github.com/kirxkirx/vast.git || exit 1
@@ -403,132 +536,6 @@ if ! grep --quiet 'PNV J19430751+2100204' "${RESULTS_DIR_FROM_URL__MANUALRUN}ind
  echo "$0 test error: RESULTS_DIR_FROM_URL__MANUALRUN=${RESULTS_DIR_FROM_URL__MANUALRUN}index.html does not have 'PNV J19430751+2100204'"
  exit 1
 fi
-
-######## Prepare to run web servers
-
-# Function to clean up (kill the server) on script exit
-cleanup() {
- cd "$SCRIPTDIR" || exit 1
- #
- if [ -f "$UPLOADS_DIR/custom_http_server.log" ];then
-  echo "____________ cleanup ____________"
-  echo "Stopping the Python HTTP server..."
-  kill $PYTHON_HTTP_SERVER_PID 2>/dev/null
-  echo "Logs of the Python HTTP server..."
-  cat "$UPLOADS_DIR/custom_http_server.log"
-  echo "________________________________"
- fi
- #
- if [ -f "$UPLOADS_DIR/sthttpd_http_server.log" ];then
-  echo "Stopping the sthttpd HTTP server..."
-  kill $STHTTPD_SERVER_PID $(cat "$UPLOADS_DIR/sthttpd_http_server.pid") 2>/dev/null
-  echo "Logs of the sthttpd HTTP server..."
-  cat "$UPLOADS_DIR/sthttpd_http_server.log"
-  if [ -f "$UPLOADS_DIR/sthttpd_http_server.pid" ];then
-   rm -fv "$UPLOADS_DIR/sthttpd_http_server.pid"
-  fi
-  echo "________________________________"
- fi
-}
-
-# Trap script exit signals to ensure cleanup is executed
-trap cleanup EXIT INT TERM
-
-
-# Go back to the work directory
-cd "$SCRIPTDIR" || exit 1
-
-echo "Let's test with sthttpd HTTP server"
-
-if [ ! -d sthttpd ];then
- echo "Get sthttpd"
- git init sthttpd && git -C sthttpd remote add origin https://github.com/blueness/sthttpd.git && git -C sthttpd fetch --depth 1 origin "$UNMW_TEST_STHTTPD_REVISION" && git -C sthttpd checkout --detach FETCH_HEAD
- if [ $? -ne 0 ];then
-  echo "$0 test error: cannot git clone sthttpd"
-  exit 1
- fi
- cd sthttpd || exit 1
- git rev-parse HEAD > "$UPLOADS_DIR/sthttpd-revision.txt"
- ./autogen.sh || exit 1
- # Detect WSL and disable mmap if running under it
- # WSL2 has known issues with mmap that cause zero-byte responses
- # See: https://github.com/microsoft/WSL/issues/10103
- if grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null; then
-  echo "Detected WSL - building sthttpd with mmap disabled"
-  CFLAGS="-UHAVE_MMAP" ./configure || exit 1
- else
-  ./configure || exit 1
- fi
- make || exit 1
- if [ ! -x src/thttpd ];then
-  echo "$0 test error: src/thttpd was not created"
-  exit 1
- fi
-fi
-
-echo "Run sthttpd"
-# Go back to the work directory
-cd "$SCRIPTDIR" || exit 1
-
-# Debug: Check CGI script setup before starting sthttpd
-echo "DEBUG: Pre-sthttpd CGI diagnostics..."
-echo "DEBUG: Current directory: $PWD"
-echo "DEBUG: Files in current directory:"
-ls -la upload.py upload.py3 2>&1
-echo "DEBUG: File types:"
-file upload.py upload.py3
-echo "DEBUG: Symlink target:"
-readlink -f upload.py
-echo "DEBUG: First line (shebang) of upload.py3:"
-head -n1 upload.py3
-echo "DEBUG: Checking if python3 is in PATH:"
-which python3
-echo "DEBUG: Checking upload.py3 permissions:"
-stat upload.py3
-echo "DEBUG: Checking if upload.py3 is executable:"
-if [ -x upload.py3 ]; then
- echo "DEBUG: upload.py3 IS executable"
-else
- echo "DEBUG: upload.py3 is NOT executable - fixing..."
- chmod +x upload.py3
-fi
-echo "DEBUG: End of pre-sthttpd diagnostics"
-
-# Run the server - it will run in the background
-if [ ! -x sthttpd/src/thttpd ];then
- echo "$0 test error: sthttpd/src/thttpd was not found"
- exit 1
-fi
-# by default, sthttpd will not pass UNMW_FREE_PORT to cgi scripts
-# So actually our only hope is that UNMW_FREE_PORT=8080
-# It will also not pass REFERENCE_IMAGES that we set above and that works well with Python HTTP server
-# Will have to hardcode REFERENCE_IMAGES to local_config.sh_for_test
-if [ "$UNMW_FREE_PORT" != "8080" ];then
- echo "$0 test error: the port 8080 needed for the sthttpd test is not free"
- exit 1
-fi
-# Use "**.py" pattern to match all Python scripts as CGI (more flexible for testing)
-#
-# WSL2 Bug Workaround:
-# When thttpd runs as root, it normally switches to the "nobody" user for security
-# before executing CGI scripts. On WSL2, this user-switching mechanism is broken:
-# the CGI script executes but its output is silently lost - the server logs show
-# "200 25000" (success with bytes sent) but curl receives 0 bytes. This appears
-# to be a WSL2-specific issue with process credentials or IPC after setuid/setgid.
-# The fix is to use "-u root" to prevent user switching, keeping the server running
-# as root throughout. This is acceptable for testing but should not be used in
-# production. See also: IPv6 and mmap workarounds earlier in this script.
-STHTTPD_EXTRA_ARGS=""
-if grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null; then
- echo "Detected WSL - running sthttpd without user switching to fix CGI execution"
- STHTTPD_EXTRA_ARGS="-u root"
-fi
-sthttpd/src/thttpd -nos -h 127.0.0.1 -p "$UNMW_FREE_PORT" -d "$PWD" -c "**.py" $STHTTPD_EXTRA_ARGS -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
-STHTTPD_SERVER_PID=$!
-# STHTTPD_SERVER_PID=$! will work only if the process was started in the background with &
-echo "sthttpd PID after starting it is $STHTTPD_SERVER_PID"
-# Nice try, but thttpd will change its PID
-
 
 # Prepare zip archive with the images for the web upload test
 cd "$UPLOADS_DIR/NMW__NovaVul24_Stas_test/" || exit 1
