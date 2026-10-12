@@ -11,6 +11,7 @@ permissions:
 jobs:
   test_wsl:
     runs-on: windows-2022
+    timeout-minutes: 90
 
     defaults:
       run:
@@ -50,18 +51,18 @@ jobs:
             python3
             python3-pip
             python3-venv
-            rar
+            apache2
+            apache2-utils
+            iproute2
+            shellcheck
 
-      - name: Copy sources to WSL home directory
+      - name: Copy sources to private WSL test directory
         run: |
-          # The checkout is on the Windows NTFS filesystem which is extremely
-          # slow under WSL2 due to the 9P protocol bridge.
-          # Copy to the WSL-native ext4 virtual disk for much better I/O.
           SRCDIR=$(wslpath '${{ github.workspace }}')
-          echo "Copying from $SRCDIR to ~/unmw ..."
-          cp -rp "$SRCDIR" ~/unmw
-          echo "Source tree size:"
-          du -sh ~/unmw
+          useradd --create-home --shell /bin/bash unmwtest
+          mkdir /tmp/unmw-ci
+          cp -rp "$SRCDIR" /tmp/unmw-ci/source
+          chown -R unmwtest:unmwtest /tmp/unmw-ci
 
       - name: Display Python version
         run: |
@@ -70,39 +71,36 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          cd ~/unmw
-          pip3 install --break-system-packages -r requirements.txt
-          pip3 install --break-system-packages pytest rarfile
+          cd /tmp/unmw-ci/source
+          runuser -u unmwtest -- python3 -m venv /tmp/unmw-ci/venv
+          runuser -u unmwtest -- /tmp/unmw-ci/venv/bin/python -m pip install -r requirements.txt -r requirements-test.txt rarfile
+          runuser -u unmwtest -- bash tests/install_rar.sh /tmp/unmw-ci/rar-tools
 
-      - name: Run Python unit tests
+      - name: Lint all sources
         run: |
-          cd ~/unmw
-          python3 -m pytest test_python.py -v
+          cd /tmp/unmw-ci/source
+          /tmp/unmw-ci/venv/bin/python -m flake8 --select=E9,F63,F7,F82 --filename='*.py,*.py3' --exclude=.git,.venv,uploads .
+          shellcheck --severity=error ./*.sh tests/*.sh
+
+      - name: Offline unit and Apache tests as an unprivileged user
+        run: |
+          cd /tmp/unmw-ci/source
+          unshare --net -- bash tests/offline_namespace.sh unmwtest \
+            /tmp/unmw-ci/venv/bin/python /tmp/unmw-ci/unit present /tmp/unmw-ci/rar-tools/rar
 
       - name: Run self-test script
         run: |
-          cd ~/unmw
-          bash unmw_selftest.sh
-        timeout-minutes: 60
-
-      - name: Collect test artifacts
-        if: always()
-        run: |
-          mkdir -p ~/unmw/test_artifacts
-          # Copy logs and results if they exist
-          cp ~/unmw/uploads/autoprocess.txt ~/unmw/test_artifacts/ 2>/dev/null || true
-          cp ~/unmw/uploads/*_summary.html ~/unmw/test_artifacts/ 2>/dev/null || true
-          cp ~/unmw/uploads/*_evening_*.html ~/unmw/test_artifacts/ 2>/dev/null || true
-          cp ~/unmw/uploads/*_morning_*.html ~/unmw/test_artifacts/ 2>/dev/null || true
+          cd /tmp/unmw-ci/source
+          runuser -u unmwtest -- env PATH="/tmp/unmw-ci/venv/bin:/tmp/unmw-ci/rar-tools/rar:/usr/local/bin:/usr/bin:/bin" \
+            /tmp/unmw-ci/venv/bin/python tests/run_science_test.py /tmp/unmw-ci/science
+        timeout-minutes: 65
 
       - name: Copy test artifacts to Windows filesystem
         if: always()
         run: |
           OUTDIR=$(wslpath '${{ github.workspace }}')
           mkdir -p "$OUTDIR/test_artifacts"
-          if [ -d ~/unmw/test_artifacts ]; then
-            cp -rp ~/unmw/test_artifacts/* "$OUTDIR/test_artifacts/" 2>/dev/null || true
-          fi
+          python3 /tmp/unmw-ci/source/tests/collect_artifacts.py /tmp/unmw-ci "$OUTDIR/test_artifacts"
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4

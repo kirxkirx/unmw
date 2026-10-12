@@ -58,7 +58,7 @@ Options +ExecCGI
 #   upload.py2     - legacy Python-2 upload handler with much weaker validation
 #                    than upload.py3; kept for exceptional circumstances only,
 #                    must never be reachable over the web
-<FilesMatch "^(test_python\.py|upload\.py2)$">
+<FilesMatch "^(test_python\.py|conftest\.py|pytest\.ini|requirements-test\.txt|\.coveragerc|upload\.py2)$">
     Require all denied
 </FilesMatch>
 

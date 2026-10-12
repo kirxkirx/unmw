@@ -146,7 +146,7 @@ def is_valid_job_id(job_id):
     """True when job_id has the expected shape. Used by the CGIs to reject
     anything that could smuggle path components before the id is ever
     joined into a filesystem path."""
-    return bool(JOB_ID_RE.match(job_id or ''))
+    return bool(JOB_ID_RE.fullmatch(job_id or ''))
 
 
 def job_dir_path(job_id):

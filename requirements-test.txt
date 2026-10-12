@@ -1,0 +1,7 @@
+# Test-only dependencies. rarfile is deliberately NOT included: CI tests both
+# with and without that optional production dependency.
+pytest>=7
+coverage>=7.10,<8
+jsonschema>=4
+flake8>=6
+PyYAML>=6

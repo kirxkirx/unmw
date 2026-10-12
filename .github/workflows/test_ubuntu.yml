@@ -3,73 +3,114 @@ name: Ubuntu deploy test
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # Allow manual triggering from GitHub web interface
+  workflow_dispatch:  # Deliberately unchanged: no PR/required-check policy changes.
 
 permissions:
-  contents: read  # Minimal permissions to access repository content
+  contents: read
 
 jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+        rarfile: [present]
+        advisory: [false]
+        include:
+          - python-version: '3.14'
+            rarfile: absent
+            advisory: false
+          - python-version: '3.15'
+            rarfile: absent
+            advisory: true
+    steps:
+      - uses: actions/checkout@v4
+        continue-on-error: ${{ matrix.advisory }}
+      - uses: actions/setup-python@v5
+        continue-on-error: ${{ matrix.advisory }}
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+      - name: Install test tools and isolated Python dependencies
+        continue-on-error: ${{ matrix.advisory }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apache2 apache2-utils unzip file shellcheck iproute2
+          python -m venv "$RUNNER_TEMP/test-venv"
+          "$RUNNER_TEMP/test-venv/bin/python" -m pip install -r requirements.txt -r requirements-test.txt
+          if [ '${{ matrix.rarfile }}' = present ]; then
+            "$RUNNER_TEMP/test-venv/bin/python" -m pip install rarfile
+          fi
+          bash tests/install_rar.sh "$RUNNER_TEMP/rar-tools"
+      - name: Lint every Python source and shell script
+        continue-on-error: ${{ matrix.advisory }}
+        run: |
+          "$RUNNER_TEMP/test-venv/bin/python" -m flake8 --select=E9,F63,F7,F82 --filename='*.py,*.py3' --exclude=.git,.venv,uploads .
+          "$RUNNER_TEMP/test-venv/bin/python" -m flake8 --ignore=W293,W291,E501,E128,E722,E402 filter_report.py upload.py3
+          shellcheck --severity=error ./*.sh tests/*.sh
+      - name: Unit and real Apache tests, without external network access
+        continue-on-error: ${{ matrix.advisory }}
+        run: |
+          sudo unshare --net -- bash tests/offline_namespace.sh \
+            "$(id -un)" "$RUNNER_TEMP/test-venv/bin/python" \
+            "$RUNNER_TEMP/unit-artifacts" '${{ matrix.rarfile }}' "$RUNNER_TEMP/rar-tools/rar"
+      - name: Retain test failures, branch coverage and server logs
+        uses: actions/upload-artifact@v4
+        continue-on-error: ${{ matrix.advisory }}
+        if: always()
+        with:
+          name: unit-py${{ matrix.python-version }}-rarfile-${{ matrix.rarfile }}
+          path: |
+            ${{ runner.temp }}/unit-artifacts/*.xml
+            ${{ runner.temp }}/unit-artifacts/*.txt
+            ${{ runner.temp }}/unit-artifacts/*.log
+            ${{ runner.temp }}/unit-artifacts/coverage-html/
+            ${{ runner.temp }}/unit-artifacts/pytest/**/*.log
+          retention-days: 7
+
+      - name: Label advisory compatibility results
+        if: always() && matrix.advisory
+        run: |
+          echo 'Python 3.15 is advisory; inspect step outcomes and retained logs for failures.' >> "$GITHUB_STEP_SUMMARY"
+          # Step-level continue-on-error keeps this CHECK successful, not just
+          # the workflow, without changing the production updater's policy.
+
   full-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 75
     strategy:
+      fail-fast: false
       matrix:
+        # Retain the existing scientific end-to-end matrix. 3.10/3.14 are
+        # covered above; the development HTTP server was removed in 3.15.
         python-version: ['3.9', '3.11', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Display Python version
-        run: python --version
-      - name: Install shellcheck
-        run: sudo apt-get install shellcheck
-      - name: Shellcheck VaST BASH scripts
-        run: |
-          for i in *sh; do
-            shellcheck --severity=error $i
-          done
-      - name: Install Flake8
-        run: pip install flake8 && flake8 --version
-      - name: Run Flake8 Python linter
-        run: |
-          for i in filter_report.py upload.py3; do
-            flake8 --ignore=W293,W291,E501,E128,E722,E402 $i
-          done
-      - name: Install VaST dependencies
+      - name: Install scientific test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install gfortran libx11-dev libpng-dev
-      - name: Install rarfile for Python
+          sudo apt-get install -y build-essential gfortran automake autoconf libtool libx11-dev libpng-dev zip unzip file iproute2
+          python -m venv "$RUNNER_TEMP/test-venv"
+          "$RUNNER_TEMP/test-venv/bin/python" -m pip install -r requirements.txt -r requirements-test.txt rarfile
+          bash tests/install_rar.sh "$RUNNER_TEMP/rar-tools"
+      - name: Scientific self-test in a fresh private copy (60-minute deadline)
         run: |
-          sudo apt-get install -y unrar
-          pip install rarfile
-          python3 -c "import rarfile" 2>/dev/null && echo "rarfile is available" || echo "rarfile is not available"
-      - name: Download and install rar as unrar cannot unpack our .rar archives
-        run: |
-          # Define the URL for the RAR package
-          RAR_URL="https://www.rarlab.com/rar/rarlinux-x64-710b2.tar.gz"
-          # Download and extract RAR
-          curl -L "$RAR_URL" | tar -xz -C /tmp
-          # Move the binaries to /usr/local/bin
-          sudo mv /tmp/rar/rar /usr/local/bin/rar
-          sudo mv /tmp/rar/unrar /usr/local/bin/unrar
-      - name: Verify RAR installation
-        run: rar
-      - name: Install Python dependencies
-        run: pip install -r requirements.txt
-      - name: Install bs4
-        run: pip install bs4
-      - name: Test bs4 installation
-        run: python -c "from bs4 import BeautifulSoup; print('bs4 installed successfully')"
-      - name: Install lxml
-        run: pip install lxml
-      - name: Test lxml installation
-        run: python -c "from lxml import etree; print('lxml installed successfully')"
-      - name: Install pytest
-        run: pip install pytest
-      - name: Run Python unit tests
-        run: python3 -m pytest test_python.py -v
-      - name: Run self-test script
-        run: bash unmw_selftest.sh
-
+          export PATH="$RUNNER_TEMP/test-venv/bin:$RUNNER_TEMP/rar-tools/rar:$PATH"
+          python tests/run_science_test.py "$RUNNER_TEMP/science-artifacts"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: science-py${{ matrix.python-version }}
+          path: |
+            ${{ runner.temp }}/science-artifacts/selftest.log
+            ${{ runner.temp }}/science-artifacts/work/uploads/*.txt
+            ${{ runner.temp }}/science-artifacts/work/uploads/*.log
+            ${{ runner.temp }}/science-artifacts/work/uploads/*.sha256
+            ${{ runner.temp }}/science-artifacts/work/uploads/*.html
+            ${{ runner.temp }}/science-artifacts/work/uploads/*/*.log
+          retention-days: 7

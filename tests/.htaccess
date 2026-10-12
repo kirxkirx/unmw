@@ -1,0 +1,2 @@
+# Tests, fixtures, manifests and test-only scripts are never public content.
+Require all denied

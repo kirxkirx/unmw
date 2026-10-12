@@ -1,10 +1,21 @@
 #!/usr/bin/env bash
 
 # Exit if the script is run via a CGI request
-if [[ -n "$REQUEST_METHOD" ]]; then
+if [[ -n "${REQUEST_METHOD:-}${GATEWAY_INTERFACE:-}" ]]; then
  echo "This script cannot be run via a web request."
  exit 1
 fi
+
+# Never overwrite a deployment or borrow its config/data. Use the wrapper to
+# create a private copy, sanitize the environment and bound the entire run.
+if [[ ${UNMW_SELFTEST_ROOT:-} != "$PWD" || ! -f .unmw-science-test ]]; then
+ echo 'Run: python3 tests/run_science_test.py /absolute/path/to/NEW-test-artifacts'
+ exit 1
+fi
+# shellcheck source=tests/dependencies.env
+source tests/dependencies.env || exit 1
+# All HTTP requests are bounded and use IPv4, without changing host sysctls.
+curl() { command curl --ipv4 --connect-timeout 10 --max-time 1200 "$@"; }
 
 ##################################################################
 # Every script that is not a CGI entry point must refuse to run when the
@@ -16,7 +27,7 @@ fi
 echo "Checking that non-CGI scripts refuse to run as CGI..."
 
 # upload.py strips CGI markers before launching wrapper.sh and autoprocess.sh.
-NON_CGI_SCRIPTS="autoprocess.sh archive_phot_prune.sh wrapper.sh combine_reports.sh combine_results_comets.sh fastplot_wrapper.sh git_unmw_automated_update.sh generate_htdocs.sh filter_report.py archive_phot_worker.py monitoring_update.py"
+NON_CGI_SCRIPTS="autoprocess.sh archive_phot_prune.sh wrapper.sh report_helpers.sh combine_reports.sh combine_results_comets.sh fastplot_wrapper.sh git_unmw_automated_update.sh generate_htdocs.sh filter_report.py archive_phot_worker.py monitoring_update.py"
 CGI_GUARD_FAILURES=""
 for SCRIPT in $NON_CGI_SCRIPTS; do
  if [ ! -f "$SCRIPT" ]; then
@@ -29,7 +40,7 @@ for SCRIPT in $NON_CGI_SCRIPTS; do
  # The guard must actually fire, not merely be mentioned in a comment.
  case "$SCRIPT" in
   *.py) GUARD_OUTPUT=$(GATEWAY_INTERFACE="CGI/1.1" REQUEST_METHOD="GET" python3 "$SCRIPT" 2>&1 | head -3) ;;
-  *)    GUARD_OUTPUT=$(GATEWAY_INTERFACE="CGI/1.1" REQUEST_METHOD="GET" ./"$SCRIPT" 2>&1 | head -3) ;;
+  *)    GUARD_OUTPUT=$(GATEWAY_INTERFACE="CGI/1.1" REQUEST_METHOD="GET" bash "$SCRIPT" 2>&1 | head -3) ;;
  esac
  if ! echo "$GUARD_OUTPUT" | grep -q 'must not be run as CGI\|not a CGI\|refuses to run as a CGI\|cannot be run via a web request'; then
   CGI_GUARD_FAILURES="$CGI_GUARD_FAILURES $SCRIPT(guard-did-not-fire)"
@@ -112,21 +123,9 @@ echo "All required external programs found!"
 echo ""
 
 ##################################################################
-# Disable IPv6 to work around WSL2 localhost networking issues
-# WSL2 has known issues with IPv6 (::1) localhost connections where
-# data can be silently lost. See: https://github.com/microsoft/WSL/issues/10803
-# This only affects the current session and is safe on native Linux.
+# IPv4 is selected per request by the curl wrapper above. Do not modify
+# the host's network configuration to work around WSL2 localhost issues.
 ##################################################################
-echo "Disabling IPv6 to work around WSL2 networking issues..."
-if sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 && \
-   sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 && \
-   sysctl -w net.ipv6.conf.lo.disable_ipv6=1 >/dev/null 2>&1; then
- echo "  IPv6 disabled successfully"
-else
- echo "  WARNING: Could not disable IPv6 (may need root privileges)"
- echo "  Continuing anyway - this may cause issues on WSL2"
-fi
-echo ""
 
 ##################################################################
 # Check Python scripts for portability and syntax
@@ -163,7 +162,7 @@ done
 # Check that required Python modules can be imported
 echo "Checking required Python modules..."
 PYTHON_MODULES_MISSING=""
-for PY_MODULE in cgi cgitb zipfile re os sys; do
+for PY_MODULE in cgi cgitb zipfile re os sys jsonschema; do
  if ! python3 -c "import $PY_MODULE" 2>/dev/null; then
   PYTHON_MODULES_MISSING="$PYTHON_MODULES_MISSING $PY_MODULE"
   echo "  $PY_MODULE - NOT FOUND"
@@ -321,22 +320,15 @@ fi
 cd "uploads" || exit 1
 UPLOADS_DIR="$PWD"
 
-# Install VaST if it was not installed before
-if [ ! -d vast ];then
- git clone --depth 1 https://github.com/kirxkirx/vast.git || exit 1
- cd vast || exit 1
- make || exit 1
-else
- cd vast || exit 1
- # Fetch and check if there are updates
- echo "Checking if VaST needs an update"
- if LANG=C git pull 2>&1 | grep --quiet 'Updating' ;then
-  echo "Running make..."
-  make || exit 1
- else
-  echo "Repository is already up-to-date. No action needed."
- fi
-fi
+# This is always a fresh private test tree. Fetch the recorded revision, not
+# the moving upstream HEAD (which made old test results irreproducible).
+git init vast || exit 1
+cd vast || exit 1
+git remote add origin https://github.com/kirxkirx/vast.git || exit 1
+git fetch --depth 1 origin "$UNMW_TEST_VAST_REVISION" || exit 1
+git checkout --detach FETCH_HEAD || exit 1
+git rev-parse HEAD > "$UPLOADS_DIR/vast-revision.txt"
+make || exit 1
 lib/update_offline_catalogs.sh all || exit 1
 VAST_INSTALL_DIR="$PWD"
 # VaST should be ready for work now
@@ -374,6 +366,7 @@ if [ ! -d "$REFERENCE_IMAGES" ];then
   rm -f NMW__NovaVul24_Stas_test.tar.bz2
   exit 1
  fi
+ sha256sum NMW__NovaVul24_Stas_test.tar.bz2 > "$UPLOADS_DIR/science-fixture.sha256"
  if ! tar -xvjf NMW__NovaVul24_Stas_test.tar.bz2 ;then
   echo "ERROR unpacking NMW__NovaVul24_Stas_test.tar.bz2 - removing the broken file"
   rm -f NMW__NovaVul24_Stas_test.tar.bz2
@@ -423,7 +416,6 @@ cleanup() {
   kill $PYTHON_HTTP_SERVER_PID 2>/dev/null
   echo "Logs of the Python HTTP server..."
   cat "$UPLOADS_DIR/custom_http_server.log"
-  rm -fv "$UPLOADS_DIR/custom_http_server.log" 
   echo "________________________________"
  fi
  #
@@ -432,7 +424,6 @@ cleanup() {
   kill $STHTTPD_SERVER_PID $(cat "$UPLOADS_DIR/sthttpd_http_server.pid") 2>/dev/null
   echo "Logs of the sthttpd HTTP server..."
   cat "$UPLOADS_DIR/sthttpd_http_server.log"
-  rm -fv "$UPLOADS_DIR/sthttpd_http_server.log" 
   if [ -f "$UPLOADS_DIR/sthttpd_http_server.pid" ];then
    rm -fv "$UPLOADS_DIR/sthttpd_http_server.pid"
   fi
@@ -451,12 +442,13 @@ echo "Let's test with sthttpd HTTP server"
 
 if [ ! -d sthttpd ];then
  echo "Get sthttpd"
- git clone --depth 1 https://github.com/blueness/sthttpd.git
+ git init sthttpd && git -C sthttpd remote add origin https://github.com/blueness/sthttpd.git && git -C sthttpd fetch --depth 1 origin "$UNMW_TEST_STHTTPD_REVISION" && git -C sthttpd checkout --detach FETCH_HEAD
  if [ $? -ne 0 ];then
   echo "$0 test error: cannot git clone sthttpd"
   exit 1
  fi
  cd sthttpd || exit 1
+ git rev-parse HEAD > "$UPLOADS_DIR/sthttpd-revision.txt"
  ./autogen.sh || exit 1
  # Detect WSL and disable mmap if running under it
  # WSL2 has known issues with mmap that cause zero-byte responses
@@ -531,7 +523,7 @@ if grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null; then
  echo "Detected WSL - running sthttpd without user switching to fix CGI execution"
  STHTTPD_EXTRA_ARGS="-u root"
 fi
-sthttpd/src/thttpd -nos -p "$UNMW_FREE_PORT" -d "$PWD" -c "**.py" $STHTTPD_EXTRA_ARGS -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
+sthttpd/src/thttpd -nos -h 127.0.0.1 -p "$UNMW_FREE_PORT" -d "$PWD" -c "**.py" $STHTTPD_EXTRA_ARGS -l "$UPLOADS_DIR/sthttpd_http_server.log" -i "$UPLOADS_DIR/sthttpd_http_server.pid" &
 STHTTPD_SERVER_PID=$!
 # STHTTPD_SERVER_PID=$! will work only if the process was started in the background with &
 echo "sthttpd PID after starting it is $STHTTPD_SERVER_PID"
@@ -634,20 +626,20 @@ cat "$UPLOADS_DIR/sthttpd_http_server.log" 2>/dev/null | tail -n5
 
 echo "DEBUG: Now attempting POST upload..."
 # Save response to file first to diagnose capture issues
-curl --max-time 600 --silent --show-error -w "\nHTTP_CODE:%{http_code}\nSIZE:%{size_download}" -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' "http://localhost:$UNMW_FREE_PORT/upload.py" -o /tmp/upload_response.txt 2>/tmp/upload_stderr.txt
+curl --max-time 600 --silent --show-error -w "\nHTTP_CODE:%{http_code}\nSIZE:%{size_download}" -X POST -F 'file=@NMW__NovaVul24_Stas__WebCheck__NotReal.zip' "http://localhost:$UNMW_FREE_PORT/upload.py" -o "$UPLOADS_DIR/upload_response.txt" 2>"$UPLOADS_DIR/upload_stderr.txt"
 curl_exit_code=$?
 echo "DEBUG: curl exit code: $curl_exit_code"
 echo "DEBUG: curl stderr:"
-cat /tmp/upload_stderr.txt
+cat "$UPLOADS_DIR/upload_stderr.txt"
 echo "DEBUG: Response file size:"
-ls -la /tmp/upload_response.txt 2>&1
+ls -la "$UPLOADS_DIR/upload_response.txt" 2>&1
 echo "DEBUG: Response file first 500 chars:"
-head -c 500 /tmp/upload_response.txt 2>/dev/null
+head -c 500 "$UPLOADS_DIR/upload_response.txt" 2>/dev/null
 echo ""
 echo "DEBUG: sthttpd log after POST:"
 cat "$UPLOADS_DIR/sthttpd_http_server.log" 2>/dev/null | tail -n5
 
-results_server_reply=$(cat /tmp/upload_response.txt 2>/dev/null)
+results_server_reply=$(cat "$UPLOADS_DIR/upload_response.txt" 2>/dev/null)
 if [ -z "$results_server_reply" ];then
  echo "$0 test error: empty HTTP server reply"
  echo "DEBUG: Full sthttpd log:"
@@ -666,12 +658,8 @@ echo "---- results_url ---
 $results_url
 ---------------------"
 echo "Sleep to give the server some time to process the data"
-# Wait until no copies of autoprocess.sh are running
-# (this assumes no other copies of the script are running)
-echo "Waiting for autoprocess.sh to finish..."
-while pgrep -f "autoprocess.sh" > /dev/null; do
- sleep 1  # Wait for 1 second before checking again
-done
+# Wait only for this test's processing, with a deadline and PID diagnostics.
+python3 "$SCRIPTDIR/tests/wait_for_processing.py" "$SCRIPTDIR" 1200 || exit 1
 #
 if curl --silent --show-error "$results_url" | grep --quiet 'out of disk space' ;then
  echo "$0 test error: out of disk space"
@@ -695,6 +683,7 @@ if [ ! -f "2025-01-07_Vul8_183150_Stas.rar" ];then
   curl --silent --show-error -O "http://scan.sai.msu.ru/~kirx/pub/2025-01-07_Vul8_183150_Stas.rar" 
  } || exit 1
 fi
+printf '%s  %s\n' "$UNMW_TEST_CAMERA_RAR_SHA256" 2025-01-07_Vul8_183150_Stas.rar | sha256sum --check --strict || exit 1
 if [ ! -s 2025-01-07_Vul8_183150_Stas.rar ];then
  echo "$0 test error: failed to download a archive with the images"
  exit 1
@@ -736,12 +725,7 @@ echo "---- results_url ---
 $results_url
 ---------------------"
 echo "Sleep to give the server some time to process the data"
-# Wait until no copies of autoprocess.sh are running
-# (this assumes no other copies of the script are running)
-echo "Waiting for autoprocess.sh to finish..."
-while pgrep -f "autoprocess.sh" > /dev/null; do
- sleep 1  # Wait for 1 second before checking again
-done
+python3 "$SCRIPTDIR/tests/wait_for_processing.py" "$SCRIPTDIR" 1200 || exit 1
 #
 echo "*** We are at $PWD"
 echo "ls -lhdt *"
@@ -822,8 +806,8 @@ else
 fi
 
 # Check that filter_report.py also produced a JSON sibling next to _filtered.html,
-# that it parses as JSON, contains the required top-level keys, and (when the
-# jsonschema package is installed) validates against the permissive schema.
+# that it parses as JSON, contains the required top-level keys, and validates
+# against the schema. Missing test dependencies must never silently pass.
 LATEST_FILTERED_HTML=$(ls -t ./*_filtered.html 2>/dev/null | head -n 1)
 if [ -z "$LATEST_FILTERED_HTML" ];then
  echo "$0 test error: no *_filtered.html files in $PWD to pair JSON against"
@@ -864,8 +848,8 @@ if not isinstance(data["candidates"], list):
 try:
     import jsonschema
 except ImportError:
-    print("jsonschema not installed; minimum top-level checks passed for {}".format(data_path))
-    sys.exit(0)
+    print("ERROR: jsonschema is required; install requirements-test.txt")
+    sys.exit(1)
 with open(schema_path) as fp:
     schema = json.load(fp)
 try:
@@ -1067,7 +1051,7 @@ if [ ! -s custom_http_server.py ];then
 fi
 # by default, Python HTTP server will pass UNMW_FREE_PORT to cgi scripts
 # Explicitly specfy port on which the Python HTTP server should run
-python3 custom_http_server.py "$UNMW_FREE_PORT" > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
+python3 custom_http_server.py --bind 127.0.0.1 "$UNMW_FREE_PORT" > "$UPLOADS_DIR/custom_http_server.log" 2>&1 &
 PYTHON_HTTP_SERVER_PID=$!
 
 
@@ -1132,12 +1116,7 @@ echo "---- results_url ---
 $results_url
 ---------------------"
 echo "Sleep to give the server some time to process the data"
-# Wait until no copies of autoprocess.sh are running
-# (this assumes no other copies of the script are running)
-echo "Waiting for autoprocess.sh to finish..."
-while pgrep -f "autoprocess.sh" > /dev/null; do
- sleep 1  # Wait for 1 second before checking again
-done
+python3 "$SCRIPTDIR/tests/wait_for_processing.py" "$SCRIPTDIR" 1200 || exit 1
 #
 if curl --silent --show-error "$results_url" | grep --quiet 'out of disk space' ;then
  echo "$0 test error: out of disk space"

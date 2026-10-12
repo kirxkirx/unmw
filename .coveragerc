@@ -1,0 +1,37 @@
+[run]
+branch = True
+parallel = True
+patch = subprocess
+sigterm = True
+source = ${UNMW_COVERAGE_SOURCE-.}
+omit =
+    */test_python.py
+    */tests/*
+    */conftest.py
+    */uploads/*
+    */.venv/*
+
+[report]
+show_missing = True
+skip_empty = True
+precision = 1
+include =
+    ${UNMW_COVERAGE_REPORT_SOURCE-.}/*.py
+    ${UNMW_COVERAGE_REPORT_SOURCE-.}/*.py3
+omit =
+    */test_python.py
+    */tests/*
+    */conftest.py
+    */uploads/*
+
+[paths]
+source =
+    .
+    */unmw-test-site/app
+    */cgi-copy
+
+[xml]
+output = test_artifacts/coverage.xml
+
+[html]
+directory = test_artifacts/coverage-html

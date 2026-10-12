@@ -583,7 +583,19 @@ TNS. When both are set, VaST's `transient_factory_test31.sh` fetches the list vi
 respect the TNS rate limit.
 
 # Alternatively
-Have a look at the [testing script](unmw_selftest.sh) that spins-up a python built-in [HTTP server](custom_http_server.py) at port 8080 (or the next one available) and puts a copy of [VaST](https://github.com/kirxkirx/vast) and all the uploaded images and processing results in the `uploads` subdirectory of the current directory.
+The [scientific test runner](tests/run_science_test.py) creates a fresh private
+copy, runs [unmw_selftest.sh](unmw_selftest.sh), and retains logs and processing
+results there. Run it as an ordinary user, never against a deployment:
+
+```bash
+python3 tests/run_science_test.py /tmp/unmw-science-results-NEW
+```
+
+The destination must not exist and must be outside the checkout. The runner
+does not copy deployment configuration, monitoring registries or credentials.
+It uses a dummy observer code, no AAVSO submission hooks, loopback-only test
+servers, and a 60-minute overall deadline. The self-test will refuse a direct
+invocation outside this private copy.
 The testing script relies on external services for plate solving and accessing
 the [UCAC5](https://cdsarc.cds.unistra.fr/viz-bin/Cat?I/340) catalog, which is fine for testing but might be too slow or
 unreliable for production. After initial testing, users are encouraged to
@@ -591,6 +603,56 @@ install local copies of [UCAC5](https://cdsarc.cds.unistra.fr/viz-bin/Cat?I/340)
 (you may place its files at `uploads/ucac5` or `$HOME/ucac5`) and [astrometry.net code](https://github.com/dstndstn/astrometry.net) (and its associated [index files](http://data.astrometry.net/)).
 
 ## Notes for maintainers
+
+### Automated tests
+
+Install runtime requirements and `requirements-test.txt` into a **user-owned
+virtual environment**. Run `python -m pytest` (not just `test_python.py`) as a
+non-root user. Apache plus its CGI/authentication modules, `htpasswd`, `rar`,
+`unrar`, `default.sfx`, `unzip` and `file` are required for the full suite.
+`bash tests/install_rar.sh /tmp/unmw-rar-tools-NEW` installs a pinned,
+SHA256-verified RAR bundle privately; add its `rar/` directory to `PATH`.
+`rarfile` remains optional: install it to test that backend, or leave it absent
+to exercise the native fallback throughout the complete suite.
+
+For JUnit, branch coverage (including subprocesses), HTML coverage and Apache
+logs, run:
+
+```bash
+bash tests/run_ci_tests.sh /absolute/path/to/venv/bin/python /tmp/unmw-unit-results-NEW absent
+# Use "present" instead when rarfile is installed in that environment.
+```
+
+Ubuntu CI covers Python 3.9–3.14 with `rarfile`, a separate clean 3.14 job
+without it, and an advisory 3.15 job. WSL also runs the complete suite as an
+unprivileged user. CI executes these tests in a network namespace with only
+loopback enabled: neither Python nor native child processes can contact AAVSO
+or any other external service. Local pytest also blocks external Python
+connections, but does not create that OS-level boundary; the Apache tests
+replace only the scientific processor with an extraction-only stand-in.
+
+Real-camera archive fixtures were sourced from this machine; provenance and
+checksums are in [tests/fixtures/README.md](tests/fixtures/README.md). Tests
+verify whole-archive rejection for unsafe paths, HTML escaping, authentication,
+private-file denials, body limits and non-executable uploads. Identical image
+uploads and retries after failure remain permitted; distinct exposure filenames
+from the same field/night are processed independently. Queue/worker, coordinate
+CGI and fastplot tests use private storage and stub external scientific tools.
+
+Unexpected skips fail CI. Only library-specific tests may skip in a deliberately
+`rarfile`-absent job. JSON-schema validation is mandatory, fatal Python lint
+covers every `.py`/`.py3` source, and FWHM regression tests call the same helper
+as the production report generator. Coverage collection itself fails if real
+CGI subprocess data or branch data disappears; the percentage is reported, not
+yet enforced as a minimum. This is not complete scientific-path coverage.
+
+The separate scientific suite retains the existing 3.9/3.11/3.12/3.13 matrix
+and uses remote plate-solving/catalog services. VaST and sthttpd revisions and
+the RAR bundle are pinned in `tests/dependencies.env`; camera fixtures are
+checksum-verified. The large legacy nova dataset's downloaded SHA256 is recorded
+with the artifacts (not yet pinned), so that input remains a reproducibility
+limitation. Workflows retain logs on failure. Push/manual triggers and deployment
+acceptance policy are unchanged.
 
 - **Test datasets** (e.g. `NMW-STL__find_Neptune_test`, `NMW-TexasTech__*`)
   are downloaded on demand by VaST's `util/examples/test_vast.sh` from

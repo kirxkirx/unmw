@@ -54,6 +54,7 @@ fi
 # change to the work directory
 SCRIPTDIR=$(dirname "$(readlink -f "$0")")
 cd "$SCRIPTDIR" || exit 1
+source "$SCRIPTDIR/report_helpers.sh" || exit 1
 # Check the flag that local_config.sh was already sourced
 if [ -z "$UNMW_LOCAL_CONFIG_SOURCED" ];then
  # source the local settings file if it exist
@@ -790,16 +791,7 @@ its candidates appear there. Please have a look at the individual-field report."
  IMAGE_CENTER_OFFSET_FROM_REF_IMAGE=$(grep 'Angular distance between the image centers' "$INPUT_DIR/index.html" | awk 'BEGIN{max=-1} {if($7+0 > max) max=$7} END{if (max == -1) print "ERROR"; else printf "%.4f", max}')
  MAG_LIMIT=$(grep 'All-image limiting magnitude estimate' "$INPUT_DIR/index.html" | tail -n1 | awk '{print $5}')
  # Extract maximum FWHM from new (second epoch) images
- # First, get the basenames of the second epoch images from the calibration lines
- SECOND_EPOCH_FIRST=$(grep 'SECOND_EPOCH__FIRST_IMAGE=' "$INPUT_DIR/index.html" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
- SECOND_EPOCH_SECOND=$(grep 'SECOND_EPOCH__SECOND_IMAGE=' "$INPUT_DIR/index.html" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
- # Extract FWHM values for these specific images and get the maximum
- # Match lines containing "pix" and image name (with or without fd_ prefix), but only
- # extract $1 if it's a number (to exclude "star elongation" lines that start with "The")
- FWHM_PIX=$( {
-  [ -n "$SECOND_EPOCH_FIRST" ] && grep "pix.*$SECOND_EPOCH_FIRST" "$INPUT_DIR/index.html" | awk '$1 ~ /^[0-9.]+$/ {print $1}'
-  [ -n "$SECOND_EPOCH_SECOND" ] && grep "pix.*$SECOND_EPOCH_SECOND" "$INPUT_DIR/index.html" | awk '$1 ~ /^[0-9.]+$/ {print $1}'
- } | sort -rn | head -n1 )
+ FWHM_PIX=$(nmw_second_epoch_fwhm "$INPUT_DIR/index.html")
  # remove "UTC" as we have it in the table header
  # LOG LINE: the universal start
  #echo -n "<tr><td>$CAMERA</td><td>${LAST_IMAGE_DATE/ UTC/}</td><td><font color='teal'> $FIELD </font></td><td>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"

@@ -430,6 +430,7 @@ New transient discovery
             filter_report(temp_path)
             # Output file should not be created when there's nothing to filter
             output_path = temp_path.replace('.html', '_filtered.html')
+            assert not os.path.exists(output_path)
             # The function prints a message but doesn't create output file
             # when there are no transients
         finally:
@@ -525,6 +526,14 @@ Unknown transient
 class TestFWHMExtraction:
     """Tests for FWHM extraction logic in combine_reports.sh"""
 
+    @staticmethod
+    def extract(report):
+        import subprocess
+        helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'report_helpers.sh')
+        return subprocess.run(
+            ['bash', '-c', 'source "$1"; nmw_second_epoch_fwhm "$2"', 'test', helper, report],
+            check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+
     def test_fwhm_extraction_with_fd_prefix(self):
         """Should extract FWHM value from calibrated image lines (fd_ prefix)"""
         # Simulate index.html content with both FWHM and star elongation lines
@@ -542,21 +551,7 @@ The star elongation is within the allowed range: median(A-B)=0.13 pix  161_2026-
             temp_path = f.name
 
         try:
-            # Extract FWHM using the same logic as combine_reports.sh
-            # This tests that we get numeric FWHM values, not "The"
-            import subprocess
-            bash_cmd = f'''
-SECOND_EPOCH_FIRST=$(grep 'SECOND_EPOCH__FIRST_IMAGE=' "{temp_path}" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
-SECOND_EPOCH_SECOND=$(grep 'SECOND_EPOCH__SECOND_IMAGE=' "{temp_path}" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
-FWHM_PIX=$( {{
-  [ -n "$SECOND_EPOCH_FIRST" ] && grep "pix.*$SECOND_EPOCH_FIRST" "{temp_path}" | awk '$1 ~ /^[0-9.]+$/ {{print $1}}'
-  [ -n "$SECOND_EPOCH_SECOND" ] && grep "pix.*$SECOND_EPOCH_SECOND" "{temp_path}" | awk '$1 ~ /^[0-9.]+$/ {{print $1}}'
-}} | sort -rn | head -n1 )
-echo "$FWHM_PIX"
-'''
-            result = subprocess.run(['bash', '-c', bash_cmd],
-                                    capture_output=True, text=True)
-            fwhm_value = result.stdout.strip()
+            fwhm_value = self.extract(temp_path)
 
             # FWHM should be a number (1.7), not "The"
             assert fwhm_value != "The", \
@@ -580,19 +575,7 @@ SECOND_EPOCH__SECOND_IMAGE= /path/to/image_002.fts
             temp_path = f.name
 
         try:
-            import subprocess
-            bash_cmd = f'''
-SECOND_EPOCH_FIRST=$(grep 'SECOND_EPOCH__FIRST_IMAGE=' "{temp_path}" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
-SECOND_EPOCH_SECOND=$(grep 'SECOND_EPOCH__SECOND_IMAGE=' "{temp_path}" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
-FWHM_PIX=$( {{
-  [ -n "$SECOND_EPOCH_FIRST" ] && grep "pix.*$SECOND_EPOCH_FIRST" "{temp_path}" | awk '$1 ~ /^[0-9.]+$/ {{print $1}}'
-  [ -n "$SECOND_EPOCH_SECOND" ] && grep "pix.*$SECOND_EPOCH_SECOND" "{temp_path}" | awk '$1 ~ /^[0-9.]+$/ {{print $1}}'
-}} | sort -rn | head -n1 )
-echo "$FWHM_PIX"
-'''
-            result = subprocess.run(['bash', '-c', bash_cmd],
-                                    capture_output=True, text=True)
-            fwhm_value = result.stdout.strip()
+            fwhm_value = self.extract(temp_path)
 
             assert fwhm_value == "2.3", \
                 f"Expected FWHM 2.3, got {fwhm_value}"
@@ -612,17 +595,7 @@ The star elongation is within the allowed range: median(A-B)=0.12 pix  161_2026-
             temp_path = f.name
 
         try:
-            import subprocess
-            bash_cmd = f'''
-SECOND_EPOCH_FIRST=$(grep 'SECOND_EPOCH__FIRST_IMAGE=' "{temp_path}" | head -n1 | sed 's|.*/||' | sed 's/<.*//')
-FWHM_PIX=$( {{
-  [ -n "$SECOND_EPOCH_FIRST" ] && grep "pix.*$SECOND_EPOCH_FIRST" "{temp_path}" | awk '$1 ~ /^[0-9.]+$/ {{print $1}}'
-}} | sort -rn | head -n1 )
-echo "$FWHM_PIX"
-'''
-            result = subprocess.run(['bash', '-c', bash_cmd],
-                                    capture_output=True, text=True)
-            fwhm_value = result.stdout.strip()
+            fwhm_value = self.extract(temp_path)
 
             # Should be empty, NOT "The"
             assert fwhm_value != "The", \
@@ -3343,9 +3316,11 @@ def test_rejected_archive_not_listed_again_as_what_was_tried(tmp_path, monkeypat
 @needs_rar
 def test_rejected_self_extracting_rar_is_listed(tmp_path, monkeypatch):
     monkeypatch.setattr(up, 'HAVE_RARFILE', False)
-    module = os.path.join(os.path.dirname(os.path.realpath(shutil.which('rar'))), 'default.sfx')
-    if not os.path.isfile(module):
-        pytest.skip('no self-extractor module next to the rar binary')
+    candidates = [os.path.join(os.path.dirname(os.path.realpath(shutil.which('rar'))), 'default.sfx'),
+                  '/usr/lib/rar/default.sfx', '/usr/share/rar/default.sfx']
+    module = next((path for path in candidates if os.path.isfile(path)), None)
+    if module is None:
+        pytest.skip('no RAR self-extractor module installed')
     archive = _rar(tmp_path, ['a.fits', 'x;y.fits'], sfx=module)
     assert not open(archive, 'rb').read(6).startswith(b'Rar!')
     found = up.SuspiciousFilenames()

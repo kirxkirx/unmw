@@ -1,4 +1,6 @@
 # Main configuration parameters
+# The isolated test runner supplies no monitoring registry or submission hooks.
+export AAVSO_OBSCODE=XXX
 export IMAGE_DATA_ROOT="$PWD/uploads"
 export DATA_PROCESSING_ROOT="$PWD/uploads"
 export VAST_REFERENCE_COPY="$PWD/uploads/vast"
