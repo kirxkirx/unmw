@@ -470,35 +470,15 @@ VAST_INSTALL_DIR="$PWD"
 export REFERENCE_IMAGES="$UPLOADS_DIR/NMW__NovaVul24_Stas_test/reference_images"
 if [ ! -d "$REFERENCE_IMAGES" ];then
  cd "$UPLOADS_DIR" || exit 1
- # Retry the large test data download a few times, resuming the partial file
- # with '--continue-at -': a transient network glitch mid-transfer (like
- # 'curl: (18) transfer closed with N bytes remaining to read', which plain
- # '--retry' does not consider a retryable error) must not derail the test.
- # Try the primary server first, then fall back to the secondary one.
- TEST_DATA_DOWNLOAD_OK=0
- for TEST_DATA_URL in "http://tau.kirx.net/vast_test_data/NMW__NovaVul24_Stas_test.tar.bz2" "http://scan.sai.msu.ru/~kirx/pub/NMW__NovaVul24_Stas_test.tar.bz2" ;do
-  # Never resume a partial file left by a different server (or an earlier
-  # script run): the mirrors are supposed to be identical, but if they ever
-  # diverge a cross-server resume would silently produce a corrupt archive.
-  rm -f NMW__NovaVul24_Stas_test.tar.bz2
-  for TEST_DATA_DOWNLOAD_ATTEMPT in 1 2 3 ;do
-   if curl --silent --show-error --connect-timeout 10 --retry 2 --retry-delay 10 --continue-at - -O "$TEST_DATA_URL" ;then
-    TEST_DATA_DOWNLOAD_OK=1
-    break
-   fi
-   echo "Test data download attempt $TEST_DATA_DOWNLOAD_ATTEMPT from $TEST_DATA_URL failed - will retry in 30 seconds"
-   sleep 30
-  done
-  if [ "$TEST_DATA_DOWNLOAD_OK" -eq 1 ];then
-   break
-  fi
-  echo "Giving up on $TEST_DATA_URL"
- done
- if [ "$TEST_DATA_DOWNLOAD_OK" -ne 1 ];then
-  echo "ERROR downloading NMW__NovaVul24_Stas_test.tar.bz2 from all servers"
-  rm -f NMW__NovaVul24_Stas_test.tar.bz2
-  exit 1
- fi
+ # Pinned and SHA256-verified, from the first mirror that serves the real
+ # archive. A plain curl kept whatever the server answered: on 2026-10-13 the
+ # reverse proxy in front of tau.kirx.net returned "503 Service Unavailable" to
+ # every CI job, the error page was accepted as the download and the second
+ # mirror was never tried because only the unpacking failed. The helper also
+ # resumes a transfer interrupted mid-way ('curl: (18) transfer closed ...').
+ bash "$SCRIPTDIR/tests/fetch_fixture.sh" NMW__NovaVul24_Stas_test.tar.bz2 "$UNMW_TEST_NOVA_FIXTURE_SHA256" \
+  "http://tau.kirx.net/vast_test_data/NMW__NovaVul24_Stas_test.tar.bz2" \
+  "http://scan.sai.msu.ru/~kirx/pub/NMW__NovaVul24_Stas_test.tar.bz2" || exit 1
  sha256sum NMW__NovaVul24_Stas_test.tar.bz2 > "$UPLOADS_DIR/science-fixture.sha256"
  if ! tar -xvjf NMW__NovaVul24_Stas_test.tar.bz2 ;then
   echo "ERROR unpacking NMW__NovaVul24_Stas_test.tar.bz2 - removing the broken file"
@@ -686,10 +666,10 @@ cd "$UPLOADS_DIR" || exit 1
 
 # RAR file with cloudy images test
 if [ ! -f "2025-01-07_Vul8_183150_Stas.rar" ];then
- {
-  curl --silent --show-error -O "http://scan.sai.msu.ru/~kirx/pub/2025-01-07_Vul8_183150_Stas.rar" 
- } || exit 1
+ bash "$SCRIPTDIR/tests/fetch_fixture.sh" 2025-01-07_Vul8_183150_Stas.rar "$UNMW_TEST_CAMERA_RAR_SHA256" \
+  "http://scan.sai.msu.ru/~kirx/pub/2025-01-07_Vul8_183150_Stas.rar" || exit 1
 fi
+# The helper verified a fresh download; this also covers an archive that was already here.
 printf '%s  %s\n' "$UNMW_TEST_CAMERA_RAR_SHA256" 2025-01-07_Vul8_183150_Stas.rar | sha256sum --check --strict || exit 1
 if [ ! -s 2025-01-07_Vul8_183150_Stas.rar ];then
  echo "$0 test error: failed to download a archive with the images"

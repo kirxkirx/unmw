@@ -652,11 +652,13 @@ yet enforced as a minimum. This is not complete scientific-path coverage.
 
 The separate scientific suite retains the existing 3.9/3.11/3.12/3.13 matrix
 and uses remote plate-solving/catalog services. VaST and sthttpd revisions and
-the RAR bundle are pinned in `tests/dependencies.env`; camera fixtures are
-checksum-verified. The large legacy nova dataset's downloaded SHA256 is recorded
-with the artifacts (not yet pinned), so that input remains a reproducibility
-limitation. Workflows retain logs on failure. Push/manual triggers and deployment
-acceptance policy are unchanged.
+the RAR bundle are pinned in `tests/dependencies.env`, together with the SHA256
+of the camera archive and of the large legacy nova dataset. Both archives are
+downloaded by `tests/fetch_fixture.sh`, which accepts a file only from the first
+mirror that serves the pinned content (an HTTP error page or a wrong checksum
+means the next mirror, never a saved archive). The dataset's checksum is also
+recorded with the artifacts. Workflows retain logs on failure. Push/manual
+triggers and deployment acceptance policy are unchanged.
 
 - **Test datasets** (e.g. `NMW-STL__find_Neptune_test`, `NMW-TexasTech__*`)
   are downloaded on demand by VaST's `util/examples/test_vast.sh` from
