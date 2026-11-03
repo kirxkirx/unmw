@@ -22,11 +22,14 @@
 #
 # By default the three directories are created inside the work directory:
 #   good_wcs_fd_images/  no_reference_image/  other_images_to_delete/
-# so the moves are instant renames on the same filesystem. Nothing in the
-# pipeline looks inside them (every tool scans only the top-level img_*
-# entries), and the img_<S> names are kept, so good_wcs_fd_images/ has the
-# uploads-style layout that IMAGE_QUARANTINE_DIR expects should it be moved
-# to a big disk later.
+# so the moves are instant renames on the same filesystem. The processing
+# pipeline never looks inside them (every tool scans only the top-level img_*
+# entries); the only reader is coord_forced_photometry.py, which also measures
+# the frames in good_wcs_fd_images/ (under the work directory and under
+# IMAGE_QUARANTINE_DIR) so sorted images keep contributing to lightcurves.
+# The img_<S> names are kept, so good_wcs_fd_images/ has the uploads-style
+# layout that IMAGE_QUARANTINE_DIR expects should it be moved to a big disk
+# later.
 #
 # A directory that cannot be judged safely is left in place and reported: a
 # file in it is younger than --min-age-hours, a vast_* working copy of its run
@@ -36,7 +39,9 @@
 #
 # Side effect of a move: the FITS download links of the per-field report and
 # the fastplot charts of the candidates of that run point into
-# uploads/img_<S>/ and stop working. Nothing else reads the moved files.
+# uploads/img_<S>/ and stop working. coord_forced_photometry.py finds the
+# moved wcs_fd_ frames under good_wcs_fd_images/ and links them at their new
+# URL (see above); nothing else reads the moved files.
 #
 # DRY RUN BY DEFAULT. Nothing is moved without --execute. Run as the owner of
 # the work directory (sudo -u apache) or as root, by hand or from cron; a lock

@@ -3,8 +3,12 @@
 CGI: forced-photometry lightcurve at a sky position over a recent time window.
 
 The user enters one sky position; the page finds every plate-solved
-(wcs_ prefix) image in the uploads/ directory and, when IMAGE_QUARANTINE_DIR
-is configured, in the quarantine directory (the most recent days by img_<YYYY-MM-DD> dir date; the day window and the maximum image count are both user-selectable on the input form) whose
+(wcs_ prefix) image in the uploads/ directory, in its good_wcs_fd_images/
+subdirectory (where sort_workdir_images.sh files the calibrated frames of
+successful runs) and, when IMAGE_QUARANTINE_DIR is configured, in the
+quarantine directory and its own good_wcs_fd_images/ subdirectory (the most
+recent days by img_<YYYY-MM-DD> dir date; the day window and the maximum image
+count are both user-selectable on the input form) whose
 field covers that position, runs the C forced-photometry implementation on each
 (util/forced_photometry.sh with FORCED_PHOTOMETRY_ONLY_C=yes), and presents the
 results -- newest first -- as an HTML table (with a full-frame preview and a
@@ -30,8 +34,9 @@ Configuration (read from local_config.sh next to this script):
   COORD_FORCED_PHOT_ZOOMIN_PIXELS zoom-in half-width in source pixels (optional)
   IMAGE_QUARANTINE_DIR            optional second uploads-style img_* tree
                                   (offloaded, not yet archived fields); its
-                                  images are measured too but carry no FITS
-                                  download link (the tree is not web-served)
+                                  images, and those of its good_wcs_fd_images/
+                                  subdirectory, are measured too but carry no
+                                  FITS download link (the tree is not web-served)
 
 Per-request output directory uploads/forced_phot_<pid><rand>/ is left in place;
 external housekeeping prunes uploads/forced_phot_* (this CGI prunes nothing).
@@ -108,6 +113,12 @@ FORCED_PHOT_MAX_CONCURRENT = 6          # each request uses its own VaST working
 
 # Per-upload directory name: img_<YYYY-MM-DD>_<...>. Only these are considered.
 IMG_DIR_RE = re.compile(r'^img_(\d{4})-(\d{2})-(\d{2})_')
+# sort_workdir_images.sh moves the wcs_fd_* frames of successful runs out of
+# <workdir>/img_<S>/ into <workdir>/good_wcs_fd_images/img_<S>/ (its default
+# --good destination), keeping the img_<S> layout. That subdirectory is
+# scanned too, under uploads/ and under IMAGE_QUARANTINE_DIR, so sorted
+# frames keep contributing to lightcurves.
+SORTED_GOOD_SUBDIR = 'good_wcs_fd_images'
 
 # Apache's CGI buffer is ~4 KB. Each streamed table row is appended with this
 # whitespace comment so the buffer crosses the flush threshold within a couple
@@ -117,7 +128,8 @@ _ROW_FLUSH_PAD = "<!-- " + (" " * 1500) + " -->\n"
 
 # ---------- image discovery ----------
 
-def list_recent_field_images(uploads_dir, covering_fields, window_days):
+def list_recent_field_images(uploads_dir, covering_fields, window_days,
+                             unreadable=None):
     """Return absolute paths of plate-solved images in the last window_days
     whose field is in covering_fields. Newest directory date first.
 
@@ -129,7 +141,11 @@ def list_recent_field_images(uploads_dir, covering_fields, window_days):
     while NMW-TexasTech produces wcs_fd_<FIELD>_... Raw un-solved uploads
     (no prefix) in the same directories stay excluded.
 
-    Only directories named img_<YYYY-MM-DD>_... are considered.
+    Only directories named img_<YYYY-MM-DD>_... are considered. A
+    per-upload directory that cannot be listed (wrong permissions, say) is
+    skipped instead of failing the whole listing; when `unreadable` is a
+    list, a (path, error) pair is appended to it for every skipped
+    directory so the caller can tell the user.
     """
     cutoff = datetime.date.today() - datetime.timedelta(days=window_days - 1)
     images = []
@@ -155,7 +171,13 @@ def list_recent_field_images(uploads_dir, covering_fields, window_days):
         dpath = os.path.join(uploads_dir, name)
         if not os.path.isdir(dpath):
             continue
-        for fname in sorted(os.listdir(dpath)):
+        try:
+            names = sorted(os.listdir(dpath))
+        except OSError as err:
+            if unreadable is not None:
+                unreadable.append((dpath, err))
+            continue
+        for fname in names:
             if not fname.startswith('wcs_'):
                 continue
             if not _looks_like_fits(fname):
@@ -424,9 +446,24 @@ def main():
         # ---- Find the recent images of those fields. ----
         print("<p class='secondary'>Listing recent images of these "
               "fields...</p>", flush=True)
+
+        def _warn_unreadable(unreadable, tree_name):
+            # Per-upload directories that could not be listed are skipped
+            # by list_recent_field_images; say so, since a silently
+            # shorter lightcurve is worse than a visibly incomplete one.
+            if not unreadable:
+                return
+            print("<div class='notice'>WARNING: {} directory(ies) in {} "
+                  "could not be listed and were skipped: {}.</div>".format(
+                      len(unreadable), html_escape(tree_name),
+                      html_escape(', '.join(os.path.basename(p)
+                                            for p, _err in unreadable))),
+                  flush=True)
+
         try:
+            unreadable = []
             images = list_recent_field_images(TEMP_PARENT, covering_fields,
-                                              window_days)
+                                              window_days, unreadable)
         except OSError as err:
             print("<div class='notice'>ERROR: could not list uploads "
                   "directory <span class='code'>{}</span>: {} ({}).</div>"
@@ -437,36 +474,61 @@ def main():
                 html_escape(search_again_url)))
             print(page_end_html())
             return
-        # Also consider the optional quarantine directory: an uploads-style
-        # tree (img_* subdirectories) holding processed fields moved off
-        # the SSD workdir but not yet quality-controlled into the archive.
-        # Same date-window and field filters as the workdir; images that
-        # are (still) present in the workdir - mid-migration duplicates -
-        # are skipped. Quarantine rows get no FITS download link (the tree
-        # is not web-served); fits_url() returns '' for them by itself.
+        _warn_unreadable(unreadable, 'the uploads directory')
+        # Also consider the secondary image trees, each an uploads-style
+        # set of img_* subdirectories with the same date-window and field
+        # filters as the workdir:
+        #  - uploads/good_wcs_fd_images/, where sort_workdir_images.sh
+        #    files the calibrated frames of successful runs (still under
+        #    uploads/, so these rows keep their FITS download link);
+        #  - the optional quarantine directory, holding processed fields
+        #    moved off the SSD workdir but not yet quality-controlled into
+        #    the archive, and its own good_wcs_fd_images/ subdirectory.
+        #    Quarantine rows get no FITS download link (the tree is not
+        #    web-served); fits_url() returns '' for them by itself.
+        # An image present in more than one tree - a mid-move duplicate -
+        # is measured once, from the first tree that lists it.
+        # (tree directory, name for the page, note appended to its count)
+        secondary_trees = [
+            (os.path.join(TEMP_PARENT, SORTED_GOOD_SUBDIR),
+             "the sorted {}/ directory".format(SORTED_GOOD_SUBDIR), ''),
+        ]
         quarantine_dir = (cfg.get('IMAGE_QUARANTINE_DIR') or '').strip()
-        if quarantine_dir and os.path.isdir(quarantine_dir):
-            try:
-                quarantine_images = list_recent_field_images(
-                    quarantine_dir, covering_fields, window_days)
-            except OSError:
-                quarantine_images = []
+        if quarantine_dir:
+            no_links = " (no FITS download links for these)"
+            secondary_trees.append(
+                (quarantine_dir, "the quarantine directory", no_links))
+            secondary_trees.append(
+                (os.path.join(quarantine_dir, SORTED_GOOD_SUBDIR),
+                 "the {}/ directory of the quarantine tree".format(
+                     SORTED_GOOD_SUBDIR), no_links))
 
-            def _dedup_key(path):
-                base = os.path.basename(path)
-                return base[:-3] if base.endswith('.fz') else base
-            seen_basenames = set(_dedup_key(p) for p in images)
-            n_from_quarantine = 0
-            for path in quarantine_images:
+        def _dedup_key(path):
+            base = os.path.basename(path)
+            return base[:-3] if base.endswith('.fz') else base
+        seen_basenames = set(_dedup_key(p) for p in images)
+        for tree_dir, tree_name, tree_note in secondary_trees:
+            if not os.path.isdir(tree_dir):
+                continue
+            unreadable = []
+            try:
+                tree_images = list_recent_field_images(
+                    tree_dir, covering_fields, window_days, unreadable)
+            except OSError:
+                tree_images = []
+            _warn_unreadable(unreadable, tree_name)
+            n_from_tree = 0
+            for path in tree_images:
                 if _dedup_key(path) in seen_basenames:
                     continue
                 seen_basenames.add(_dedup_key(path))
                 images.append(path)
-                n_from_quarantine += 1
-            if n_from_quarantine:
-                print("<p class='secondary'>{} image(s) come from the "
-                      "quarantine directory (no FITS download links for "
-                      "these).</p>".format(n_from_quarantine), flush=True)
+                n_from_tree += 1
+            if n_from_tree:
+                print("<p class='secondary'>{} image(s) come from {}{}.</p>"
+                      .format(n_from_tree, html_escape(tree_name),
+                              html_escape(tree_note)),
+                      flush=True)
         # Stream rows in (approximate) newest-first order without waiting
         # for all images to be measured. The timestamp embedded in the
         # image filename closely tracks JD and is known without opening

@@ -1,4 +1,5 @@
 """Exercise CGI entry points, not copies of their validation logic."""
+import datetime
 import fcntl
 import html
 import io
@@ -245,6 +246,140 @@ def test_forced_photometry_cgi_keeps_distinct_visits_and_cleans_working_copy(
         assert 'None of the 2 image(s) yielded' in output
     if cap == 1:
         assert 'Limited to the first 1 of 2' in output
+
+
+@pytest.fixture
+def forced_phot_engine(app_sandbox, coordinate_science, monkeypatch):
+    """Stub the measurement engine of coord_forced_photometry (VaST working
+    copy, plate solve, C photometry, plots) while the directory walk, the
+    concurrency slot and the page rendering stay real. Returns the list of
+    frames handed to the (stubbed) C engine."""
+    module = coord_forced_photometry
+    coordinate_science(module, {'coords': '300 20'})
+    work = app_sandbox.root / 'science-copy'
+    work.mkdir()
+    monkeypatch.delenv('DEBUG_KEEP_WORK_DIR', raising=False)
+    monkeypatch.setattr(module, 'setup_vast_working_copy', lambda *a: str(work))
+    monkeypatch.setattr(module, '_read_factory_text', lambda *a: '')
+    monkeypatch.setattr(module, 'derive_band', lambda *a: 'V')
+    monkeypatch.setattr(module, 'derive_sextractor_config', lambda *a: None)
+    monkeypatch.setattr(module, '_phase1_parallel_solve_plate',
+                        lambda work_dir, cfg, images, *a, **kw: (
+                            len(images), 0, 0, {img: img for img in images}, .1))
+    monkeypatch.setattr(module, 'get_jd_and_atel_date', lambda *a: ('2460683.15', '2025-01-07'))
+    monkeypatch.setattr(module, 'render_lightcurve_plots', lambda *a: (None, None))
+    measured = []
+
+    def measure(*args, **kwargs):
+        measured.append(args[2])
+        return dict(status='detection', mag='14.25', err='.03', jd='2460683.15',
+                    x='512', y='512', aperture='5')
+
+    monkeypatch.setattr(module, 'run_forced_photometry_c', measure)
+    return measured
+
+
+def _make_frames(trees):
+    """Create empty placeholder frames: {directory: [file names]}."""
+    for directory, names in trees.items():
+        directory.mkdir(parents=True)
+        for name in names:
+            (directory / name).write_bytes(b'')
+
+
+def test_forced_photometry_cgi_measures_sorted_good_and_quarantine_trees(
+        app_sandbox, forced_phot_engine, capsys):
+    """Real directory walk over the four image trees: uploads/img_*, the
+    good_wcs_fd_images/ directory that sort_workdir_images.sh fills under
+    uploads/, IMAGE_QUARANTINE_DIR/img_* and its own good_wcs_fd_images/.
+    A frame listed by two trees is measured once; only frames under uploads/
+    get a FITS download link."""
+    today = datetime.date.today().isoformat()
+    uploads = app_sandbox.paths['uploads']
+    quarantine = app_sandbox.root / 'quarantine'
+    app_sandbox.config['IMAGE_QUARANTINE_DIR'] = str(quarantine)
+    _make_frames({
+        uploads / ('img_%s_a' % today): [
+            'wcs_fd_Vul8_2025-1-7_15-30-31_001.fts',
+            'fd_Vul8_2025-1-7_15-30-31_001.fts'],          # not plate-solved: ignored
+        uploads / 'good_wcs_fd_images' / ('img_%s_b' % today): [
+            'wcs_fd_Vul8_2025-1-7_15-31-1_002.fts'],
+        quarantine / ('img_%s_c' % today): [
+            'wcs_fd_Vul8_2025-1-7_15-31-1_002.fts',        # mid-move duplicate: measured once
+            'wcs_fd_Vul8_2025-1-7_15-32-1_003.fts'],
+        quarantine / 'good_wcs_fd_images' / ('img_%s_d' % today): [
+            'wcs_fd_Vul8_2025-1-7_15-33-1_004.fts',
+            'wcs_fd_Cyg1_2025-1-7_15-33-1_005.fts'],       # other field: ignored
+    })
+    coord_forced_photometry.main()
+    output = capsys.readouterr().out
+    assert '</html>' in output and 'Internal error' not in output
+    expected = {
+        str(uploads / ('img_%s_a' % today) / 'wcs_fd_Vul8_2025-1-7_15-30-31_001.fts'),
+        str(uploads / 'good_wcs_fd_images' / ('img_%s_b' % today)
+            / 'wcs_fd_Vul8_2025-1-7_15-31-1_002.fts'),
+        str(quarantine / ('img_%s_c' % today) / 'wcs_fd_Vul8_2025-1-7_15-32-1_003.fts'),
+        str(quarantine / 'good_wcs_fd_images' / ('img_%s_d' % today)
+            / 'wcs_fd_Vul8_2025-1-7_15-33-1_004.fts'),
+    }
+    assert set(forced_phot_engine) == expected and len(forced_phot_engine) == len(expected)
+    assert 'Performing forced photometry on 4 images' in output
+    assert '1 image(s) come from the sorted good_wcs_fd_images/ directory.' in output
+    assert ('1 image(s) come from the quarantine directory '
+            '(no FITS download links for these).') in output
+    assert ('1 image(s) come from the good_wcs_fd_images/ directory of the '
+            'quarantine tree (no FITS download links for these).') in output
+    assert 'WARNING' not in output
+    # Rows are streamed newest first (by the timestamp in the file name), and
+    # only the two frames under uploads/ carry a FITS link.
+    links = re.findall(r"<a href='([^']*)' target='_blank'>FITS</a>", output)
+    assert links == [
+        'http://127.0.0.1/uploads/good_wcs_fd_images/img_%s_b/wcs_fd_Vul8_2025-1-7_15-31-1_002.fts' % today,
+        'http://127.0.0.1/uploads/img_%s_a/wcs_fd_Vul8_2025-1-7_15-30-31_001.fts' % today,
+    ]
+    assert not (app_sandbox.root / 'science-copy').exists()
+
+
+def test_forced_photometry_cgi_skips_unreadable_upload_directories_with_a_warning(
+        app_sandbox, forced_phot_engine, monkeypatch, capsys):
+    """One img_* directory that cannot be listed costs only that directory:
+    the other frames of the same tree are still measured, and the page says
+    which directories were skipped."""
+    today = datetime.date.today().isoformat()
+    uploads = app_sandbox.paths['uploads']
+    _make_frames({
+        uploads / ('img_%s_a' % today): ['wcs_fd_Vul8_2025-1-7_15-30-31_001.fts'],
+        uploads / ('img_%s_y' % today): ['wcs_fd_Vul8_2025-1-7_15-31-1_002.fts'],
+        uploads / 'good_wcs_fd_images' / ('img_%s_b' % today): [
+            'wcs_fd_Vul8_2025-1-7_15-32-1_003.fts'],
+        uploads / 'good_wcs_fd_images' / ('img_%s_z' % today): [
+            'wcs_fd_Vul8_2025-1-7_15-33-1_004.fts'],
+    })
+    # Deny listing of img_*_y and img_*_z regardless of the test user's
+    # privileges (chmod 000 would be a no-op for root).
+    unreadable = {'img_%s_y' % today, 'img_%s_z' % today}
+    real_listdir = os.listdir
+
+    def listdir(path='.'):
+        if os.path.basename(str(path)) in unreadable:
+            raise PermissionError(13, 'Permission denied', str(path))
+        return real_listdir(path)
+
+    monkeypatch.setattr(os, 'listdir', listdir)
+    coord_forced_photometry.main()
+    output = capsys.readouterr().out
+    assert '</html>' in output and 'Internal error' not in output
+    assert set(forced_phot_engine) == {
+        str(uploads / ('img_%s_a' % today) / 'wcs_fd_Vul8_2025-1-7_15-30-31_001.fts'),
+        str(uploads / 'good_wcs_fd_images' / ('img_%s_b' % today)
+            / 'wcs_fd_Vul8_2025-1-7_15-32-1_003.fts'),
+    }
+    assert ('WARNING: 1 directory(ies) in the uploads directory could not be '
+            'listed and were skipped: img_%s_y.' % today) in output
+    assert ('WARNING: 1 directory(ies) in the sorted good_wcs_fd_images/ directory '
+            'could not be listed and were skipped: img_%s_z.' % today) in output
+    assert '1 image(s) come from the sorted good_wcs_fd_images/ directory.' in output
+    assert 'Performing forced photometry on 2 images' in output
 
 
 @pytest.fixture

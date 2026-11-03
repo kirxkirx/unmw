@@ -87,6 +87,13 @@ mechanisms `coord_search.py` already uses; they are moved into a shared module
   `img_<YYYY-MM-DD>_<...field+camera+id...>` and contain the calibrated,
   plate-solved images `wcs_fd_<Field>-..._LIGHTs_NNNN.fits` (the only ones we
   measure -- they carry WCS for RA/Dec -> pixel and are dark+flat corrected).
+- Secondary image trees, scanned with the same date window and field filter:
+  `uploads/good_wcs_fd_images/`, where `sort_workdir_images.sh` files the
+  `wcs_fd_*` frames of successful runs keeping the `img_<S>` layout (still
+  served, so these rows keep their FITS link), and, when
+  `IMAGE_QUARANTINE_DIR` is configured, that tree and its own
+  `good_wcs_fd_images/` (not served: no FITS link). A frame listed by more
+  than one tree is measured once.
 - Reference images: `$REFERENCE_IMAGES`
   (`/data_ssd/NMW-TexasTech/reference_imgs`), one or more reference frames per
   field per camera.

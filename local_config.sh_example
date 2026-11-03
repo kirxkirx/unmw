@@ -83,8 +83,11 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # forced-photometry page (coord_forced_photometry.py) also enumerate this
 # tree so lightcurves stay complete after workdir offloading (quarantine
 # rows on the forced-photometry page carry no FITS download link - the tree
-# is not web-served). Skipped silently when unset; the monitoring rescan
-# logs a note when the configured directory is missing.
+# is not web-served). The forced-photometry page also scans the
+# good_wcs_fd_images/ subdirectory, where sort_workdir_images.sh files the
+# calibrated frames of successful runs: always under IMAGE_DATA_ROOT, and
+# under this tree when it is set. Skipped silently when unset; the monitoring
+# rescan logs a note when the configured directory is missing.
 #export IMAGE_QUARANTINE_DIR="/mnt/nmwttu1/NMW-TexasTech_quarantine"
 
 # Archival photometry queue protection (defaults shown):
