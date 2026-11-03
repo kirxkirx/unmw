@@ -1,7 +1,9 @@
 """Exercise CGI entry points, not copies of their validation logic."""
 import fcntl
+import html
 import io
 import os
+import re
 import shlex
 import sys
 import types
@@ -70,6 +72,100 @@ def test_coordinate_cgi_reports_no_covering_images(app_sandbox, monkeypatch, cap
     assert len(scans) == 1
     assert 'no ' in output.lower() and '</html>' in output
     assert app_sandbox.kicks == []
+
+
+def _search_again_hrefs(output):
+    return [html.unescape(href) for href in
+            re.findall(r"<a href='([^']*)'>Search again</a>", output)]
+
+
+def test_message_page_link_prefers_explicit_target_over_referer(monkeypatch, capsys):
+    monkeypatch.setenv('HTTP_REFERER', 'http://referer.invalid/previous.html')
+    ncl.emit_message_page('Title', '<p>body</p>')
+    assert _search_again_hrefs(capsys.readouterr().out) == ['http://referer.invalid/previous.html']
+    ncl.emit_message_page('Title', '<p>body</p>', search_again_url='/cgi-bin/x.py?a=1&b=2')
+    output = capsys.readouterr().out
+    assert _search_again_hrefs(output) == ['/cgi-bin/x.py?a=1&b=2']
+    assert 'referer.invalid' not in output
+
+
+@pytest.fixture
+def forced_phot_slots(app_sandbox, monkeypatch):
+    """The CGI's real flock slot pool inside the sandbox. Yields hold(n), which
+    occupies n slots of that pool (kept until the test ends) so main() finds
+    them busy."""
+    module = coord_forced_photometry
+    locks = app_sandbox.root / 'locks'
+    locks.mkdir()
+    monkeypatch.setattr(module, 'acquire_concurrency_slot',
+                        lambda **kw: ncl.acquire_concurrency_slot(lock_dir=str(locks), **kw))
+    held = []
+
+    def hold(count):
+        for _ in range(count):
+            handle = ncl.acquire_concurrency_slot(
+                prefix='forced_phot', max_concurrent=module.FORCED_PHOT_MAX_CONCURRENT,
+                lock_dir=str(locks))
+            assert handle is not None
+            held.append(handle)
+
+    yield hold
+    for handle in held:
+        handle.close()
+
+
+FORCED_PHOT_QUERY = {'coords': '300 20', 'window_days': '3', 'max_images': '5'}
+
+
+@pytest.mark.parametrize('band', ['', 'R'])
+def test_forced_photometry_busy_page_search_again_repeats_the_request(
+        app_sandbox, forced_phot_slots, monkeypatch, capsys, band):
+    module = coord_forced_photometry
+    query = dict(FORCED_PHOT_QUERY, band=band)
+    app_sandbox.configure(module, query)
+    referer = 'http://referer.invalid/unmw/coord_forced_photometry.html'
+    monkeypatch.setenv('HTTP_REFERER', referer)
+    scans = []
+    monkeypatch.setattr(module, 'run_sky2xy_scan', lambda *a, **kw: scans.append(a) or ([], False))
+    forced_phot_slots(module.FORCED_PHOT_MAX_CONCURRENT)
+    module.main()
+    output = capsys.readouterr().out
+    assert 'Status: 503' in output and 'Server busy' in output
+    assert '({0} of {0})'.format(module.FORCED_PHOT_MAX_CONCURRENT) in output
+    assert scans == [] and list(app_sandbox.paths['uploads'].iterdir()) == []
+    # One click re-runs the same request: a GET to the CGI itself carrying the
+    # request's own parameters (an empty band is left out so the form default
+    # applies), not a return to the referring form page.
+    repeated = {name: value for name, value in query.items() if value}
+    assert _search_again_hrefs(output) == [
+        '/cgi-bin/coord_forced_photometry.py?' + urllib.parse.urlencode(repeated)]
+    assert 'referer.invalid' not in output
+
+
+@pytest.mark.parametrize('outcome', ['no_covering_field', 'no_recent_images'])
+def test_forced_photometry_no_data_page_returns_to_prefilled_form(
+        app_sandbox, forced_phot_slots, monkeypatch, capsys, outcome):
+    module = coord_forced_photometry
+    query = dict(FORCED_PHOT_QUERY, band='R')
+    app_sandbox.configure(module, query)
+    monkeypatch.setenv('HTTP_REFERER', 'http://referer.invalid/unmw/coord_forced_photometry.html')
+    matches = ([] if outcome == 'no_covering_field'
+               else [('/reference/Vul8_2025-1-7_15-30-31_001.fts', 512., 512.)])
+    monkeypatch.setattr(module, 'run_sky2xy_scan', lambda *a, **kw: (matches, False))
+    monkeypatch.setattr(module, 'list_recent_field_images', lambda *a: [])
+    # Every slot but one is taken: the last free slot still admits the request.
+    forced_phot_slots(module.FORCED_PHOT_MAX_CONCURRENT - 1)
+    module.main()
+    output = capsys.readouterr().out
+    assert 'Status: 503' not in output and 'Server busy' not in output
+    assert 'ERROR: no ' in output and '</html>' in output
+    if outcome == 'no_recent_images':
+        assert 'Vul8' in output
+    # No data: go back to the input form, pre-filled with this request, so the
+    # user can widen the window or change the position.
+    assert _search_again_hrefs(output) == [
+        '/unmw/coord_forced_photometry.html?' + urllib.parse.urlencode(query)]
+    assert 'referer.invalid' not in output
 
 
 @pytest.mark.parametrize('raw,expected', [('300 20', ('300', '20')),

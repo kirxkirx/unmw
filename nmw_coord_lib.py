@@ -243,7 +243,13 @@ def emit_redirect(url):
               u=safe))
 
 
-def emit_message_page(title, body_html, status_line=None):
+def emit_message_page(title, body_html, status_line=None,
+                      search_again_url=None):
+    """Emit a complete small page: the optional HTTP status line, the
+    title, body_html and a 'Search again' link. The link goes to
+    search_again_url when the caller provides one (e.g. a URL that re-runs
+    the same request); otherwise it returns to the referring page, falling
+    back to the input form (see back_link_url)."""
     if status_line:
         print(status_line)
     print("Content-Type: text/html\n")
@@ -254,7 +260,10 @@ def emit_message_page(title, body_html, status_line=None):
                         wide=False))
     print(page_title_html(title))
     print(body_html)
-    print("<br><br><a href='{}'>Search again</a>".format(html_escape(back_link_url())))
+    if not search_again_url:
+        search_again_url = back_link_url()
+    print("<br><br><a href='{}'>Search again</a>".format(
+        html_escape(search_again_url)))
     print(page_end_html())
 
 

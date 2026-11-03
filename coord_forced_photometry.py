@@ -88,6 +88,11 @@ from nmw_forced_phot_lib import (
 # point it at this page's input form.
 DEFAULT_FORM_PATH = '/unmw/coord_forced_photometry.html'
 ncl.DEFAULT_FORM_PATH = DEFAULT_FORM_PATH
+# URL path of this CGI itself, used only when the web server does not
+# provide SCRIPT_NAME (every CGI/1.1 server does). The "Server busy" page
+# links back here, with the request's own parameters, so that one click
+# re-runs the same request.
+DEFAULT_CGI_PATH = '/cgi-bin/unmw/coord_forced_photometry.py'
 
 # ---------- code-level constants (not deployment-specific) ----------
 TEMP_PARENT = 'uploads'                 # mirrors upload.py's upload_dir
@@ -99,7 +104,7 @@ DEFAULT_WINDOW_DAYS = 7
 MAX_WINDOW_DAYS = 30
 DEFAULT_MAX_IMAGES = 20
 MAX_MAX_IMAGES = 50
-FORCED_PHOT_MAX_CONCURRENT = 3          # each request uses its own VaST working copy, so this only caps server load
+FORCED_PHOT_MAX_CONCURRENT = 6          # each request uses its own VaST working copy, so this only caps server load
 
 # Per-upload directory name: img_<YYYY-MM-DD>_<...>. Only these are considered.
 IMG_DIR_RE = re.compile(r'^img_(\d{4})-(\d{2})-(\d{2})_')
@@ -241,21 +246,12 @@ def main():
                 ' '.join(VALID_BANDS)))
         return
 
-    slot = acquire_concurrency_slot(prefix='forced_phot',
-                                    max_concurrent=FORCED_PHOT_MAX_CONCURRENT)
-    if slot is None:
-        emit_message_page(
-            "Server busy",
-            "<p>The maximum number of concurrent forced-photometry requests "
-            "({0} of {0}) is currently running. Please try again in a "
-            "minute.</p>".format(FORCED_PHOT_MAX_CONCURRENT),
-            status_line="Status: 503 Service Unavailable")
-        return
-
     # URL of the input form pre-filled with this request's values. Used for
-    # every "Search again" link so the user can re-run with the same
-    # coordinates and tweak only window_days / max_images / band. Empty
-    # band_override is omitted so the form's default ("auto") remains
+    # every "Search again" link on the results page -- including the "no
+    # reference field covers this position" and "no images in the last N
+    # days" outcomes -- so the user lands back on the form with the same
+    # coordinates and can tweak only window_days / max_images / band.
+    # Empty band_override is omitted so the form's default ("auto") remains
     # selected on the return visit.
     search_again_params = {
         'coords': raw_coords,
@@ -264,8 +260,28 @@ def main():
     }
     if band_override:
         search_again_params['band'] = band_override
-    search_again_url = '{}?{}'.format(
-        DEFAULT_FORM_PATH, urllib.parse.urlencode(search_again_params))
+    search_again_query = urllib.parse.urlencode(search_again_params)
+    search_again_url = '{}?{}'.format(DEFAULT_FORM_PATH, search_again_query)
+    # URL that re-runs this very request: a GET to this CGI with the same
+    # parameters (the CGI accepts GET and POST alike). Only the "Server
+    # busy" page links here, so that a single click retries the measurement
+    # instead of sending the user back to the input form.
+    repeat_search_url = '{}?{}'.format(
+        os.environ.get('SCRIPT_NAME', '').strip() or DEFAULT_CGI_PATH,
+        search_again_query)
+
+    slot = acquire_concurrency_slot(prefix='forced_phot',
+                                    max_concurrent=FORCED_PHOT_MAX_CONCURRENT)
+    if slot is None:
+        emit_message_page(
+            "Server busy",
+            "<p>The maximum number of concurrent forced-photometry requests "
+            "({0} of {0}) is currently running. Please try again in a "
+            "minute: the Search again link below re-runs this same "
+            "request.</p>".format(FORCED_PHOT_MAX_CONCURRENT),
+            status_line="Status: 503 Service Unavailable",
+            search_again_url=repeat_search_url)
+        return
 
     try:
         work_dir = None  # per-request VaST working copy; cleaned up in finally

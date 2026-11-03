@@ -299,9 +299,17 @@ from the main transient pipeline that also runs there), the CGI makes a
   `autoprocess.sh`), so it does not accumulate.
 
 Because each request is isolated in its own copy, `FORCED_PHOT_MAX_CONCURRENT`
-(default 5) only caps server load, not correctness. The served PNG thumbnails
+(default 6) only caps server load, not correctness. The served PNG thumbnails
 still go to `uploads/forced_phot_<pid><rand>/` and are left for external
 housekeeping; only the VaST working copy is deleted by the CGI.
+
+When every slot is taken the CGI answers `503 Server busy` before doing any
+work. The "Search again" link on that page re-submits the same request (a GET
+to the CGI with the request's own parameters), so a single click retries the
+measurement. The pages that report no data -- no reference field covers the
+position, or no images of the covering fields in the requested window -- link
+back to the input form instead, pre-filled with the request, so the user can
+widen the window or change the position.
 
 ## 11. Backward compatibility
 
