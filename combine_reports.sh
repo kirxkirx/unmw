@@ -108,8 +108,20 @@ if [ -z "$MAX_UNIDENTIFIED_CANDIDATES_FOR_COMBINED_LIST" ];then
 fi
 # The total number of candidates allowed in one field when most of them are
 # already identified (known variable stars, asteroids etc.)
+# Raised from 200 to 400 in 2026-11, together with the same limit in VaST's
+# transient_factory_test31.sh. On the night of 2026-11-03 CDS VizieR was down and
+# the ESA Gaia archive failed intermittently, so the Gaia known-star check found
+# nothing in many runs: crowded Milky Way fields reported up to 222 candidates,
+# almost all of them known variable stars, which the filtered list hides anyway
+# (Vul-01 8 unidentified of 222, Cyg-08 5 of 217), and these two were dropped
+# from the combined list. In the 338 NMW-TexasTech summary pages of
+# 2025-12..2026-11 (58969 field reports) no other field with at most 19
+# unidentified candidates had more than 200 candidates; the fields with more
+# candidates and more unidentified ones are still caught by the limits on
+# unidentified candidates. The outage raised the unidentified counts only to
+# 13 at most, so those limits stay.
 if [ -z "$MAX_CANDIDATES_FOR_COMBINED_LIST_IF_MOST_ARE_KNOWN" ];then
- MAX_CANDIDATES_FOR_COMBINED_LIST_IF_MOST_ARE_KNOWN=200
+ MAX_CANDIDATES_FOR_COMBINED_LIST_IF_MOST_ARE_KNOWN=400
 fi
 # The total number of candidates allowed in one field otherwise
 if [ -z "$MAX_CANDIDATES_FOR_COMBINED_LIST_DEFAULT" ];then

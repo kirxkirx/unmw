@@ -158,11 +158,33 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 #export MAX_UNIDENTIFIED_CANDIDATES_FOR_COMBINED_LIST=40
 # Total number of candidates allowed in one field when most of them are already
 # identified (known variable stars, asteroids etc.)
-#export MAX_CANDIDATES_FOR_COMBINED_LIST_IF_MOST_ARE_KNOWN=200
+#export MAX_CANDIDATES_FOR_COMBINED_LIST_IF_MOST_ARE_KNOWN=400
 # Total number of candidates allowed in one field otherwise
 #export MAX_CANDIDATES_FOR_COMBINED_LIST_DEFAULT=120
-# Number of unidentified candidates up to which the higher total limit applies
+# Number of unidentified candidates up to which the higher total limit applies.
+# VaST's transient_factory_test31.sh reads the same variable for its own limits.
 #export MAX_UNIDENTIFIED_CANDIDATES_FOR_RELAXED_LIMIT=19
+# VaST's transient_factory_test31.sh does not add the candidates of a field to the
+# exclusion list (so they are reported again next time) when the field has more
+# candidates than this, or than the second value when at most
+# MAX_UNIDENTIFIED_CANDIDATES_FOR_RELAXED_LIMIT of them are unidentified; it then
+# writes an ERROR line, which fails the field on the summary page.
+#export MAX_NUMBER_OF_CANDIDATES_PER_FIELD=80
+#export MAX_NUMBER_OF_CANDIDATES_PER_FIELD_IF_MOST_ARE_KNOWN=400
+
+# The known-star check of transient candidates (VaST's report_transient.sh) rejects a
+# candidate that is a catalogued star of about the same brightness. VaST uses a local
+# Gaia DR2 copy when it finds one (built with lib/install_local_copy_of_GaiaDR2.sh in
+# the VaST directory, 13 GB, and found in lib/catalogs/gaia_dr2 or one of the
+# directories the factory searches, such as /data_ssd/GaiaDR2), and otherwise asks the
+# ESA Gaia archive and CDS VizieR. GAIA_DR2_CLIENT forces a source: local, esa_tap,
+# vizquery, none (no known-star check), or tycho2_ucac5 (experimental: the local
+# Tycho-2 and UCAC5 copies).
+#export GAIA_DR2_CLIENT=auto
+# The second known-star check, against APASS, is off since 2026-11: APASS is served only
+# by CDS VizieR. Set this to use it again when VizieR answers (one more VizieR query per
+# candidate; VaST skips it anyway when it finds VizieR unreachable).
+#export APASS_KNOWN_STAR_CHECK=yes
 
 # The high-priority fields: crowded Galactic Center region fields where a real
 # transient is most likely to hide among the many known variable stars.
