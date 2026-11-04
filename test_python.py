@@ -619,6 +619,95 @@ def _det(basename, jd, mag, err=0.01, camera='CAM1'):
             'jd_float': jd, 'mag_float': mag, 'err_float': err}
 
 
+class TestAltitudeExtraction:
+    """Tests for nmw_second_epoch_min_altitude (report_helpers.sh), which fills
+    the Altitude column of the combine_reports.sh summary table"""
+
+    @staticmethod
+    def extract(report):
+        import subprocess
+        helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'report_helpers.sh')
+        return subprocess.run(
+            ['bash', '-c', 'source "$1"; nmw_second_epoch_min_altitude "$2"', 'test', helper, report],
+            check=True, capture_output=True, text=True, timeout=10).stdout
+
+    @staticmethod
+    def report(content):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as f:
+            f.write(content)
+            return f.name
+
+    def test_lowest_of_two_images_to_one_decimal(self):
+        """The column shows the lower altitude of the two new images, one decimal place"""
+        path = self.report("""
+SECOND_EPOCH__FIRST_IMAGE= /path/to/Gem-03-Q1b1x1_2026-01-21_02-42-26_20.00sec_-15.00C_LIGHT_0409.fits
+Field altitude during imaging: 42.9 deg (FITS keyword CENTALT)  Gem-03-Q1b1x1_2026-01-21_02-42-26_20.00sec_-15.00C_LIGHT_0409.fits
+Field altitude during imaging: 42.7 deg (FITS keyword CENTALT)  Gem-03-Q1b1x1_2026-01-21_02-43-15_20.00sec_-15.00C_LIGHT_0410.fits
+Angular distance between the image centers 0.0123 deg.
+""")
+        try:
+            assert self.extract(path) == "42.7"
+        finally:
+            os.unlink(path)
+
+    def test_lowest_is_chosen_numerically(self):
+        """9.8 is lower than 10.1 although it sorts after it as text"""
+        path = self.report("Field altitude during imaging: 10.1 deg (FITS keyword CENTALT)  img_001.fits\n"
+                           "Field altitude during imaging: 9.8 deg (FITS keyword CENTALT)  img_002.fits\n")
+        try:
+            assert self.extract(path) == "9.8"
+        finally:
+            os.unlink(path)
+
+    def test_notes_about_unusable_values_are_ignored(self):
+        """A note about an unusable header value leaves the column to the other image"""
+        path = self.report("No field altitude in the FITS header (the CENTALT value is not an altitude in degrees)  img_001.fits\n"
+                           "Field altitude during imaging: 25.4 deg (FITS keyword CENTALT)  img_002.fits\n")
+        try:
+            assert self.extract(path) == "25.4"
+        finally:
+            os.unlink(path)
+
+    def test_blank_without_altitude_lines(self):
+        """No altitude keyword in the headers: the note lines leave the column blank"""
+        path = self.report("""
+SECOND_EPOCH__FIRST_IMAGE= /path/to/5027_2026-3-12_22-50-40_003.fts
+No field altitude in the FITS header (no CENTALT or OBJCTALT keyword)  5027_2026-3-12_22-50-40_003.fts
+No field altitude in the FITS header (no CENTALT or OBJCTALT keyword)  5027_2026-3-12_22-51-32_004.fts
+Angular distance between the image centers 0.0123 deg.
+""")
+        try:
+            assert self.extract(path) == ""
+        finally:
+            os.unlink(path)
+
+    def test_blank_for_a_report_without_the_marker(self):
+        """Reports from a VaST revision predating the altitude line give a blank cell"""
+        path = self.report("Processing fields Vul3<br>\nLast  image: 2460683.14 07.01.2025 15:30:31\n")
+        try:
+            assert self.extract(path) == ""
+        finally:
+            os.unlink(path)
+
+    def test_single_image_negative_and_formatting(self):
+        """One line is enough; a negative value survives sorting and gets one decimal place"""
+        path = self.report("Field altitude during imaging: -5.5 deg (FITS keyword OBJCTALT)  img_001.fits\n"
+                           "Field altitude during imaging: 12 deg (FITS keyword OBJCTALT)  img_002.fits\n")
+        try:
+            assert self.extract(path) == "-5.5"
+        finally:
+            os.unlink(path)
+
+    def test_lines_without_a_number_are_ignored(self):
+        """A mangled line never turns into a bogus cell value"""
+        path = self.report("Field altitude during imaging: unknown deg  img_001.fits\n"
+                           "Field altitude during imaging: 30.0 deg (FITS keyword CENTALT)  img_002.fits\n")
+        try:
+            assert self.extract(path) == "30.0"
+        finally:
+            os.unlink(path)
+
+
 def test_visit_consistency_clean_pair_kept():
     rows = [_det('a.fits', 2461000.500, 9.70),
             _det('b.fits', 2461000.501, 9.72)]

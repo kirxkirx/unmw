@@ -672,7 +672,9 @@ triggers and deployment acceptance policy are unchanged.
   (`combine_reports.sh`, `autoprocess.sh`) and by `filter_report.py` - for
   example `Processing fields`, `Processing complete!`,
   `printCandidateNameWithAbsLink`, `The object was found in`,
-  `mag brighter than the`, and `Last  image` (two spaces). `unmw_selftest.sh`
+  `mag brighter than the`, `Last  image` (two spaces), `Angular distance between the
+  image centers` and `Field altitude during imaging:` (the Pointing.Offset and
+  Altitude columns of the summary page). `unmw_selftest.sh`
   even depends on the exact misspelling `too few refereence images`. If any
   of these strings is changed on the VaST side, the corresponding consumer
   here must be updated in step (and vice versa). When adding an ATTENTION/NOTE

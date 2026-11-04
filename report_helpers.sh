@@ -15,3 +15,13 @@ nmw_second_epoch_fwhm() {
   [ -n "$second" ] && grep "pix.*$second" "$report" | awk '$1 ~ /^[0-9.]+$/ {print $1}'
  } | sort -rn | head -n1
 }
+
+nmw_second_epoch_min_altitude() {
+ # The lowest altitude of the second-epoch images in degrees, to one decimal
+ # place, from the 'Field altitude during imaging: NN.N deg' lines the VaST
+ # transient factory writes for images whose FITS header records the altitude
+ # (CENTALT or OBJCTALT). Empty when the report has no such line, so the
+ # summary column stays blank for cameras whose headers carry no altitude.
+ local report="$1"
+ grep 'Field altitude during imaging:' "$report" | awk '{for (i = 2; i <= NF; i++) if ($i == "deg" && $(i-1) ~ /^[-+]?[0-9]+\.?[0-9]*$/) {print $(i-1); break}}' | sort -n | head -n1 | awk '{printf "%.1f", $1}'
+}
