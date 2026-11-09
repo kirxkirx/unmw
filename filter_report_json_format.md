@@ -77,6 +77,7 @@ Required: `id`, `classification`. Everything else may be `null` or omitted.
 | `discovery_images` | object[] \| null | One row per row in the per-candidate HTML table. |
 | `crossmatches` | object \| null | One sub-object per crossmatch catalog. |
 | `forced_photometry` | object \| null | Forced photometry on reference images. |
+| `uv_ceti_check` | string \| null | The `UV Ceti check (...): ...` line VaST appends after the forced photometry (since 2026-11): whether a Gaia DR3 star closer than 200 pc, a red dwarf most likely, sits at the position once its proper motion is applied, with its distance, colour, absolute magnitude and a verdict. Plain text, as rendered. `null` when the producer did not run the check (an older VaST, or the check disabled). Additive field, no schema version bump. |
 | `external_links` | object \| null | Absolute URLs of external catalog/service searches. |
 | `report_stubs` | object \| null | Pre-formatted text blocks (MPC, TOCP, AAVSO, VSNET). |
 | `parse_warnings` | string[] | Per-candidate parse warnings. Empty array when everything parsed cleanly. |

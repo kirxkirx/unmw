@@ -571,11 +571,14 @@ def _extract_crossmatches(pre_text, warnings):
                     end = nxt_idx
                     break
             # Stop earlier at known terminators that come after crossmatches.
+            # 'UV Ceti check' is the line VaST appends after the forced photometry
+            # (util/transients/check_nearby_red_dwarf.sh) since 2026-11.
             for j in range(idx + 1, end):
                 stripped = lines[j].strip()
                 if stripped.startswith((
                     'Forced photometry',
                     'online_id',
+                    'UV Ceti check',
                     'Check this position in',
                     'Online MPChecker',
                 )):
@@ -639,6 +642,20 @@ def _extract_forced_photometry(pre_text, warnings):
         "per_image": per_image or None,
         "reference_weighted_avg": avg,
     }
+
+
+def _extract_uv_ceti_check(pre_text):
+    """The 'UV Ceti check (...): ...' line VaST appends after the forced
+    photometry (util/transients/check_nearby_red_dwarf.sh): is there a Gaia DR3
+    star closer than 200 pc, a red dwarf most likely, at the position once its
+    proper motion is applied? Returned as the plain line; None when the
+    producer did not run the check (an older VaST, or the check disabled)."""
+    plain = BeautifulSoup(pre_text, 'lxml').get_text()
+    for line in plain.split('\n'):
+        stripped = line.strip()
+        if stripped.startswith('UV Ceti check'):
+            return stripped
+    return None
 
 
 _EXTERNAL_LINK_RULES = [
@@ -745,6 +762,7 @@ def _build_candidate(transient_html, candidate_id, classification, base_url):
     discovery_images = _extract_discovery_table(transient_soup, base_url, warnings)
     crossmatches = _extract_crossmatches(pre_text, warnings) if pre_text else None
     forced_phot = _extract_forced_photometry(pre_text, warnings) if pre_text else None
+    uv_ceti_check = _extract_uv_ceti_check(pre_text) if pre_text else None
     external_links = _extract_external_links(transient_soup, base_url)
     report_stubs = _extract_report_stubs(transient_soup, candidate_id, warnings)
     return {
@@ -757,6 +775,7 @@ def _build_candidate(transient_html, candidate_id, classification, base_url):
         "discovery_images": discovery_images,
         "crossmatches": crossmatches,
         "forced_photometry": forced_phot,
+        "uv_ceti_check": uv_ceti_check,
         "external_links": external_links,
         "report_stubs": report_stubs,
         "parse_warnings": warnings,
