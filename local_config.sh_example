@@ -186,6 +186,19 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # candidate; VaST skips it anyway when it finds VizieR unreachable).
 #export APASS_KNOWN_STAR_CHECK=yes
 
+# The UV Ceti check of transient candidates (VaST's util/transients/check_nearby_red_dwarf.sh)
+# adds a line to the report of every surviving candidate telling whether a Gaia DR3 star
+# closer than 200 pc sits at its position once the star's proper motion is applied to the
+# epoch of the images, and where that star is with respect to the red dwarf main sequence
+# (a flare on a red dwarf being the most common short-lived brightening). VaST reads a local
+# copy of the Gaia DR3 nearby stars when it finds one (195 MB, installed in a minute from the
+# VaST catalog mirrors with lib/install_local_copy_of_GaiaDR3_nearby_stars.sh in the VaST
+# directory, found in lib/catalogs/gaia_dr3_nearby or one of the directories the factory
+# searches, such as /data_ssd/GaiaDR3_nearby or /home/kirx/GaiaDR3_nearby), and otherwise
+# asks the ESA Gaia archive, then CDS VizieR, once per candidate. filter_report.py exports the
+# line as the uv_ceti_check field. Set this to no to skip the check.
+#export UV_CETI_CHECK=yes
+
 # The high-priority fields: crowded Galactic Center region fields where a real
 # transient is most likely to hide among the many known variable stars.
 # Exported here, this one list drives BOTH scripts: combine_reports.sh always
