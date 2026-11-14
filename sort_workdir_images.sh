@@ -43,6 +43,12 @@
 # moved wcs_fd_ frames under good_wcs_fd_images/ and links them at their new
 # URL (see above); nothing else reads the moved files.
 #
+# The run ends by listing the destination directories that received files,
+# with the number of files and GiB placed in each - also when a failed move
+# stops it; a dry run lists where --execute would place them.
+# sort_workdir_images_logs/manifest_*.tsv in the work directory records the
+# moves file by file.
+#
 # DRY RUN BY DEFAULT. Nothing is moved without --execute. Run as the owner of
 # the work directory (sudo -u apache) or as root, by hand or from cron; a lock
 # file keeps two runs from overlapping. Cron example (daily at noon):
@@ -321,7 +327,17 @@ classify() {
 declare -A CNT BYTES SKIP_REASONS
 for k in GOOD NOREF OTHER SKIP; do CNT[$k]=0; done
 BYTES[GOOD_good]=0; BYTES[GOOD_other]=0; BYTES[NOREF]=0; BYTES[OTHER]=0
+# Files and bytes per destination directory, for the list that ends the run:
+# what --execute placed there, or - in a dry run - what the directories the
+# move loop would take (same --only and --limit selection) would place there.
+declare -A PLACED_FILES PLACED_BYTES
+# count_placed <dest root> <files> <bytes>
+count_placed() {
+ PLACED_FILES[$1]=$(( ${PLACED_FILES[$1]:-0} + $2 ))
+ PLACED_BYTES[$1]=$(( ${PLACED_BYTES[$1]:-0} + $3 ))
+}
 N_IMG=0
+N_SEL=0
 while IFS= read -r -d '' d; do
  N_IMG=$((N_IMG + 1))
  classify "$d"
@@ -333,9 +349,37 @@ while IFS= read -r -d '' d; do
   OTHER) BYTES[OTHER]=$(( ${BYTES[OTHER]} + B_OTHER )) ;;
   SKIP) key="${REASON%%:*}"; key="${key%% (*}"; SKIP_REASONS["$key"]=$(( ${SKIP_REASONS["$key"]:-0} + 1 )) ;;
  esac
+ # dry run: count the files toward their destinations if the move loop would
+ # take this directory
+ if [ $EXECUTE -eq 0 ] && [ "$CAT" != SKIP ] && [ "${ONLY:-$CAT}" = "$CAT" ] && { [ "$LIMIT" -eq 0 ] || [ $N_SEL -lt "$LIMIT" ]; }; then
+  N_SEL=$((N_SEL + 1))
+  case "$CAT" in
+   GOOD) count_placed "$DEST_GOOD" "$N_GOOD" "$B_GOOD"; count_placed "$DEST_OTHER" "$N_OTHER" "$B_OTHER" ;;
+   NOREF) count_placed "$DEST_NOREF" "$N_OTHER" "$B_OTHER" ;;
+   OTHER) count_placed "$DEST_OTHER" "$N_OTHER" "$B_OTHER" ;;
+  esac
+ fi
 done < <(find "$WORKDIR" -mindepth 1 -maxdepth 1 -type d -name 'img_*' -print0 | sort -z)
 
 gib() { awk -v b="$1" 'BEGIN { printf "%.1f GiB", b / 1073741824 }'; }
+
+# list_destinations: the end of the run - the destination directories that
+# received files (a dry run: would receive them), one per line; a relative
+# destination is shown with the directory it is relative to
+list_destinations() {
+ local say=echo heading="DRY RUN - nothing was moved. With --execute the sorted images would be placed in:" dest shown n=0
+ local none="DRY RUN - nothing was moved, and --execute with these options would move nothing."
+ if [ $EXECUTE -eq 1 ]; then say=log; heading="sorted images placed in:"; none="no files were moved"; fi
+ for dest in "$DEST_GOOD" "$DEST_NOREF" "$DEST_OTHER"; do
+  [ "${PLACED_FILES[$dest]:-0}" -gt 0 ] || continue
+  [ $n -gt 0 ] || "$say" "$heading"
+  n=$((n + 1))
+  case "$dest" in /*) shown="$dest" ;; *) shown="${PWD:-.}/$dest" ;; esac
+  "$say" "   $shown (${PLACED_FILES[$dest]} files, $(gib "${PLACED_BYTES[$dest]}"))"
+ done
+ [ $n -gt 0 ] || "$say" "$none"
+}
+
 echo
 echo "img_* directories: $N_IMG"
 echo "GOOD  ${CNT[GOOD]} dirs: $(gib ${BYTES[GOOD_good]}) of wcs_fd_ images -> good; $(gib ${BYTES[GOOD_other]}) of other files -> other"
@@ -363,7 +407,7 @@ if [ $EXECUTE -eq 0 ]; then
   PLAN_COPY="${TMPDIR:-/tmp}/sort_workdir_images_plan_${RUN_STAMP}.tsv"
  fi
  cp "$PLAN" "$PLAN_COPY" 2>/dev/null && echo "plan written to $PLAN_COPY (name, category, n_good, bytes_good, n_other, bytes_other, reason)"
- echo "DRY RUN - nothing was moved. Add --execute to move."
+ list_destinations
  exit 0
 fi
 
@@ -381,6 +425,9 @@ done
 LOG="$LOG_DIR/sort_workdir_images.log"
 MANIFEST="$LOG_DIR/manifest_${RUN_STAMP}.tsv"
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" | tee -a "$LOG"; }
+# stop <reason>: a move failed - end the run with exit code 2, listing where
+# the files moved until then went
+stop() { log "STOP: $*"; list_destinations; exit 2; }
 printf 'time\tcategory\timg_dir\tfile\tbytes\tdestination\n' > "$MANIFEST"
 cp "$PLAN" "$LOG_DIR/plan_${RUN_STAMP}.tsv"
 log "start: workdir=$WORKDIR good=$DEST_GOOD noref=$DEST_NOREF other=$DEST_OTHER min_age=${MIN_AGE_HOURS}h limit=$LIMIT only=${ONLY:-all} keep_catalogs=$KEEP_CATALOGS user=$(id -un)"
@@ -390,23 +437,25 @@ log "start: workdir=$WORKDIR good=$DEST_GOOD noref=$DEST_NOREF other=$DEST_OTHER
 # overwriting an existing file; a name that already exists at the destination
 # stays in place and stops the run.
 move_files() {
- local cat="$1" name="$2" src="$3" list="$5" dest="$4/$2" f
+ local cat="$1" name="$2" src="$3" list="$5" dest="$4/$2" f size
  [ -s "$list" ] || return 0
  if [ ! -d "$dest" ]; then
-  mkdir -p "$dest" || { log "STOP: cannot create $dest"; exit 2; }
+  mkdir -p "$dest" || stop "cannot create $dest"
   chown --reference="$src" "$dest" 2>/dev/null || true
   chmod --reference="$src" "$dest" 2>/dev/null || true
  fi
  while IFS= read -r -d '' f; do
   if [ -e "$dest/$f" ]; then
-   log "STOP: $dest/$f already exists - not overwriting; $src/$f left in place, please inspect"
-   exit 2
+   stop "$dest/$f already exists - not overwriting; $src/$f left in place, please inspect"
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$cat" "$name" "$f" "$(stat -c %s -- "$src/$f" 2>/dev/null || echo '?')" "$dest" >> "$MANIFEST"
+  size=$(stat -c %s -- "$src/$f" 2>/dev/null) || size='?'
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$cat" "$name" "$f" "$size" "$dest" >> "$MANIFEST"
   if ! mv -n -- "$src/$f" "$dest/$f"; then
-   log "STOP: cannot move $src/$f to $dest/ - rerun to resume"
-   exit 2
+   stop "cannot move $src/$f to $dest/ - rerun to resume"
   fi
+  # counted once it has left the source (mv -n skips an existing name silently)
+  case "$size" in ''|*[!0-9]*) size=0 ;; esac
+  [ -e "$src/$f" ] || count_placed "$4" 1 "$size"
  done < "$list"
 }
 
@@ -433,11 +482,11 @@ while IFS=$'\t' read -r name cat _rest; do
   OTHER) move_files OTHER "$name" "$d" "$DEST_OTHER" "$LIST_OTHER" ;;
  esac
  if [ -n "$(find "$d" -mindepth 1 -print -quit 2>/dev/null)" ]; then
-  log "STOP: $d is not empty after the move - please inspect"
-  exit 2
+  stop "$d is not empty after the move - please inspect"
  fi
- rmdir "$d" || { log "STOP: cannot remove the emptied directory $d"; exit 2; }
+ rmdir "$d" || stop "cannot remove the emptied directory $d"
  N_DONE=$((N_DONE + 1))
 done < "$PLAN"
 log "done: $N_DONE directories moved; manifest $MANIFEST"
+list_destinations
 exit 0

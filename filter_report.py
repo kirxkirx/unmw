@@ -658,12 +658,18 @@ def _extract_uv_ceti_check(pre_text):
     return None
 
 
+# VaST links SIMBAD, VizieR and Aladin Lite at cds.unistra.fr: the old u-strasbg.fr names
+# have had no address records since 2026-11-10. Reports made before that still carry the
+# old names, so both are recognised (a key is filled by the first rule that matches).
 _EXTERNAL_LINK_RULES = [
     ('tns', 'wis-tns.org'),
     ('asassn_list', 'astronomy.ohio-state.edu/asassn'),
+    ('simbad', 'simbad.cds.unistra.fr'),
     ('simbad', 'simbad.u-strasbg.fr'),
+    ('vizier', 'vizier.cds.unistra.fr'),
     ('vizier', 'vizier.u-strasbg.fr'),
     ('wise', 'irsa.ipac.caltech.edu'),
+    ('aladin_lite', 'aladin.cds.unistra.fr'),
     ('aladin_lite', 'aladin.u-strasbg.fr'),
     ('snad_ztf', 'ztf.snad.space'),
 ]
