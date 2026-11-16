@@ -17,8 +17,9 @@
 #  NOREF  not OK, error "ERROR: too few refereence images for the field ..."
 #          (no reference images for this field - the frames cannot be
 #          calibrated yet)    -> the whole directory to <noref>/img_<S>/
-#  OTHER  everything else (any other ERROR, CAMERA STUCK, field excluded from
-#          the combined report) -> the whole directory to <other>/img_<S>/
+#  OTHER  everything else (any other ERROR, CAMERA STUCK, ROOF CLOSED, field
+#          excluded from the combined report) -> the whole directory to
+#          <other>/img_<S>/
 #
 # By default the three directories are created inside the work directory:
 #   good_wcs_fd_images/  no_reference_image/  other_images_to_delete/

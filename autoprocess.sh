@@ -39,6 +39,13 @@ UNMW_SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 # Clear any remaining request metadata before launching batch helpers.
 unset GATEWAY_INTERFACE REQUEST_METHOD QUERY_STRING CONTENT_LENGTH CONTENT_TYPE
 
+# The closed observatory roof Slack alert: roof_closed_alert and
+# roof_closed_alert_rearm, called after the transient search below
+if [ -f "$UNMW_SCRIPT_DIR/roof_closed_alert.sh" ];then
+ # shellcheck source=roof_closed_alert.sh disable=SC1091
+ source "$UNMW_SCRIPT_DIR/roof_closed_alert.sh"
+fi
+
 
 # Normally $IMAGE_DATA_ROOT $DATA_PROCESSING_ROOT $URL_OF_DATA_PROCESSING_ROOT are
 # exported in local_config.sh that is sourced by wrapper.sh
@@ -1135,6 +1142,8 @@ if [ "$RUN_VERDICT" != "ok" ];then
  record_transient_search_verdict "$RUN_VERDICT" "$RUN_VERDICT_REASON"
 fi
 CPU_TEMERATURE_AT_THE_END_OF_THE_RUN_STRING=$(is_temperature_low log)
+# What happened to the closed-roof Slack alert, for the autoprocess.txt record
+ROOF_CLOSED_ALERT_DECISION=""
 #################################################################
 if [ ! -f transient_report/index.html ];then
  ERROR_MSG="no transient_report/index.html"
@@ -1205,6 +1214,22 @@ $MSG"
 Please check it at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME"
   fi
  fi # grep 'ERROR' "transient_report/index.html" | grep 'camera is stuck'
+ ### Check for the closed observatory roof: VaST writes a line with both ERROR and
+ ### OBSERVATORY ROOF CLOSED when the latest new image shows no stars and no sky
+ ### light while the camera keeps imaging (cross-repo contract, see README.md).
+ ### A successful run may re-arm the rate-limited alert (roof_closed_alert.sh).
+ if grep 'ERROR' "transient_report/index.html" | grep --quiet 'OBSERVATORY ROOF CLOSED' ;then
+  if declare -F roof_closed_alert > /dev/null ;then
+   ROOF_CLOSED_ALERT_DECISION=$(roof_closed_alert transient_report/index.html "$URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/")
+  else
+   ROOF_CLOSED_ALERT_DECISION="Closed-roof Slack alert: not sent - roof_closed_alert.sh is missing from $UNMW_SCRIPT_DIR"
+  fi
+ elif [ "$RUN_VERDICT" = "ok" ] && declare -F roof_closed_alert_rearm > /dev/null ;then
+  ROOF_CLOSED_ALERT_DECISION=$(roof_closed_alert_rearm transient_report/index.html)
+ fi
+ if [ -n "$ROOF_CLOSED_ALERT_DECISION" ];then
+  echo "$ROOF_CLOSED_ALERT_DECISION" | tee -a "$AUTOPROCESS_LOG"
+ fi
 fi # if [ ! -f transient_report/index.html ];then
 # Source monitoring: quality-check and ingest the factory's monitoring
 # measurements. The frame-quality (cloud) check needs the frame and
@@ -1290,6 +1315,13 @@ PROCESSING_TIME_WAITLOAD=$(echo "$UNIXSEC_STOP_WAITLOAD $UNIXSEC_START_WAITLOAD"
 PROCESSING_TIME_UNPACK=$(echo "$UNIXSEC_START $UNIXSEC_STOP_WAITLOAD" | awk '{printf "%6.2f", ($1-$2)/60 }')
 PROCESSING_TIME_TOTAL=$(echo "$UNIXSEC_STOP $UNIXSEC_START_TOTAL" | awk '{printf "%6.2f", ($1-$2)/60 }')
 DATETIME=$(LANG=C date --utc)
+# The closed-roof alert decision gets its own paragraph; without one the record is unchanged
+ROOF_CLOSED_ALERT_MSG_PARAGRAPH=""
+if [ -n "$ROOF_CLOSED_ALERT_DECISION" ];then
+ ROOF_CLOSED_ALERT_MSG_PARAGRAPH="
+$ROOF_CLOSED_ALERT_DECISION
+"
+fi
 
 # report end of work
 echo "Reporting the end of work"  | tee -a "$AUTOPROCESS_LOG"
@@ -1311,7 +1343,7 @@ $PROCESSING_TIME_WAITLOAD min  -- wait due to high server load
 $PROCESSING_TIME_UNPACK min  -- unpack data and prepare VaST
 
 The script exit code is $SCRIPT_EXIT_CODE
-
+$ROOF_CLOSED_ALERT_MSG_PARAGRAPH
 $CPU_TEMERATURE_AT_THE_END_OF_THE_RUN_STRING
 
 The results should appear at $URL_OF_DATA_PROCESSING_ROOT/$VAST_RESULTS_DIR_FILENAME/
