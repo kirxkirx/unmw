@@ -214,7 +214,8 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 
 # Notification hooks (all optional; no notifications are sent when unset).
 # autoprocess.sh and combine_reports.sh use these to alert the team about
-# bright candidates, errors and stuck cameras.
+# bright candidates, errors, stuck cameras and a closed observatory roof
+# (see "Notifications" in README.md).
 #
 # CURL_USERNAME_URL_TO_EMAIL_TEAM / CURL_USERNAME_URL_TO_EMAIL_KIRX are the
 # URLs of a form-to-email relay; the scripts POST name/message/submit fields
@@ -228,6 +229,50 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # SLACK_WEBHOOK_URL_TEAM is a Slack incoming-webhook URL; the scripts POST a
 # JSON {"text": ...} alert to it.
 #export SLACK_WEBHOOK_URL_TEAM="https://hooks.slack.com/services/XXX/YYY/ZZZ"
+#
+# Closed observatory roof alert. When the latest new image of a field shows no
+# stars and no sky light above the dark level - the roof is closed, but the
+# camera keeps imaging, as NINA does not know that the roof is closed - VaST
+# fails the field with an ERROR line containing OBSERVATORY ROOF CLOSED (the
+# summary page shows ROOF CLOSED) and autoprocess.sh posts a Slack message to
+# SLACK_WEBHOOK_URL_TEAM naming the camera, the field, the UTC time of the
+# frame and the results page. No alert is sent for a test upload (an archive
+# name containing "test"), for the manual reprocessing of an image directory,
+# or for a frame taken more than ROOF_CLOSED_ALERT_MAX_AGE_HOURS ago (a late
+# upload; a frame of unknown time is alerted). A camera gets at most one alert
+# per ROOF_CLOSED_ALERT_REPEAT_HOURS (0 = no limit); its next successful run
+# with a frame taken after the closed-roof frame of the last alert re-arms the
+# alert, so the next closure is reported at once. The rate-limit state is kept in
+# DATA_PROCESSING_ROOT/roof_closed_alert_<camera>.state, and autoprocess.txt
+# records for every closed-roof run whether the alert was sent (with the curl
+# exit code and the Slack response) or why not. Set ROOF_CLOSED_SLACK_ALERT to
+# no to turn the alert off. The defaults are shown.
+#export ROOF_CLOSED_SLACK_ALERT=yes
+#export ROOF_CLOSED_ALERT_REPEAT_HOURS=3
+#export ROOF_CLOSED_ALERT_MAX_AGE_HOURS=6
+# The check itself is done by VaST: transient_factory_test31.sh runs
+# util/detect_closed_roof on the new images (never on the reference images).
+# It is on by default only for the NMW-TexasTech cameras TTUQ1b1x1 and
+# TTUQ2b1x1, whose master darks give the zero level of the sky background.
+# VaST reads the settings below from the environment, so they may be exported
+# here like the other VaST settings in this file; an exported
+# CHECK_FOR_CLOSED_ROOF applies to every camera (no turns the check off). An
+# image counts as taken with the roof closed when it has fewer than
+# CLOSED_ROOF_CHECK_MAX_STARS star-like peaks and its background is less than
+# CLOSED_ROOF_CHECK_MAX_SKY_ADU_PER_SEC ADU per second of exposure above the
+# dark. A starless frame whose background is far below the dark, or - with
+# CLOSED_ROOF_CHECK_MAX_NOISE_ADU, 15 ADU for the TTU cameras (about twice
+# their read noise) - a starless frame at the dark level that is noisier than
+# a frame without sky light can be, means that the dark frame does not match
+# the image: the field then gets a "no stars ... closed roof or thick clouds?"
+# ERROR and no alert. The limits were set for the QHY600M cameras at GAIN 30,
+# OFFSET 30 in the current readout mode: revisit them, and take new master
+# darks, if the gain, offset or readout mode change. The values shown are
+# VaST's defaults for the TTU cameras.
+#export CHECK_FOR_CLOSED_ROOF=yes
+#export CLOSED_ROOF_CHECK_MAX_STARS=20
+#export CLOSED_ROOF_CHECK_MAX_SKY_ADU_PER_SEC=5.0
+#export CLOSED_ROOF_CHECK_MAX_NOISE_ADU=15
 
 # Half-width in source-image pixels of the zoom-in thumbnail produced by the
 # forced-photometry pages (coord_forced_photometry.py and the archival

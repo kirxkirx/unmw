@@ -27,7 +27,7 @@ curl() { command curl --ipv4 --connect-timeout 10 --max-time 1200 "$@"; }
 echo "Checking that non-CGI scripts refuse to run as CGI..."
 
 # upload.py strips CGI markers before launching wrapper.sh and autoprocess.sh.
-NON_CGI_SCRIPTS="autoprocess.sh archive_phot_prune.sh wrapper.sh report_helpers.sh combine_reports.sh combine_results_comets.sh fastplot_wrapper.sh git_unmw_automated_update.sh generate_htdocs.sh filter_report.py archive_phot_worker.py monitoring_update.py"
+NON_CGI_SCRIPTS="autoprocess.sh archive_phot_prune.sh wrapper.sh report_helpers.sh roof_closed_alert.sh combine_reports.sh combine_results_comets.sh fastplot_wrapper.sh git_unmw_automated_update.sh generate_htdocs.sh filter_report.py archive_phot_worker.py monitoring_update.py"
 CGI_GUARD_FAILURES=""
 for SCRIPT in $NON_CGI_SCRIPTS; do
  if [ ! -f "$SCRIPT" ]; then

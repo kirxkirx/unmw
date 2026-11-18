@@ -109,7 +109,7 @@ expires; both fixes only govern responses served from the change onward.
 After editing the vhost, `apachectl configtest && apachectl -k graceful`
 (or `/etc/init.d/apache2 reload` on OpenRC) applies the new headers.
 
-***Don't forget to add new camera name to combine_reports.sh***
+***Don't forget to add new camera name to combine_reports.sh (and to the same list in roof_closed_alert.sh)***
 
 # draft installation instructions
 
@@ -558,6 +558,57 @@ as the web server user that owns the uploads directory):
 41 4 * * * apache cd /data/cgi-bin/unmw && ./archive_phot_prune.sh 90 >> uploads/archive_phot_prune.log 2>&1
 ````
 
+# Notifications
+
+All notifications are optional. They go to a form-to-email relay
+(`CURL_USERNAME_URL_TO_EMAIL_TEAM`, `CURL_USERNAME_URL_TO_EMAIL_KIRX`) and to a
+Slack incoming webhook (`SLACK_WEBHOOK_URL_TEAM`) set in `local_config.sh` (see
+the "Notification hooks" block of `local_config.sh_example`); nothing is sent
+while they are unset. `autoprocess.sh` sends nothing for a test upload (an
+archive name containing `test`, `Test` or `TEST`), and `combine_reports.sh`
+leaves results directories with `_test` in the name out of its lists.
+
+- **New candidates list** (`combine_reports.sh`): an e-mail to the team and a
+  Slack message when the first combined list of a camera for the half-night is
+  created, so once per camera per half-night.
+- **Stuck camera** (`autoprocess.sh`): an e-mail to the team and a Slack message
+  after every run whose report says the camera keeps sending the same image.
+- **Closed observatory roof** (`autoprocess.sh`, `roof_closed_alert.sh`): a
+  Slack message when VaST finds no stars and no sky light on the latest new
+  image of a field - the roof is closed, but the camera keeps imaging (NINA
+  does not know that the roof is closed). It names the camera, the field, the
+  UTC time of the frame and the results page, e.g. `:warning: *Observatory roof
+  appears to be CLOSED* - camera *TTUQ2b1x1*: no stars and no sky light on the
+  latest new image of Pup-02-Q2b1x1 taken 12.11.2026 08:56:16 UTC, but the camera
+  keeps imaging (NINA may not know that the roof is closed). Please check the
+  observatory. Log: <results URL>`. It is not sent for a test upload, for the
+  manual reprocessing of an image directory, for a frame taken more than
+  `ROOF_CLOSED_ALERT_MAX_AGE_HOURS` (default 6) ago - a frame of unknown time
+  is alerted - or with `ROOF_CLOSED_SLACK_ALERT=no`. A camera gets at most one
+  alert per `ROOF_CLOSED_ALERT_REPEAT_HOURS` (default 3). A successful run of
+  the camera whose newest frame was taken after the closed-roof frame of the
+  last alert re-arms the alert, so that the next closure is reported at once; frame times
+  decide, not the order in which the runs finish, because uploads are not
+  processed in the order they were taken (for the same reason a closed-roof
+  frame older than a good frame already processed is not alerted; a frame time
+  more than 10 min in the future, from a camera clock running ahead, is treated
+  as unknown and never recorded). The state is
+  one line per camera in `DATA_PROCESSING_ROOT/roof_closed_alert_<camera>.state`,
+  rewritten under a lock and never deleted; if it cannot be used, the alert is
+  sent without the rate limit. curl gives up after 30 s, and `autoprocess.txt`
+  records for every closed-roof run whether the alert was sent (with the curl
+  exit code and the Slack response) or why not; a failed POST is retried by the
+  next closed-roof run of the camera. The summary page shows such a run as
+  ROOF CLOSED. VaST's closed-roof check and its settings are described next to
+  the alert settings in `local_config.sh_example`.
+- **Bright candidate** (`autoprocess.sh`): an e-mail to
+  `CURL_USERNAME_URL_TO_EMAIL_KIRX` for a new candidate brighter than magnitude
+  9.5 that is not found in the catalogs.
+- **Fields left out of the combined list** (`combine_reports.sh`): an e-mail to
+  `CURL_USERNAME_URL_TO_EMAIL_KIRX` (oversized report, unparsable candidate list,
+  too many candidates, report body that cannot be extracted), once per results
+  directory.
+
 # Optional: TNS (Transient Name Server) transient matching
 The pipeline can cross-match each transient candidate against transients registered on the
 [Transient Name Server](https://www.wis-tns.org/) within the last 30 days. Matched candidates are
@@ -642,6 +693,11 @@ private-file denials, body limits and non-executable uploads. Identical image
 uploads and retries after failure remain permitted; distinct exposure filenames
 from the same field/night are processed independently. Queue/worker, coordinate
 CGI and fastplot tests use private storage and stub external scientific tools.
+The notification tests (`tests/test_roof_closed_alert.py`) run `autoprocess.sh`
+and `combine_reports.sh` with a stand-in VaST factory, put a fake `curl` first in
+`PATH` and point `SLACK_WEBHOOK_URL_TEAM` at a loopback dummy, so they cannot
+post to Slack even outside the CI network namespace; do the same in any new
+test that can reach a notification.
 
 Unexpected skips fail CI. Only library-specific tests may skip in a deliberately
 `rarfile`-absent job. JSON-schema validation is mandatory, fatal Python lint
@@ -676,11 +732,21 @@ triggers and deployment acceptance policy are unchanged.
   image centers` and `Field altitude during imaging:` (the Pointing.Offset and
   Altitude columns of the summary page). The Azimuth column reads
   `Field azimuth during imaging:` for the same image as the lowest altitude.
-  Older reports fall back to the `CENTAZ`/`OBJCTAZ` header card that dark frame subtraction
-  (`util/ccd/ms`) logs as `Exploring image header: <path>` followed by
-  `Record N: "<card>" status=0` lines. Without an azimuth for that image the
-  column stays blank. New VaST reports work without dark subtraction. `unmw_selftest.sh`
-  even depends on the exact misspelling `too few refereence images`. If any
+  Older reports fall back to the `CENTAZ`/`OBJCTAZ` header card that dark frame
+  subtraction (`util/ccd/ms`) logs as `Exploring image header: <path>` followed
+  by `Record N: "<card>" status=0` lines. Without an azimuth for that image the
+  column stays blank. New VaST reports work without dark subtraction.
+  Stuck-camera detection uses `camera is stuck` / `stuck camera` on a line
+  containing `ERROR`. The closed-roof
+  alert (see "Notifications") relies on a line containing both `ERROR` and
+  `OBSERVATORY ROOF CLOSED` (case-sensitive; no other VaST message contains that
+  phrase, and the other roof-related VaST errors deliberately do not), on the
+  `CAMERA_SETTINGS= <camera>` line of the processing parameters (the camera),
+  on `Processing fields <FIELD> <br>` (the field) and on the first
+  `Last  image: <JD> <DD.MM.YYYY> <HH:MM:SS.sss> UTC` line (the frame JD and
+  time; for a successful run, the newest image, which re-arms the alert).
+  `unmw_selftest.sh` even depends on the exact misspelling
+  `too few refereence images`. If any
   of these strings is changed on the VaST side, the corresponding consumer
   here must be updated in step (and vice versa). When adding an ATTENTION/NOTE
   line, keep the phrases `The object was`, `found in`, `not found` out of it -

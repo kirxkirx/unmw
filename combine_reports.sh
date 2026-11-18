@@ -190,6 +190,7 @@ trap 'rm -f "${LOCKFILE}"; exit' INT TERM EXIT
 echo $$ > "${LOCKFILE}"
 
 # loop through the cameras
+# (roof_closed_report_camera in roof_closed_alert.sh has the same list - keep the two in step)
 for CAMERA in Stas STL-11000M TICA_TESS ED80__Black TTUQ1b1x1 TTUQ2b1x1 ;do
 
 debug_log "========== Processing CAMERA=$CAMERA =========="
@@ -862,6 +863,11 @@ its candidates appear there. Please have a look at the individual-field report."
    FIELD=$(grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:<br>::g' | awk '{print $1}')
    # LOG LINE: suck camera error
    echo "<td><span class='status-error'>CAMERA STUCK</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td>$BLANK_ALT_AZ_CELLS<td></td><td></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+  elif grep 'ERROR' "$INPUT_DIR/index.html" | grep --quiet 'OBSERVATORY ROOF CLOSED' ;then
+   # VaST's closed-roof check: the latest new image shows no stars and no sky
+   # light (autoprocess.sh sends the Slack alert for it)
+   # LOG LINE: closed observatory roof
+   echo "<td><span class='status-error'>ROOF CLOSED</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td>$BLANK_ALT_AZ_CELLS<td></td><td></td><td></td><td>no stars and no sky light on the latest new image - is the observatory roof closed?</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
   else
    ### Check for all other errors
    grep --quiet 'ERROR' "$INPUT_DIR/index.html"

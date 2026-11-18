@@ -35,7 +35,7 @@ def isolated_test_environment(monkeypatch):
              'SUSPICIOUS_FILENAMES_LOG', 'UNMW_CGITB_LOGDIR', 'QUERY_STRING',
              'GATEWAY_INTERFACE', 'REQUEST_METHOD', 'CONTENT_LENGTH', 'CONTENT_TYPE'}
     for key in list(os.environ):
-        if key in exact or key.startswith(('AAVSO_', 'CURL_USERNAME_', 'MONITORING_', 'SLACK_')):
+        if key in exact or key.startswith(('AAVSO_', 'CURL_USERNAME_', 'MONITORING_', 'SLACK_', 'ROOF_CLOSED_')):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv('AAVSO_OBSCODE', 'XXX')
     original_connect = socket.socket.connect
