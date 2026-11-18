@@ -896,6 +896,10 @@ if ! grep --quiet '<th>Altitude(&deg;)</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;t
  echo "$0 test error: cannot find 'Altitude(&deg;)' column header in $LATEST_PROCESSING_SUMMARY_LOG"
  exit 1
 fi
+if ! grep --quiet '<th>Altitude(&deg;)</th><th>Azimuth(&deg;)</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;then
+ echo "$0 test error: cannot find the 'Azimuth(&deg;)' column header right after 'Altitude(&deg;)' in $LATEST_PROCESSING_SUMMARY_LOG"
+ exit 1
+fi
 if ! grep --quiet '<th>mag.lim.</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;then
  echo "$0 test error: cannot find 'mag.lim.' column header in $LATEST_PROCESSING_SUMMARY_LOG"
  exit 1
@@ -951,9 +955,9 @@ echo "Validated $VUL3_PREVIEW_PNG_COUNT Preview PNG file(s) for Vul3 OK rows"
 # There may be multiple Vul3 rows, check all of them
 VUL3_FWHM_VALID=0
 while IFS= read -r VUL3_ROW; do
- # FWHM is in the 10th <td> column
+ # FWHM is in the 11th <td> column
  # Use sed to extract column content, handling nested HTML tags
- VUL3_FWHM=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '10p' | tr -d ' ')
+ VUL3_FWHM=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '11p' | tr -d ' ')
  if [ -z "$VUL3_FWHM" ];then
   echo "FWHM value for a Vul3 row is empty (acceptable)"
   VUL3_FWHM_VALID=1
@@ -976,9 +980,9 @@ fi
 
 # Check mag.lim. value for Vul3 OK rows - should be empty or a float (typically 10-20)
 while IFS= read -r VUL3_ROW; do
- # mag.lim. is in the 9th <td> column
+ # mag.lim. is in the 10th <td> column
  # Use sed to extract column content, handling nested HTML tags
- VUL3_MAGLIM=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '9p' | tr -d ' ')
+ VUL3_MAGLIM=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '10p' | tr -d ' ')
  if [ -n "$VUL3_MAGLIM" ]; then
   if ! echo "$VUL3_MAGLIM" | grep -qE '^[0-9]+\.?[0-9]*$' ; then
    echo "$0 test error: mag.lim. value '$VUL3_MAGLIM' is not a valid number (got text instead?)"
@@ -1023,10 +1027,25 @@ while IFS= read -r VUL3_ROW; do
  fi
 done < <(grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep 'OK')
 
+# Check the Azimuth value for Vul3 OK rows - blank (the ST-8300M test images carry no
+# CENTAZ/OBJCTAZ keyword) or a number of degrees with one decimal place between 0 and 360
+while IFS= read -r VUL3_ROW; do
+ # Azimuth is in the 9th <td> column, right after Altitude
+ VUL3_AZIMUTH=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '9p' | tr -d ' ')
+ if [ -z "$VUL3_AZIMUTH" ]; then
+  echo "Azimuth value for Vul3 is blank (acceptable: no azimuth keyword in the FITS header)"
+ elif echo "$VUL3_AZIMUTH" | grep -qE '^[0-9]+\.[0-9]$' && echo "$VUL3_AZIMUTH" | awk '{exit ($1 >= 0 && $1 <= 360 ? 0 : 1)}' ;then
+  echo "Azimuth value for Vul3 is valid: $VUL3_AZIMUTH"
+ else
+  echo "$0 test error: Azimuth value '$VUL3_AZIMUTH' is not blank or a one-decimal number of degrees"
+  exit 1
+ fi
+done < <(grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep 'OK')
+
 # Every data row of the summary table must have as many cells as the header has columns
 SUMMARY_HEADER_COLUMNS=$(grep '<th>Camera</th>' "$LATEST_PROCESSING_SUMMARY_LOG" | head -n1 | grep -o '<th>' | wc -l)
-if [ "$SUMMARY_HEADER_COLUMNS" -lt 12 ];then
- echo "$0 test error: expected at least 12 summary table header columns, found $SUMMARY_HEADER_COLUMNS"
+if [ "$SUMMARY_HEADER_COLUMNS" -lt 13 ];then
+ echo "$0 test error: expected at least 13 summary table header columns, found $SUMMARY_HEADER_COLUMNS"
  exit 1
 fi
 while IFS= read -r SUMMARY_ROW; do

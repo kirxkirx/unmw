@@ -674,7 +674,12 @@ triggers and deployment acceptance policy are unchanged.
   `printCandidateNameWithAbsLink`, `The object was found in`,
   `mag brighter than the`, `Last  image` (two spaces), `Angular distance between the
   image centers` and `Field altitude during imaging:` (the Pointing.Offset and
-  Altitude columns of the summary page). `unmw_selftest.sh`
+  Altitude columns of the summary page). The Azimuth column reads
+  `Field azimuth during imaging:` for the same image as the lowest altitude.
+  Older reports fall back to the `CENTAZ`/`OBJCTAZ` header card that dark frame subtraction
+  (`util/ccd/ms`) logs as `Exploring image header: <path>` followed by
+  `Record N: "<card>" status=0` lines. Without an azimuth for that image the
+  column stays blank. New VaST reports work without dark subtraction. `unmw_selftest.sh`
   even depends on the exact misspelling `too few refereence images`. If any
   of these strings is changed on the VaST side, the corresponding consumer
   here must be updated in step (and vice versa). When adding an ATTENTION/NOTE

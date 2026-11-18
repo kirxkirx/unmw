@@ -708,6 +708,184 @@ Angular distance between the image centers 0.0123 deg.
             os.unlink(path)
 
 
+class TestAzimuthExtraction:
+    """Tests for nmw_second_epoch_azimuth (report_helpers.sh), which fills the
+    Azimuth column from VaST's coordinate lines or legacy FITS header dumps."""
+
+    @staticmethod
+    def extract(report):
+        import subprocess
+        helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'report_helpers.sh')
+        return subprocess.run(
+            ['bash', '-c', 'source "$1"; nmw_second_epoch_azimuth "$2"', 'test', helper, report],
+            check=True, capture_output=True, text=True, timeout=10).stdout
+
+    @staticmethod
+    def report(content):
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False) as f:
+            f.write(content)
+            return f.name
+
+    @staticmethod
+    def header_dump(path, *cards):
+        """The util/ccd/ms log of one image: its path, then one Record line per card"""
+        lines = [f"Exploring image header: {path} ",
+                 "Header: 74 keys total, 33 keys left",
+                 'Record 0: "" status=0']
+        lines += [f'Record {n}: "{card}" status=0' for n, card in enumerate(cards, start=1)]
+        return "\n".join(lines) + "\n"
+
+    # Excerpt of a production report (TTUQ2b1x1, N.I.N.A. headers): the second
+    # image is the lower one, so the column shows its CENTAZ
+    NINA_REPORT = (
+        "Field altitude during imaging: 22.7 deg (FITS keyword CENTALT)  Oph-06-Q2b1x1_2026-11-13_18-52-02_20.00sec_-0.00C_LIGHT_0000.fits\n"
+        "Field altitude during imaging: 22.6 deg (FITS keyword CENTALT)  Oph-06-Q2b1x1_2026-11-13_18-52-49_20.00sec_-0.00C_LIGHT_0001.fits\n"
+        "CCD-TEMP= -0.000000 for /data/workdir//img_x/Oph-06-Q2b1x1_2026-11-13_18-52-02_20.00sec_-0.00C_LIGHT_0000.fits\n"
+    )
+
+    def test_azimuth_of_the_lowest_image_from_nina_headers(self):
+        """The Azimuth column describes the same image as the Altitude column"""
+        content = self.NINA_REPORT + self.header_dump(
+            "/data/workdir//img_x/Oph-06-Q2b1x1_2026-11-13_18-52-02_20.00sec_-0.00C_LIGHT_0000.fits",
+            "SIMPLE  =                    T / C# FITS",
+            "CENTALT =     22.6952777777778 / [deg] Altitude of telescope",
+            "CENTAZ  =     239.615833333333 / [deg] Azimuth of telescope",
+        ) + "Allocating memory for image, dark and result arrays...\n" + self.header_dump(
+            "/data/workdir//img_x/Oph-06-Q2b1x1_2026-11-13_18-52-49_20.00sec_-0.00C_LIGHT_0001.fits",
+            "CENTALT =     22.5513888888889 / [deg] Altitude of telescope",
+            "CENTAZ  =             239.7625 / [deg] Azimuth of telescope",
+        )
+        path = self.report(content)
+        try:
+            assert self.extract(path) == "239.8"
+        finally:
+            os.unlink(path)
+
+    def test_first_image_when_it_is_the_lowest(self):
+        path = self.report(
+            "Field altitude during imaging: 9.8 deg (FITS keyword CENTALT)  a.fits\n"
+            "Field altitude during imaging: 10.1 deg (FITS keyword CENTALT)  b.fits\n"
+            + self.header_dump("/w/img/a.fits", "CENTAZ  =                 81.2 / [deg] Azimuth of telescope")
+            + self.header_dump("/w/img/b.fits", "CENTAZ  =                 81.9 / [deg] Azimuth of telescope"))
+        try:
+            assert self.extract(path) == "81.2"
+        finally:
+            os.unlink(path)
+
+    def test_maxim_dl_sexagesimal_objctaz(self):
+        """MaxIm DL writes OBJCTAZ as a 'D M S' string"""
+        path = self.report(
+            "Field altitude during imaging: 45.0 deg (FITS keyword OBJCTALT)  a.fit\n"
+            + self.header_dump("/w/img/a.fit",
+                               "OBJCTALT= '45 00 00'           / [degrees] Nominal altitude of center of image",
+                               "OBJCTAZ = '123 45 36'          / [degrees] Nominal azimuth of center of image"))
+        try:
+            assert self.extract(path) == "123.8"
+        finally:
+            os.unlink(path)
+
+    def test_centaz_is_preferred_and_unusable_values_fall_back(self):
+        """CENTAZ wins over OBJCTAZ, as CENTALT wins over OBJCTALT; an unusable CENTAZ falls back"""
+        path = self.report(
+            self.header_dump("/w/img/a.fits",
+                             "OBJCTAZ =                 10.0 / mount",
+                             "CENTAZ  =                 20.0 / center")
+            + self.header_dump("/w/img/b.fits",
+                               "CENTAZ  = 'N/A'                / not a number",
+                               "OBJCTAZ =                 30.0 / mount"))
+        try:
+            # without altitude lines the first image with an azimuth is used
+            assert self.extract(path) == "20.0"
+        finally:
+            os.unlink(path)
+        path = self.report(
+            "Field altitude during imaging: 30.0 deg (FITS keyword CENTALT)  a.fits\n"
+            "Field altitude during imaging: 20.0 deg (FITS keyword CENTALT)  b.fits\n"
+            + self.header_dump("/w/img/a.fits", "CENTAZ  =                 20.0 / center")
+            + self.header_dump("/w/img/b.fits",
+                               "CENTAZ  =                412.0 / out of range",
+                               "OBJCTAZ =                 30.0 / mount"))
+        try:
+            assert self.extract(path) == "30.0"
+        finally:
+            os.unlink(path)
+
+    def test_card_without_comment_and_with_exponent(self):
+        path = self.report(self.header_dump("/w/img/a.fits", "CENTAZ  = 2.3961583D2"))
+        try:
+            assert self.extract(path) == "239.6"
+        finally:
+            os.unlink(path)
+
+    def test_blank_without_azimuth_keyword(self):
+        """ST-8300M frames written by MaxIm DL with no telescope connection"""
+        path = self.report(
+            "No field altitude in the FITS header (no CENTALT or OBJCTALT keyword)  5027_2026-3-12_22-50-40_003.fts\n"
+            + self.header_dump("/w/img/5027_2026-3-12_22-50-40_003.fts",
+                               "SIMPLE  =                    T",
+                               "EXPTIME =                 20.0 / Exposure time in seconds"))
+        try:
+            assert self.extract(path) == ""
+        finally:
+            os.unlink(path)
+
+    def test_blank_without_header_dump(self):
+        """No dark frame subtraction in this run (no darks, or calibrated by an earlier run)"""
+        path = self.report(self.NINA_REPORT
+                           + "try_to_calibrate_the_input_frame(): found a calibrated frame from a previosu run /w/img/fd_a.fits\n")
+        try:
+            assert self.extract(path) == ""
+        finally:
+            os.unlink(path)
+
+    def test_records_before_any_header_dump_are_ignored(self):
+        path = self.report('Record 34: "CENTAZ  =     239.615833333333 / [deg] Azimuth of telescope" status=0\n')
+        try:
+            assert self.extract(path) == ""
+        finally:
+            os.unlink(path)
+
+    @pytest.mark.parametrize('content, expected', [
+        ("Field altitude during imaging: 25.0 deg (FITS keyword CENTALT)  a.fits\n"
+         "Field azimuth during imaging: 110.0 deg (FITS keyword CENTAZ)  a.fits\n"
+         "Field altitude during imaging: 20.0 deg (FITS keyword CENTALT)  b.fits\n"
+         "Field azimuth during imaging: 120.5 deg (FITS keyword CENTAZ)  b.fits\n", "120.5"),
+        ("Field altitude during imaging: 25.0 deg (FITS keyword CENTALT)  a.fits\n"
+         "Field azimuth during imaging: 110.0 deg (FITS keyword CENTAZ)  a.fits\n"
+         "Field altitude during imaging: 20.0 deg (FITS keyword CENTALT)  b.fits\n", ""),
+        ("Field azimuth during imaging: 0.0 deg (FITS keyword CENTAZ)  a.fits<br>\n", "0.0"),
+        ("Field altitude during imaging: 20.0 deg (FITS keyword CENTALT)  /img/a.fits<br>\n"
+         "Field azimuth during imaging: 360.0 deg (FITS keyword OBJCTAZ)  a.fits<br>\n", "360.0"),
+        ("Field azimuth during imaging: 361.0 deg (FITS keyword CENTAZ)  a.fits\n", ""),
+        ("Field azimuth during imaging: NaN deg (FITS keyword CENTAZ)  a.fits\n", ""),
+    ])
+    def test_direct_lines_without_dark_subtraction(self, content, expected):
+        path = self.report(content)
+        try:
+            assert self.extract(path) == expected
+        finally:
+            os.unlink(path)
+
+    def test_direct_line_preferred_over_header_dump(self):
+        path = self.report(
+            self.header_dump('/img/a.fits', 'CENTAZ  =                100.0')
+            + 'Field azimuth during imaging: 120.0 deg (FITS keyword CENTAZ)  a.fits\n')
+        try:
+            assert self.extract(path) == '120.0'
+        finally:
+            os.unlink(path)
+
+    def test_legacy_azimuth_must_belong_to_lowest_image(self):
+        path = self.report(
+            'Field altitude during imaging: 10.0 deg (FITS keyword CENTALT)  a.fits\n'
+            'Field altitude during imaging: 20.0 deg (FITS keyword CENTALT)  b.fits\n'
+            + self.header_dump('/img/b.fits', 'CENTAZ  =                100.0'))
+        try:
+            assert self.extract(path) == ''
+        finally:
+            os.unlink(path)
+
+
 def test_visit_consistency_clean_pair_kept():
     rows = [_det('a.fits', 2461000.500, 9.70),
             _det('b.fits', 2461000.501, 9.72)]
