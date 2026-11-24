@@ -1,0 +1,16 @@
+# Camera settings of archive_frame_quality.sh, one line per camera. The first line whose
+# pattern (a shell glob) matches the name of the upload directory img_<S> applies.
+#
+# PATTERN       the glob matched against img_<S> (the camera is part of the upload name)
+# SEX_CONFIG    SExtractor configuration in the VaST directory (the camera's main detection pass)
+# SITE          header (SITELAT/SITELONG/SITEELEV are right) or LAT,EAST_LON,HEIGHT_M
+# EXTINCTION    extinction coefficient, mag per airmass, for the moonlight model and the
+#               airmass correction of the zero point
+# DARK_SKY_V    dark zenith sky brightness of the site, V mag/arcsec^2 (moonlight model)
+#
+# The STL/Stas cameras have SITELAT and SITELONG swapped in their headers: never use header there.
+#
+# PATTERN       SEX_CONFIG                          SITE                          EXTINCTION DARK_SKY_V
+*TTUQ1b1x1*     default.sex.telephoto_lens_vSTL     header                        0.20       21.0
+*TTUQ2b1x1*     default.sex.telephoto_lens_vSTL     header                        0.20       21.0
+*               default.sex.telephoto_lens_vSTL     header                        0.20       21.0
