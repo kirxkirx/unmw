@@ -369,14 +369,19 @@ if [ ! -d sthttpd ];then
  # build at the selected test venv and private RAR tools, not system installs.
  python3 "$SCRIPTDIR/tests/science_cgi.py" configure src/thttpd.h || exit 1
  ./autogen.sh || exit 1
+ # thttpd.c and libhttpd.c call the obsolete sigset(), which glibc declares only
+ # for X/Open or GNU builds. GCC 14 and later (Ubuntu 26.04 has GCC 15) reject
+ # the implicit declaration, so request the GNU declarations, as
+ # start_unmw_here_with_sthttpd.sh does. Set for configure only, not exported,
+ # so the VaST build below is unaffected.
  # Detect WSL and disable mmap if running under it
  # WSL2 has known issues with mmap that cause zero-byte responses
  # See: https://github.com/microsoft/WSL/issues/10103
  if grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null; then
   echo "Detected WSL - building sthttpd with mmap disabled"
-  CFLAGS="-UHAVE_MMAP" ./configure || exit 1
+  CFLAGS="-UHAVE_MMAP" CPPFLAGS="-D_GNU_SOURCE" ./configure || exit 1
  else
-  ./configure || exit 1
+  CPPFLAGS="-D_GNU_SOURCE" ./configure || exit 1
  fi
  make || exit 1
  if [ ! -x src/thttpd ];then
