@@ -108,7 +108,7 @@ TEMP_DIR_PREFIX = 'forced_phot_'
 DEFAULT_WINDOW_DAYS = 7
 MAX_WINDOW_DAYS = 30
 DEFAULT_MAX_IMAGES = 20
-MAX_MAX_IMAGES = 50
+MAX_MAX_IMAGES = 150
 FORCED_PHOT_MAX_CONCURRENT = 6          # each request uses its own VaST working copy, so this only caps server load
 
 # Per-upload directory name: img_<YYYY-MM-DD>_<...>. Only these are considered.
