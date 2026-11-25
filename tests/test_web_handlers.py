@@ -3,6 +3,7 @@ import datetime
 import fcntl
 import html
 import io
+import json
 import os
 import re
 import shlex
@@ -167,6 +168,10 @@ def test_forced_photometry_no_data_page_returns_to_prefilled_form(
     assert _search_again_hrefs(output) == [
         '/unmw/coord_forced_photometry.html?' + urllib.parse.urlencode(query)]
     assert 'referer.invalid' not in output
+    # A page that ended early keeps no copy and offers no downloads.
+    assert 'forced_phot_download.py' not in output
+    assert not list(app_sandbox.paths['uploads'].glob('forced_phot_*/index.html*'))
+    assert not list(app_sandbox.paths['uploads'].glob('forced_phot_*/download_manifest.json'))
 
 
 @pytest.mark.parametrize('raw,expected', [('300 20', ('300', '20')),
@@ -246,6 +251,20 @@ def test_forced_photometry_cgi_keeps_distinct_visits_and_cleans_working_copy(
         assert 'None of the 2 image(s) yielded' in output
     if cap == 1:
         assert 'Limited to the first 1 of 2' in output
+    # The finished page keeps a copy of itself and a manifest of its frames
+    # for the downloads it links at the bottom (forced_phot_download.py).
+    out_dir, = app_sandbox.paths['uploads'].glob('forced_phot_*')
+    page = (out_dir / 'index.html').read_text()
+    assert page.rstrip().endswith('</html>') and '<!--' + ' ' * 64 not in page
+    assert not list(out_dir.glob('index.html.part'))
+    manifest = json.loads((out_dir / 'download_manifest.json').read_text())
+    assert (manifest['tool'], manifest['name']) == ('forced_phot', out_dir.name)
+    assert [f['path'] for f in manifest['frames']] == measured
+    assert {f['status'] for f in manifest['frames']} == (
+        {'detection'} if successful else {'skipped'})
+    for what in ('zip', 'zip_cutouts', 'script'):
+        link = 'forced_phot_download.py?request={}&amp;what={}'.format(out_dir.name, what)
+        assert link in output and link in page
 
 
 @pytest.fixture

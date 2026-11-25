@@ -90,6 +90,13 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # rescan logs a note when the configured directory is missing.
 #export IMAGE_QUARANTINE_DIR="/mnt/nmwttu1/NMW-TexasTech_quarantine"
 
+# Size, in pixels, of the square FITS cutouts centred on the target in the
+# "Download results + FITS cutouts (ZIP)" archive of the forced-photometry and
+# archival-photometry results pages (forced_phot_download.py). The cutouts are
+# made with VaST's util/fitscopy and keep the frame's WCS. Default 501 (49
+# arcmin at 5.9"/pix); values outside 11-4001 fall back to the default.
+#export FORCED_PHOT_CUTOUT_PIXELS=501
+
 # Archival photometry queue protection (defaults shown):
 # maximum queued+running jobs, maximum queued+running jobs per client IP,
 # and how many jobs may run at the same time (worker slots).

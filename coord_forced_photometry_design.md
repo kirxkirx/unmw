@@ -273,6 +273,58 @@ contains the two lines we parse:
 We take the `JD` and `ATel style` values and present them to 4 decimal places
 (e.g. `2026-05-17.3653  2461177.8653`).
 
+### 9.4 Downloads (ZIP archives, FITS cutouts, full-frame script)
+
+The bottom of the results page (and of the archival photometry results page,
+which shares the engine) links `forced_phot_download.py` three ways:
+`what=zip` (everything the page shows or links), `what=zip_cutouts` (the same
+plus FITS cutouts) and `what=script` (`download_fits.sh`, full frames with
+`wget -c` / `curl -C -`). The shared code is `nmw_results_download_lib.py`.
+
+- **During the run** only two small files are written into the result
+  directory: `download_manifest.json` (parameters; every frame with its server
+  path at measurement time, target pixel, frame size, raw and displayed
+  photometry) and, for this page, `index.html`: a copy of the streamed page
+  (`StreamedPageCopy` tees `sys.stdout`, drops the flush padding, and renames
+  `index.html.part` into place only when the page is complete). The links are
+  printed only when both will exist. The archival worker always wrote
+  `index.html`; its manifest is written before the page, and the job counts as
+  finished only in state `done`.
+- **On click** the CGI checks the result-directory name against the two
+  shapes (`forced_phot_<pid><8 letters>`, `archive_phot_<job id>`), requires
+  a finished run, and builds the archive once under a per-directory flock and
+  a global slot (two builds at a time; `download_build_slot_*.lock` in
+  `uploads/`, owned by the web server user, not in world-writable `/tmp`),
+  after a free-space check that keeps the pipeline's own floor
+  (`WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB`) plus 1 GiB free. It streams a
+  progress page (with keep-alive lines every 5 s, so Apache's `Timeout` never
+  ends a long build; write errors only silence the page), publishes
+  `<name>_results[_with_cutouts].zip` with an atomic rename, and redirects;
+  later clicks get a 302 to the static file. Work directories of builds that
+  Apache killed (a client that went away gets SIGTERM, then SIGKILL) are
+  removed by the next build under the same lock; a build gives up after 30
+  minutes. The CSV, text table,
+  README, script and URL list are generated at click time from the manifest,
+  with every frame looked up where it is now (`good_wcs_fd_images/`,
+  `frame_quality/`, `IMAGE_QUARANTINE_DIR`; the real path of a frame must stay
+  inside these upload trees, so a planted symlink is never followed out of
+  them, while archive frames only have to be inside `IMAGE_ARCHIVE_DIR` by
+  name, as its month folders may be symlinks), so their URLs are current; the
+  page copy's own-directory links become relative and its FITS links are
+  updated the same way. Only allowlisted files of the directory (the page,
+  `*.png`, `*.eps`, `*.dat`, the skip log; regular files, no symlinks) go into
+  an archive.
+- **Cutouts** (`FORCED_PHOT_CUTOUT_PIXELS`, default 501) are centred on the
+  engine's `# target_pixel:` of each measured frame (a sky2xy inverse-SIP
+  fold-back cannot misplace them) and cut by VaST's `util/fitscopy` with a
+  cfitsio image section (`frame.fits[x1:x2,y1:y2]`, or `frame.fits.fz[1][...]`).
+  cfitsio shifts `CRPIX` and keeps the TAN-SIP coefficients, so the WCS stays
+  exact; for a `.fz` frame it writes the section as an extension behind an
+  empty primary HDU, which the post-processing turns into a single primary
+  image. It also sets `IMAGEW`/`IMAGEH`, `LTV1`/`LTV2` and appends `HISTORY`.
+  Paths are passed to cfitsio only when made of `[A-Za-z0-9_./-]`, because its
+  extended file-name syntax gives brackets, parentheses, `+N` and `!` a meaning.
+
 ## 10. Per-request scratch and cleanup
 
 The served PNG thumbnails (full-frame preview and zoom-in cutout) for each

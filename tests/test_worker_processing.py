@@ -62,6 +62,14 @@ def test_worker_publishes_measurements_skips_and_persistent_results(
         assert '14.250' in (directory / 'lightcurve.dat').read_text()
     if 'upperlimit' in states:
         assert '14.250' in (directory / 'upperlimits.dat').read_text()
+    # The results page links the downloads, built from the job's manifest.
+    manifest = apl.read_json_file(str(directory / 'download_manifest.json'))
+    assert (manifest['tool'], manifest['name']) == ('archive_phot', directory.name)
+    assert [f['path'] for f in manifest['frames']] == images
+    assert [f['status'] for f in manifest['frames']] == [s or 'skipped' for s in states]
+    for what in ('zip', 'zip_cutouts', 'script'):
+        assert ('/cgi-bin/unmw/forced_phot_download.py?request={}&amp;what={}'.format(
+            directory.name, what)) in report
 
 
 def test_worker_cleans_disposable_copy_after_science_exception(app_sandbox, science_standins, monkeypatch):

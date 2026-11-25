@@ -88,6 +88,10 @@ from nmw_forced_phot_lib import (
     _fmt_err, _fmt_duration, _html_row, _html_skipped_row,
     wide_field_photometry_caveat_html,
 )
+# Downloadable copies of the results (ZIP archives, FITS cutouts, a full-frame
+# download script): this page keeps a copy of itself and a manifest of its
+# frames, forced_phot_download.py builds the downloads on request.
+import nmw_results_download_lib as rdl
 
 # The shared page-chrome helpers build their links from ncl.DEFAULT_FORM_PATH;
 # point it at this page's input form.
@@ -305,6 +309,7 @@ def main():
             search_again_url=repeat_search_url)
         return
 
+    page_copy = None  # copy of the streamed page; see rdl.StreamedPageCopy
     try:
         work_dir = None  # per-request VaST working copy; cleaned up in finally
         cfg = read_config_vars(
@@ -389,6 +394,14 @@ def main():
         # committed to a 200 OK response.
         page_title = "Forced-photometry lightcurve"
         print("Content-Type: text/html\n", flush=True)
+        # From here on the page also goes into out_dir/index.html, published
+        # only when the page is complete: the ZIP downloads include it.
+        try:
+            page_copy = rdl.StreamedPageCopy(
+                sys.stdout, os.path.join(out_dir, rdl.PAGE_BASENAME))
+            sys.stdout = page_copy
+        except OSError:
+            page_copy = None
         print("<html><head><title>{}</title>".format(html_escape(page_title)))
         print(_PAGE_CSS)
         # Page-local CSS in <head> so muted status lines streamed before the
@@ -651,6 +664,8 @@ def main():
         # this account -- the generic default.sex remains in place.
         work_dir_default_sex = os.path.join(work_dir, 'default.sex')
         results = []
+        # Every frame of the run, measured or not, for the download manifest.
+        manifest_frames = []
         # SExtractor catalogs were already seeded by Phase 1 above (which
         # also counted cache hits into sextractor_cache_hits). Per-image
         # default.sex is still picked per camera here just before the
@@ -685,6 +700,9 @@ def main():
                     img, field_name_from_fits(img),
                     fits_url(url_prefix, img, uploads_abs)) + _ROW_FLUSH_PAD,
                     flush=True)
+                manifest_frames.append(rdl.frame_entry(
+                    img, field_name_from_fits(img),
+                    fits_url(url_prefix, img, uploads_abs), band=band))
                 continue
             fp = run_forced_photometry_c(work_dir, local_config_path, img,
                                          compute_path, ra, dec, band,
@@ -696,6 +714,9 @@ def main():
                     img, field_name_from_fits(img),
                     fits_url(url_prefix, img, uploads_abs)) + _ROW_FLUSH_PAD,
                     flush=True)
+                manifest_frames.append(rdl.frame_entry(
+                    img, field_name_from_fits(img),
+                    fits_url(url_prefix, img, uploads_abs), band=band))
                 continue
             # The C engine prints the basename of whatever path it was
             # handed, which for `.fz` uploads is the funpacked sibling.
@@ -745,6 +766,9 @@ def main():
                 'png_cutout_hires': png_cutout_hires,
             }
             results.append(r)
+            manifest_frames.append(rdl.frame_entry(
+                img, r['field'], r['fits_url'], fp=fp, row=r, band=band,
+                meta=meta))
             print(_html_row(r, url_prefix, sub_name) + _ROW_FLUSH_PAD,
                   flush=True)
         print("</table>", flush=True)
@@ -845,10 +869,32 @@ def main():
             print("<p class='secondary'>Total computation time: "
                   "{}.</p>".format(_fmt_duration(elapsed)))
 
+        # ---- Download links (bottom of the page): ZIP archives with and
+        # without FITS cutouts and the full-frame download script, made by
+        # forced_phot_download.py from the manifest written here. Offered
+        # only when the page copy is being kept: the archives include it.
+        if page_copy is not None and rdl.write_manifest(
+                out_dir, rdl.TOOL_RECENT, ra, dec, raw_coords,
+                {'window_days': window_days, 'max_images': max_images,
+                 'band': band_override or 'auto'},
+                manifest_frames, url_prefix):
+            cgi_base = os.path.dirname(
+                os.environ.get('SCRIPT_NAME', '').strip() or DEFAULT_CGI_PATH)
+            print(rdl.download_links_html(cgi_base, sub_name))
+
         print("<br><br><a href='{}'>Search again</a>".format(
             html_escape(search_again_url)))
         print(page_end_html())
+        if page_copy is not None:
+            sys.stdout = page_copy.stream
+            page_copy.finish()
     finally:
+        if page_copy is not None:
+            # Early returns and errors: the page was not completed, so its
+            # copy is dropped (no-op after finish()).
+            if sys.stdout is page_copy:
+                sys.stdout = page_copy.stream
+            page_copy.abandon()
         if work_dir is not None:
             if os.environ.get('DEBUG_KEEP_WORK_DIR'):
                 print('<!-- DEBUG: keeping work_dir {} -->'.format(work_dir))

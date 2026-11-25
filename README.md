@@ -24,7 +24,7 @@ pip install -r requirements.txt
 
 On Python 3.13+, the CGIs (`upload.py`, `coord_search.py`,
 `coord_forced_photometry.py`, `archive_forced_photometry.py`,
-`archive_phot_status.py`, `fastplot.py`) will exit with an
+`archive_phot_status.py`, `forced_phot_download.py`, `fastplot.py`) will exit with an
 `Error: 'cgi' module not found` page unless `legacy-cgi` is importable. On the
 production server this is arranged **entirely through Apache and a dedicated
 virtualenv**, not through the system Python:
@@ -534,12 +534,54 @@ Notes:
 - Verify it took effect with:
   `curl -sI http://<host>/unmw/uploads/<dir>/<image>.png | grep -i cache-control`
 
+# Downloading forced-photometry results
+
+The results pages of the forced-photometry page (`coord_forced_photometry.py`)
+and of the archival photometry queue end with three links to
+[`forced_phot_download.py`](forced_phot_download.py):
+
+- **Download results (ZIP)**: everything the page shows or links: the page
+  itself (its images become relative links, so it opens from the unpacked
+  archive), all thumbnails, the lightcurve plot and data files, the skip log,
+  the photometry table as `photometry.csv` (one row per frame, full precision,
+  skipped frames included) and `photometry.txt`, a `README.txt` with the
+  request parameters, and the full-frame download script.
+- **Download results + FITS cutouts (ZIP)**: the same plus `cutouts/`, a FITS
+  cutout centred on the target from every measured frame. The cutouts are
+  `FORCED_PHOT_CUTOUT_PIXELS` pixels square (`local_config.sh`, default 501,
+  clipped at frame edges, at most 2000 per archive), made with VaST's
+  `util/fitscopy`: the pixels and header of the calibrated frame with `CRPIX`
+  shifted, so its TAN-SIP solution stays valid (checked against astropy and
+  WCSTools on NMW-TexasTech frames, plain and fpacked). `IMAGEW`/`IMAGEH` follow
+  the cutout, `LTV1`/`LTV2` make DS9's "physical" coordinates full-frame pixels,
+  and `HISTORY` names the source frame and section.
+- **FITS download script**: `download_fits.sh`, a bash script that downloads
+  the full-frame FITS images with `wget -c` (or `curl -C -`); running it again
+  resumes. There is deliberately no archive of full frames (122 MB each).
+
+Only runs made after this feature was added offer the links: each run now
+saves `download_manifest.json` (its frames and parameters) and, for the
+recent-images page, a copy of the page as `index.html` in its result
+directory. Nothing else happens until somebody clicks: an archive is built on
+the first click (a progress page, then a redirect), published into the result
+directory and served by Apache as a static, resumable download from then on.
+It is deleted together with its result directory (see below). Frames are
+looked up where they are at click time, after `sort_workdir_images.sh` or
+`archive_frame_quality.sh` moved them; frames in `IMAGE_QUARANTINE_DIR` (not
+web-served) get cutouts but no full-frame link, and archival frames get links
+only when `IMAGE_ARCHIVE_URL` is set. At most two archives are built at a
+time (each within 30 minutes; the browser has to stay on the progress page,
+since Apache stops a CGI whose client went away), and a build is refused when
+it would leave less free disk than the transient pipeline's own floor
+(`WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB`, default 5 GB, below which
+`autoprocess.sh` stops) plus 1 GiB.
+
 # Housekeeping: pruning old per-request result directories
 
 The coordinate-search, forced-photometry and archival-photometry pages leave
 their per-request output directories (`uploads/coord_search_*`,
 `uploads/forced_phot_*`, `uploads/archive_phot_*`) in place so that result
-URLs keep working. Nothing deletes them automatically; when disk space
+URLs keep working (together with any result ZIPs downloaded from them). Nothing deletes them automatically; when disk space
 becomes a concern, run [`archive_phot_prune.sh`](archive_phot_prune.sh):
 ````
 ./archive_phot_prune.sh 90            # delete result dirs older than 90 days

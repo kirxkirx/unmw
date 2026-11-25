@@ -55,6 +55,10 @@ from nmw_forced_phot_lib import (
     _html_skipped_row, wide_field_photometry_caveat_html,
 )
 import nmw_archive_phot_lib as apl
+# Downloadable copies of the results (ZIP archives, FITS cutouts, a full-frame
+# download script): the job directory gets a manifest of its frames and the
+# results page links forced_phot_download.py, which builds the downloads.
+import nmw_results_download_lib as rdl
 
 WORK_DIR_PREFIX = 'vast_archive_phot_'
 
@@ -241,6 +245,8 @@ def process_job(job_id, job_dir, request, cfg, local_config_path,
         results = []
         rows_html = []
         n_skipped = 0
+        # Every frame of the job, measured or not, for the download manifest.
+        manifest_frames = []
 
         apl.update_state(job_dir, stage='measuring')
         for idx, img in enumerate(images, start=1):
@@ -272,6 +278,8 @@ def process_job(job_id, job_dir, request, cfg, local_config_path,
             if fp is None:
                 rows_html.append(_html_skipped_row(
                     img, field_name_from_fits(img), file_fits_url))
+                manifest_frames.append(rdl.frame_entry(
+                    img, field_name_from_fits(img), file_fits_url, band=band))
                 n_skipped += 1
                 progress('skipped {}/{}: {}'.format(
                     idx, n_images, os.path.basename(img)))
@@ -317,6 +325,9 @@ def process_job(job_id, job_dir, request, cfg, local_config_path,
                 'png_cutout_hires': png_cutout_hires,
             }
             results.append(r)
+            manifest_frames.append(rdl.frame_entry(
+                img, r['field'], file_fits_url, fp=fp, row=r, band=band,
+                meta=meta))
             rows_html.append(_html_row(r, url_prefix, sub_name))
             progress('measured {}/{}: {} {} mag={} ({})'.format(
                 idx, n_images, os.path.basename(img), band, r['mag'],
@@ -412,6 +423,18 @@ def process_job(job_id, job_dir, request, cfg, local_config_path,
                      "lightcurve data files): this results page stays at "
                      "this URL, but may eventually be deleted to free up "
                      "server disk space.</p>")
+        # Download links (ZIP archives with and without FITS cutouts, the
+        # full-frame download script), built by forced_phot_download.py
+        # from this manifest once the job is done.
+        if rdl.write_manifest(
+                job_dir, rdl.TOOL_ARCHIVE, ra, dec,
+                request.get('coords_raw') or '',
+                {'band': band_override or 'auto',
+                 'date_from': request.get('date_from') or '',
+                 'date_to': request.get('date_to') or ''},
+                manifest_frames, url_prefix):
+            parts.append(rdl.download_links_html(
+                request.get('cgi_base') or '/cgi-bin/unmw', sub_name))
         parts.append(apl.job_links_html(job_id, request))
         parts.append("</body></html>\n")
         apl.write_index_html_atomic(job_dir, '\n'.join(parts))

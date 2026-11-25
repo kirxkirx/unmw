@@ -67,7 +67,9 @@ def apache(tmp_path):
     (app / '.git').mkdir()
     (app / '.git' / 'config').write_text('PRIVATE REPOSITORY CONTENT\n')
     for name in ('.htaccess', 'wrapper.sh', 'upload.py3', 'upload.py2',
-                 'nmw_fs_check.py', 'nmw_coord_lib.py'):
+                 'nmw_fs_check.py', 'nmw_coord_lib.py', 'forced_phot_download.py',
+                 'nmw_results_download_lib.py', 'nmw_forced_phot_lib.py',
+                 'nmw_archive_phot_lib.py'):
         shutil.copy2(REPO / name, app / name)
     shutil.copy2(REPO / 'tests' / '.htaccess', app / 'tests' / '.htaccess')
     (app / 'tests' / 'private.txt').write_text('PRIVATE TEST DATA')
@@ -280,7 +282,8 @@ def test_apache_authentication_and_private_file_denials(apache):
     code, _, _ = apache.request('GET', '/cgi-bin/unmw/upload.py', authenticated=False)
     assert code == 401
     for path in ('local_config.sh', 'HANDOFF.md', '.env', '.git/config', 'wrapper.sh',
-                 'nmw_coord_lib.py', 'upload.py2', 'tests/private.txt'):
+                 'nmw_coord_lib.py', 'nmw_results_download_lib.py', 'upload.py2',
+                 'tests/private.txt'):
         code, body, _ = apache.request('GET', '/cgi-bin/unmw/' + path)
         assert code == 403, (path, code, body)
         assert b'PRIVATE' not in body
@@ -297,3 +300,51 @@ def test_apache_body_limit_and_upload_tree_not_executable(apache):
     script.chmod(0o700)
     code, body, _ = apache.request('GET', '/uploads/probe.py')
     assert code == 200 and body.startswith(b'#!/bin/sh')
+
+
+def test_results_download_over_http(apache):
+    """A finished forced-photometry run: the CGI builds its ZIP once, the web
+    server then serves the published file; the script names current URLs."""
+    import nmw_results_download_lib as rdl
+    uploads = apache.app / 'uploads'
+    prefix = apache.base + '/uploads'
+    (apache.app / 'local_config.sh').write_text(
+        'export URL_OF_DATA_PROCESSING_ROOT="{}"\n'.format(prefix))
+    name = 'forced_phot_77abcdEFGH'
+    run = uploads / name
+    run.mkdir()
+    frame = uploads / 'img_2026-11-09_CI_Aur-05_1_abcdEFGH' / 'wcs_fd_Aur-05_2026-11-09_LIGHT_0001.fits'
+    frame.parent.mkdir()
+    frame.write_bytes(b'SIMPLE  =                    T' + b' ' * 2850)
+    (run / 'index.html').write_text(
+        "<html><img src='{}/{}/a_zoomin.png'></html>\n".format(prefix, name))
+    (run / 'a_zoomin.png').write_bytes(b'\x89PNG test')
+    (run / 'lightcurve.dat').write_text('2461353.7289 14.52 0.12\n')
+    assert rdl.write_manifest(str(run), rdl.TOOL_RECENT, '04:49:22.53', '+29:26:01.6',
+                              '04:49:22.53 +29:26:01.6', {}, [rdl.frame_entry(
+                                  str(frame), 'Aur-05', '', fp={'status': 'detection',
+                                  'mag': '14.52', 'err': '0.12', 'x': 3, 'y': 4})], prefix)
+    query = '/cgi-bin/unmw/forced_phot_download.py?request={}&what='.format(name)
+    zip_url = '{}/{}/{}_results.zip'.format(prefix, name, name)
+
+    code, body, _ = apache.request('GET', query + 'zip')
+    assert code == 200 and "url={}'".format(zip_url).encode() in body, body
+    code, data, _ = apache.request('GET', urllib.parse.urlsplit(zip_url).path)
+    assert code == 200
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        assert archive.read(name + '/index.html') == b"<html><img src='a_zoomin.png'></html>\n"
+        assert archive.read(name + '/a_zoomin.png') == b'\x89PNG test'
+        script = archive.read(name + '/download_fits.sh').decode()
+    assert "fetch '{}/{}'".format(prefix, frame.relative_to(uploads)) in script
+    code, _, headers = apache.request('GET', query + 'zip')
+    assert code == 302 and headers['Location'] == zip_url
+
+    code, body, headers = apache.request('GET', query + 'script')
+    assert code == 200 and body.decode().count("\nfetch '") == 1
+    assert headers['Content-Type'].startswith('text/x-shellscript')
+    assert headers['Content-Disposition'] == 'attachment; filename="download_fits_{}.sh"'.format(name)
+
+    for bad in ('../.git', name + '%2F..%2F..'):
+        code, body, _ = apache.request('GET', '/cgi-bin/unmw/forced_phot_download.py?request='
+                                       + bad + '&what=zip')
+        assert code == 404 and b'PRIVATE' not in body
