@@ -211,15 +211,17 @@ def main():
         return
 
     cfg = read_config_vars('URL_OF_DATA_PROCESSING_ROOT',
-                           'VAST_REFERENCE_COPY', 'IMAGE_QUARANTINE_DIR',
+                           'VAST_REFERENCE_COPY', 'IMAGE_DATA_ROOT', 'IMAGE_QUARANTINE_DIR',
                            'IMAGE_ARCHIVE_DIR', 'IMAGE_ARCHIVE_URL',
                            'FORCED_PHOT_CUTOUT_PIXELS',
                            'WARN_ON_LOW_DISK_SPACE_HARDLIMIT_KB')
     url_prefix = cfg['URL_OF_DATA_PROCESSING_ROOT'].strip().rstrip('/')
     archive_dir = cfg['IMAGE_ARCHIVE_DIR'].strip()
     quarantine_dir = cfg['IMAGE_QUARANTINE_DIR'].strip()
+    image_data_root = cfg['IMAGE_DATA_ROOT'].strip()
     cfg_paths = {
         'workdir': os.path.abspath(TEMP_PARENT),
+        'image_data_root': os.path.abspath(image_data_root) if image_data_root else '',
         'quarantine_dir': os.path.abspath(quarantine_dir)
         if quarantine_dir else '',
         'archive_dir': os.path.abspath(archive_dir) if archive_dir else '',

@@ -2,14 +2,11 @@
 """
 CGI: forced-photometry lightcurve at a sky position over a recent time window.
 
-The user enters one sky position; the page finds every plate-solved
-(wcs_ prefix) image in the uploads/ directory, in its good_wcs_fd_images/
-subdirectory (where sort_workdir_images.sh files the calibrated frames of
-successful runs) and, when IMAGE_QUARANTINE_DIR is configured, in the
-quarantine directory and its own good_wcs_fd_images/ subdirectory (the most
-recent days by img_<YYYY-MM-DD> dir date; the day window and the maximum image
-count are both user-selectable on the input form) whose
-field covers that position, runs the C forced-photometry implementation on each
+The user enters one sky position. The page finds recent plate-solved
+(wcs_ prefix) frames in the work directory and optional quarantine tree.
+Both trees can hold img_* uploads, good_wcs_fd_images/ from
+sort_workdir_images.sh and manually approved frames in frame_quality/.
+The page runs the C forced-photometry implementation on the selected fields
 (util/forced_photometry.sh with FORCED_PHOTOMETRY_ONLY_C=yes), and presents the
 results -- newest first -- as an HTML table (with a full-frame preview and a
 zoom-in cutout marked with a red circle of the photometric aperture, plus a
@@ -32,11 +29,8 @@ Configuration (read from local_config.sh next to this script):
   URL_OF_DATA_PROCESSING_ROOT     URL prefix for the served uploads/ directory
   COORD_SEARCH_THUMBNAIL_PIXELS   in-page thumbnail size (optional)
   COORD_FORCED_PHOT_ZOOMIN_PIXELS zoom-in half-width in source pixels (optional)
-  IMAGE_QUARANTINE_DIR            optional second uploads-style img_* tree
-                                  (offloaded, not yet archived fields); its
-                                  images, and those of its good_wcs_fd_images/
-                                  subdirectory, are measured too but carry no
-                                  FITS download link (the tree is not web-served)
+  IMAGE_DATA_ROOT                 work directory if separate from uploads/
+  IMAGE_QUARANTINE_DIR            optional uploads-style tree (no FITS links)
 
 Per-request output directory uploads/forced_phot_<pid><rand>/ is left in place;
 external housekeeping prunes uploads/forced_phot_* (this CGI prunes nothing).
@@ -117,13 +111,6 @@ FORCED_PHOT_MAX_CONCURRENT = 6          # each request uses its own VaST working
 
 # Per-upload directory name: img_<YYYY-MM-DD>_<...>. Only these are considered.
 IMG_DIR_RE = re.compile(r'^img_(\d{4})-(\d{2})-(\d{2})_')
-# sort_workdir_images.sh moves the wcs_fd_* frames of successful runs out of
-# <workdir>/img_<S>/ into <workdir>/good_wcs_fd_images/img_<S>/ (its default
-# --good destination), keeping the img_<S> layout. That subdirectory is
-# scanned too, under uploads/ and under IMAGE_QUARANTINE_DIR, so sorted
-# frames keep contributing to lightcurves.
-SORTED_GOOD_SUBDIR = 'good_wcs_fd_images'
-
 # Apache's CGI buffer is ~4 KB. Each streamed table row is appended with this
 # whitespace comment so the buffer crosses the flush threshold within a couple
 # of rows instead of stalling until many rows have accumulated.
@@ -186,8 +173,46 @@ def list_recent_field_images(uploads_dir, covering_fields, window_days,
                 continue
             if not _looks_like_fits(fname):
                 continue
-            if field_name_from_fits(fname) in covering_fields:
-                images.append(os.path.abspath(os.path.join(dpath, fname)))
+            path = os.path.join(dpath, fname)
+            if field_name_from_fits(fname) in covering_fields and os.path.isfile(path):
+                images.append(os.path.abspath(path))
+    return images
+
+
+def list_recent_approved_frames(root, covering_fields, window_days, unreadable=None):
+    """Find plate-solved frames marked good by hand in the quality archive."""
+    cutoff = datetime.date.today() - datetime.timedelta(days=window_days - 1)
+    frames = []
+    for directory in rdl.quality_frame_dirs(root, statuses=('good',),
+                                           unreadable=unreadable):
+        try:
+            names = sorted(os.listdir(directory))
+        except OSError as err:
+            if unreadable is not None:
+                unreadable.append((directory, err))
+            continue
+        for name in names:
+            if not name.startswith('wcs_') or not _looks_like_fits(name):
+                continue
+            if field_name_from_fits(name) not in covering_fields:
+                continue
+            path = os.path.abspath(os.path.join(directory, name))
+            if os.path.isfile(path) and rdl.recent_frame_within(path, root):
+                frames.append(path)
+
+    uploads = rdl.quality_upload_dirs(root, {os.path.basename(p) for p in frames})
+    images = []
+    for path in frames:
+        name = os.path.basename(path)
+        match = IMG_DIR_RE.match(uploads.get(name, '')) or _IMG_TS_RE.search(name)
+        if match is None:
+            continue
+        try:
+            date = datetime.date(*map(int, match.groups()[:3]))
+        except ValueError:
+            continue
+        if date >= cutoff:
+            images.append(path)
     return images
 
 
@@ -315,7 +340,8 @@ def main():
         cfg = read_config_vars(
             'REFERENCE_IMAGES', 'VAST_REFERENCE_COPY',
             'URL_OF_DATA_PROCESSING_ROOT', 'COORD_SEARCH_THUMBNAIL_PIXELS',
-            'COORD_FORCED_PHOT_ZOOMIN_PIXELS', 'IMAGE_QUARANTINE_DIR')
+            'COORD_FORCED_PHOT_ZOOMIN_PIXELS', 'IMAGE_DATA_ROOT',
+            'IMAGE_QUARANTINE_DIR')
         ref_dir = cfg['REFERENCE_IMAGES'].strip()
         vast_dir = cfg['VAST_REFERENCE_COPY'].strip()
         url_prefix = cfg['URL_OF_DATA_PROCESSING_ROOT'].strip().rstrip('/')
@@ -488,45 +514,47 @@ def main():
             print(page_end_html())
             return
         _warn_unreadable(unreadable, 'the uploads directory')
-        # Also consider the secondary image trees, each an uploads-style
-        # set of img_* subdirectories with the same date-window and field
-        # filters as the workdir:
-        #  - uploads/good_wcs_fd_images/, where sort_workdir_images.sh
-        #    files the calibrated frames of successful runs (still under
-        #    uploads/, so these rows keep their FITS download link);
-        #  - the optional quarantine directory, holding processed fields
-        #    moved off the SSD workdir but not yet quality-controlled into
-        #    the archive, and its own good_wcs_fd_images/ subdirectory.
-        #    Quarantine rows get no FITS download link (the tree is not
-        #    web-served); fits_url() returns '' for them by itself.
-        # An image present in more than one tree - a mid-move duplicate -
-        # is measured once, from the first tree that lists it.
-        # (tree directory, name for the page, note appended to its count)
+        # Search the archives in each root. Only the curated sorted tree
+        # and frames manually marked good enter a new lightcurve.
+        sorted_subdir = rdl.SORTED_GOOD_SUBDIR
+        quality_name = "the manually approved frame_quality/ folders"
+        no_links = " (no FITS download links for these)"
         secondary_trees = [
-            (os.path.join(TEMP_PARENT, SORTED_GOOD_SUBDIR),
-             "the sorted {}/ directory".format(SORTED_GOOD_SUBDIR), ''),
+            (os.path.join(TEMP_PARENT, sorted_subdir),
+             "the sorted {}/ directory".format(sorted_subdir), '', list_recent_field_images),
+            (TEMP_PARENT, quality_name, '', list_recent_approved_frames),
         ]
+        data_root = (cfg.get('IMAGE_DATA_ROOT') or '').strip()
+        if data_root and os.path.realpath(data_root) != os.path.realpath(TEMP_PARENT):
+            secondary_trees.extend([
+                (data_root, "the work directory", no_links, list_recent_field_images),
+                (os.path.join(data_root, sorted_subdir),
+                 "the {}/ directory of the work directory".format(sorted_subdir),
+                 no_links, list_recent_field_images),
+                (data_root, quality_name + " of the work directory",
+                 no_links, list_recent_approved_frames),
+            ])
         quarantine_dir = (cfg.get('IMAGE_QUARANTINE_DIR') or '').strip()
         if quarantine_dir:
-            no_links = " (no FITS download links for these)"
-            secondary_trees.append(
-                (quarantine_dir, "the quarantine directory", no_links))
-            secondary_trees.append(
-                (os.path.join(quarantine_dir, SORTED_GOOD_SUBDIR),
-                 "the {}/ directory of the quarantine tree".format(
-                     SORTED_GOOD_SUBDIR), no_links))
+            secondary_trees.extend([
+                (quarantine_dir, "the quarantine directory", no_links, list_recent_field_images),
+                (os.path.join(quarantine_dir, sorted_subdir),
+                 "the {}/ directory of the quarantine tree".format(sorted_subdir),
+                 no_links, list_recent_field_images),
+                (quarantine_dir, quality_name + " of the quarantine tree",
+                 no_links, list_recent_approved_frames),
+            ])
 
         def _dedup_key(path):
             base = os.path.basename(path)
             return base[:-3] if base.endswith('.fz') else base
         seen_basenames = set(_dedup_key(p) for p in images)
-        for tree_dir, tree_name, tree_note in secondary_trees:
+        for tree_dir, tree_name, tree_note, scan in secondary_trees:
             if not os.path.isdir(tree_dir):
                 continue
             unreadable = []
             try:
-                tree_images = list_recent_field_images(
-                    tree_dir, covering_fields, window_days, unreadable)
+                tree_images = scan(tree_dir, covering_fields, window_days, unreadable)
             except OSError:
                 tree_images = []
             _warn_unreadable(unreadable, tree_name)

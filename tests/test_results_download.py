@@ -545,6 +545,40 @@ def test_frame_containment_rules(run, tmp_path):
     assert rdl.locate_frame(outside, rdl.TOOL_ARCHIVE, '', '', str(archive)) is None
 
 
+def test_download_tracks_frames_between_linked_archives(run, tmp_path, capsys):
+    base = run.frames[1]['basename']
+    disk = tmp_path / 'off_disk'
+    sorted_dir = run.uploads / 'good_wcs_fd_images'
+    sorted_dir.rename(disk)
+    sorted_dir.symlink_to(disk, target_is_directory=True)
+    old_path = sorted_dir / run.img / base
+
+    output = run.call(capsys, {'request': NAME, 'what': 'script'})
+    assert '{}/good_wcs_fd_images/{}/{}'.format(PREFIX, run.img, base) in output
+
+    quality = run.quarantine / 'frame_quality'
+    approved = quality / 'rejected' / 'moon' / 'good'
+    approved.parent.mkdir(parents=True)
+    approved.symlink_to(tmp_path / 'approved_disk', target_is_directory=True)
+    approved.resolve().mkdir()
+    moved = old_path.rename(approved / base)
+    frame = run.frames[1]
+    assert rdl.locate_frame(frame, rdl.TOOL_RECENT, str(run.uploads),
+                            str(run.quarantine), '') == str(moved)
+    assert rdl.current_fits_url(str(moved), rdl.TOOL_RECENT, str(run.uploads),
+                                PREFIX, '', '') == ''
+
+    (quality / 'measurements.txt').write_text('img_dir={} frame={}\n'.format(run.img, base))
+    returned = run.quarantine / 'good_wcs_fd_images' / run.img / base
+    returned.parent.mkdir(parents=True)
+    moved.rename(returned)
+    former_manifest = {'tool': rdl.TOOL_RECENT,
+                       'frames': [{'path': str(moved), 'basename': base}]}
+    found = rdl.resolve_frames(former_manifest, {'workdir': str(run.uploads),
+                                                'quarantine_dir': str(run.quarantine)})
+    assert found[0][1:] == (str(returned), '')
+
+
 def test_missing_fitscopy_is_a_configuration_error(run, capsys):
     (run.sandbox.paths['vast'] / 'util' / 'fitscopy').unlink()
     out = run.call(capsys, {'request': NAME, 'what': 'zip_cutouts'})

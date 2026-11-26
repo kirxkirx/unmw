@@ -401,6 +401,48 @@ def test_forced_photometry_cgi_skips_unreadable_upload_directories_with_a_warnin
     assert 'Performing forced photometry on 2 images' in output
 
 
+def test_forced_photometry_cgi_reads_manually_approved_frames_through_links(
+        app_sandbox, forced_phot_engine, capsys):
+    today = datetime.date.today().isoformat()
+    old_day = (datetime.date.today() - datetime.timedelta(days=60)).isoformat()
+    workdir = app_sandbox.root / 'workdir'
+    quarantine = app_sandbox.root / 'quarantine'
+    app_sandbox.config.update(IMAGE_DATA_ROOT=str(workdir),
+                              IMAGE_QUARANTINE_DIR=str(quarantine))
+    disk = app_sandbox.root / 'other_disk'
+    sorted_upload = 'img_{}_upload'.format(today)
+    sorted_name = 'wcs_fd_Vul8_{}_15-30-31_001.fits'.format(today)
+    reviewed_name = 'wcs_fd_Vul8_{}_15-31-31_002.fits'.format(today)
+    # This frame's original upload date is available in the measurement log.
+    approved_name = 'wcs_fd_Vul8_003.fits'
+    _make_frames({
+        disk / 'sorted' / sorted_upload: [sorted_name],
+        disk / 'approved': [reviewed_name, 'wcs_fd_Vul8_{}_15-32-31_004.fits'.format(old_day)],
+        workdir / 'frame_quality' / 'review' / 'clouds' / 'bad': [
+            'wcs_fd_Vul8_{}_15-33-31_005.fits'.format(today)],
+        workdir / 'no_reference_image' / sorted_upload: [
+            'wcs_fd_Vul8_{}_15-34-31_006.fits'.format(today)],
+        quarantine / 'frame_quality' / 'rejected' / 'moon': [
+            'wcs_fd_Vul8_{}_15-35-31_007.fits'.format(today)],
+        quarantine / 'frame_quality' / 'rejected' / 'moon' / 'good': [approved_name],
+    })
+    (workdir / 'good_wcs_fd_images').symlink_to(disk / 'sorted', target_is_directory=True)
+    quality_good = workdir / 'frame_quality' / 'review' / 'clouds' / 'good'
+    quality_good.symlink_to(disk / 'approved', target_is_directory=True)
+    (quarantine / 'frame_quality' / 'measurements.txt').write_text(
+        'img_dir={} frame={} extra=value\n'.format(sorted_upload, approved_name))
+
+    coord_forced_photometry.main()
+    output = capsys.readouterr().out
+    assert 'Performing forced photometry on 3 images' in output
+    assert set(forced_phot_engine) == {
+        str(workdir / 'good_wcs_fd_images' / sorted_upload / sorted_name),
+        str(quality_good / reviewed_name),
+        str(quarantine / 'frame_quality' / 'rejected' / 'moon' / 'good' / approved_name),
+    }
+    assert "target='_blank'>FITS</a>" not in output
+
+
 @pytest.fixture
 def plot_sandbox(tmp_path, monkeypatch):
     root = tmp_path / "plot dir with ' quotes"

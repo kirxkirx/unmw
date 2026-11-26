@@ -23,11 +23,9 @@
 #
 # By default the three directories are created inside the work directory:
 #   good_wcs_fd_images/  no_reference_image/  other_images_to_delete/
-# so the moves are instant renames on the same filesystem. The processing
-# pipeline never looks inside them (every tool scans only the top-level img_*
-# entries); the only reader is coord_forced_photometry.py, which also measures
-# the frames in good_wcs_fd_images/ (under the work directory and under
-# IMAGE_QUARANTINE_DIR) so sorted images keep contributing to lightcurves.
+# so the moves are instant renames on the same filesystem. Forced photometry
+# measures frames in good_wcs_fd_images/ and Fastplot checks all three
+# destinations under the work directory and IMAGE_QUARANTINE_DIR.
 # The img_<S> names are kept, so good_wcs_fd_images/ has the uploads-style
 # layout that IMAGE_QUARANTINE_DIR expects should it be moved to a big disk
 # later.
@@ -38,11 +36,9 @@
 # results directory of it has no summary row (the run never completed), it
 # contains subdirectories or symlinks, or its name is not autoprocess-style.
 #
-# Side effect of a move: the FITS download links of the per-field report and
-# the fastplot charts of the candidates of that run point into
-# uploads/img_<S>/ and stop working. coord_forced_photometry.py finds the
-# moved wcs_fd_ frames under good_wcs_fd_images/ and links them at their new
-# URL (see above); nothing else reads the moved files.
+# The per-field report's original FITS download links still point into
+# uploads/img_<S>/. Forced photometry links the sorted frames at their new
+# URLs. Fastplot resolves the report's frame names against the archive trees.
 #
 # The run ends by listing the destination directories that received files,
 # with the number of files and GiB placed in each - also when a failed move

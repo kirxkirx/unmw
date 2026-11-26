@@ -48,9 +48,9 @@
 # The camera settings (SExtractor configuration, site, extinction) are in
 # archive_frame_quality_cameras.txt next to this script.
 #
-# Frames moved out of good_wcs_fd_images/ are not seen by coord_forced_photometry.py until they
-# return from a good/ folder. Uncalibrated frames are never touched: only wcs_fd_* frames in
-# good_wcs_fd_images/ are considered.
+# Forced photometry can use the frames in good/ as soon as they are sorted by eye.
+# Fastplot checks review/ and rejected/ including their good/ and bad/ folders.
+# This script only handles wcs_fd_* frames from good_wcs_fd_images/.
 #
 # DRY RUN BY DEFAULT: frames are measured (that is kept), but nothing is moved without
 # --execute. Run it as the owner of the work directory (sudo -u apache); a lock file keeps two

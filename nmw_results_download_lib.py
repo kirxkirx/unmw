@@ -97,7 +97,9 @@ REQUEST_NAME_RE = re.compile(
 # Pipeline directory layout (see sort_workdir_images.sh and
 # archive_frame_quality.sh).
 SORTED_GOOD_SUBDIR = 'good_wcs_fd_images'
+SORTED_SUBDIRS = (SORTED_GOOD_SUBDIR, 'no_reference_image', 'other_images_to_delete')
 FRAME_QUALITY_SUBDIR = 'frame_quality'
+QUALITY_VERDICTS = ('review', 'rejected')
 _IMG_DIR_RE = re.compile(r'^img_[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.+-]+$')
 
 # ---------- limits ----------
@@ -122,8 +124,6 @@ KEEPALIVE_SECONDS = 5
 # A build gives up after this long (a stalled disk would otherwise make every
 # fitscopy run into its own timeout and hold a build slot for days).
 BUILD_DEADLINE_SECONDS = 1800
-# frame_quality/<verdict>/<reason>/ folders searched when relocating a frame
-_MAX_QUALITY_REASON_DIRS = 64
 _MAX_HEADER_BLOCKS = 1000           # 2.9 MB of FITS header is surely garbage
 
 # Files of the request directory that go into the archives: the page and
@@ -437,44 +437,90 @@ def _is_regular_file(path):
         return False
 
 
-def frame_candidates(frame_path, workdir, quarantine_dir):
-    """Every place a recent-images frame may have moved to since its run:
-    its own path, the img_<S>/ directory of the work directory and of the
-    quarantine tree (each with and without good_wcs_fd_images/), and the
-    frame_quality/ review and rejected folders (with their good/ and bad/
-    subfolders) of the work directory."""
-    base = os.path.basename(frame_path)
-    img_dir = os.path.basename(os.path.dirname(frame_path))
-    candidates = [frame_path]
-    if _IMG_DIR_RE.match(img_dir):
-        for root in (workdir, quarantine_dir):
-            if root:
-                candidates.append(os.path.join(root, img_dir, base))
-                candidates.append(os.path.join(root, SORTED_GOOD_SUBDIR,
-                                               img_dir, base))
-    if workdir:
-        quality = os.path.join(workdir, FRAME_QUALITY_SUBDIR)
-        for verdict in ('review', 'rejected'):
-            verdict_dir = os.path.join(quality, verdict)
-            try:
-                reasons = sorted(os.listdir(verdict_dir))
-            except OSError:
+def quality_frame_dirs(root, statuses=('', 'good', 'bad'), unreadable=None):
+    """Existing flat frame directories produced by archive_frame_quality.sh."""
+    if not root:
+        return
+    for verdict in QUALITY_VERDICTS:
+        verdict_dir = os.path.join(root, FRAME_QUALITY_SUBDIR, verdict)
+        try:
+            reasons = sorted(os.listdir(verdict_dir))
+        except FileNotFoundError:
+            continue
+        except OSError as err:
+            if unreadable is not None:
+                unreadable.append((verdict_dir, err))
+            continue
+        for reason in reasons:
+            if reason.startswith('.'):
                 continue
-            for reason in reasons[:_MAX_QUALITY_REASON_DIRS]:
-                if reason.startswith('.'):
+            reason_dir = os.path.join(verdict_dir, reason)
+            for status in statuses:
+                directory = os.path.join(reason_dir, status) if status else reason_dir
+                if os.path.isdir(directory):
+                    yield directory
+
+
+def quality_upload_dirs(root, basenames):
+    """Get the original img_<S> names of selected quality-sorted frames."""
+    uploads = {}
+    if not root or not basenames:
+        return uploads
+    pending = set(basenames)
+    try:
+        with open(os.path.join(root, FRAME_QUALITY_SUBDIR, 'measurements.txt'),
+                  encoding='utf-8', errors='replace') as measurements:
+            for line in measurements:
+                fields = line.split(maxsplit=2)
+                if len(fields) < 2:
                     continue
-                for sub in ('', 'good', 'bad'):
-                    candidates.append(os.path.join(verdict_dir, reason, sub,
-                                                   base))
-    unique = []
-    for candidate in candidates:
-        candidate = os.path.normpath(candidate)
-        if candidate not in unique:
-            unique.append(candidate)
-    return unique
+                img, frame = fields[:2]
+                if not img.startswith('img_dir=') or not frame.startswith('frame='):
+                    continue
+                img, frame = img[8:], frame[6:]
+                if frame in pending and _IMG_DIR_RE.fullmatch(img):
+                    uploads[frame] = img
+                    pending.remove(frame)
+                    if not pending:
+                        break
+    except OSError:
+        pass
+    return uploads
 
 
-def locate_frame(frame, tool, workdir, quarantine_dir, archive_dir):
+def recent_frame_within(path, root):
+    """Check a frame against its root, resolving operator archive directories."""
+    if not root:
+        return False
+    parts = os.path.relpath(path, root).split(os.sep)
+    sorted_frame = (len(parts) == 3 and parts[0] in SORTED_SUBDIRS
+                    and _IMG_DIR_RE.fullmatch(parts[1]))
+    quality_frame = (len(parts) in (4, 5) and parts[0] == FRAME_QUALITY_SUBDIR
+                     and parts[1] in QUALITY_VERDICTS
+                     and (len(parts) == 4 or parts[3] in ('good', 'bad')))
+    # The archive directories are operator-controlled and may be symlinks to
+    # another disk. An individual FITS symlink must stay within its directory.
+    return _within(path, [os.path.dirname(path) if sorted_frame or quality_frame
+                          else root])
+
+
+def _frame_candidates(frame_path, roots, img_dir):
+    """Current and possible archived paths of a recent-images frame."""
+    base = os.path.basename(frame_path)
+    img_dir = img_dir or os.path.basename(os.path.dirname(frame_path))
+    yield os.path.normpath(frame_path)
+    if _IMG_DIR_RE.fullmatch(img_dir):
+        for root in roots:
+            yield os.path.join(root, img_dir, base)
+            for subdir in SORTED_SUBDIRS:
+                yield os.path.join(root, subdir, img_dir, base)
+    for root in roots:
+        for directory in quality_frame_dirs(root):
+            yield os.path.join(directory, base)
+
+
+def locate_frame(frame, tool, workdir, quarantine_dir, archive_dir,
+                 image_data_root='', img_dir=''):
     """Current path of a manifest frame, or None when it is gone (or its
     recorded path is not inside the trees this tool reads)."""
     base = frame.get('basename') or ''
@@ -490,13 +536,11 @@ def locate_frame(frame, tool, workdir, quarantine_dir, archive_dir):
         def inside(candidate):
             return _lexically_within(candidate, [archive_dir])
     else:
-        # The upload trees take files from the web: their real paths must
-        # stay inside them, so a planted symlink can never be followed out.
-        roots = [workdir, quarantine_dir]
-        candidates = frame_candidates(path, workdir, quarantine_dir)
+        roots = [root for root in (workdir, image_data_root, quarantine_dir) if root]
+        candidates = _frame_candidates(path, roots, img_dir)
 
         def inside(candidate):
-            return _within(candidate, roots)
+            return any(recent_frame_within(candidate, root) for root in roots)
     for candidate in candidates:
         if os.path.basename(candidate) == base and \
                 _is_regular_file(candidate) and inside(candidate):
@@ -532,22 +576,34 @@ def current_fits_url(path, tool, workdir, url_prefix, archive_dir,
             return _served_url(archive_url, os.path.normpath(path),
                                os.path.normpath(archive_dir))
         return ''
-    if workdir and _within(path, [workdir]):
+    if recent_frame_within(path, workdir):
         return _served_url(url_prefix, path, workdir)
     return ''
 
 
 def resolve_frames(manifest, cfg_paths):
     """[(frame, current_path or None, current_url)] for every manifest
-    frame. cfg_paths: dict with workdir, quarantine_dir, archive_dir,
-    url_prefix, archive_url."""
+    frame. cfg_paths includes the work, uploads, quarantine and archive trees
+    and the public URL prefixes."""
     tool = manifest['tool']
+    workdir = cfg_paths.get('workdir')
+    image_data_root = cfg_paths.get('image_data_root')
+    quarantine_dir = cfg_paths.get('quarantine_dir')
+    uploads = {}
+    if tool == TOOL_RECENT:
+        # A manually approved frame may have gone back to img_<S> since
+        # photometry. Read each quality log once to recover its upload name.
+        returned = {f.get('basename') for f in manifest['frames']
+                    if FRAME_QUALITY_SUBDIR in (f.get('path') or '').split(os.sep)
+                    and not os.path.isfile(f.get('path') or '')}
+        for root in (workdir, image_data_root, quarantine_dir):
+            uploads.update(quality_upload_dirs(root, returned - uploads.keys()))
     resolved = []
     for frame in manifest['frames']:
-        current = locate_frame(frame, tool, cfg_paths.get('workdir'),
-                               cfg_paths.get('quarantine_dir'),
-                               cfg_paths.get('archive_dir'))
-        url = current_fits_url(current, tool, cfg_paths.get('workdir'),
+        current = locate_frame(frame, tool, workdir, quarantine_dir,
+                               cfg_paths.get('archive_dir'), image_data_root,
+                               uploads.get(frame.get('basename'), ''))
+        url = current_fits_url(current, tool, workdir,
                                cfg_paths.get('url_prefix'),
                                cfg_paths.get('archive_dir'),
                                cfg_paths.get('archive_url'))

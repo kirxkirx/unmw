@@ -84,10 +84,11 @@ export REFERENCE_IMAGES=/dataX/kirx/NMW_reference_images_2012
 # tree so lightcurves stay complete after workdir offloading (quarantine
 # rows on the forced-photometry page carry no FITS download link - the tree
 # is not web-served). The forced-photometry page also scans the
-# good_wcs_fd_images/ subdirectory, where sort_workdir_images.sh files the
-# calibrated frames of successful runs: always under IMAGE_DATA_ROOT, and
-# under this tree when it is set. Skipped silently when unset; the monitoring
-# rescan logs a note when the configured directory is missing.
+# good_wcs_fd_images/ subdirectory and manually approved frame_quality/
+# folders under IMAGE_DATA_ROOT and this tree. Fastplot searches both trees,
+# including no_reference_image/, other_images_to_delete/ and all quality
+# verdicts. The archive subdirectories can be symlinks to another disk.
+# The monitoring rescan logs a note when the configured directory is missing.
 #export IMAGE_QUARANTINE_DIR="/mnt/nmwttu1/NMW-TexasTech_quarantine"
 
 # Size, in pixels, of the square FITS cutouts centred on the target in the

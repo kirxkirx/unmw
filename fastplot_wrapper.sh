@@ -219,7 +219,9 @@ fi
 echo "Running fastplot.sh with URL: $CANDIDATE_URL"
 echo "Working directory: $FASTPLOT_VAST_WORKDIR"
 
-"$FASTPLOT_VAST_WORKDIR/util/transients/fastplot.sh" "$CANDIDATE_URL"
+IMAGE_DATA_ROOT="${IMAGE_DATA_ROOT:-$DATA_PROCESSING_ROOT}" \
+ IMAGE_QUARANTINE_DIR="${IMAGE_QUARANTINE_DIR:-}" \
+ "$FASTPLOT_VAST_WORKDIR/util/transients/fastplot.sh" "$CANDIDATE_URL"
 FASTPLOT_EXIT_CODE=$?
 
 echo "fastplot.sh exit code: $FASTPLOT_EXIT_CODE"
