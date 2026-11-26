@@ -631,7 +631,7 @@ document.addEventListener(\"DOMContentLoaded\", function() {
 <button id='theme-btn' class='floating-btn' onclick='toggleTheme()'>Dark theme</button>
 
 <table align='center' width='100%' border='0' class='main'>
-<tr><th>Camera</th><th>Obs.Time(UTC)</th><th>Field</th><th>Preview</th><th>Status</th><th>Log</th><th>Pointing.Offset(&deg;)</th><th>Altitude(&deg;)</th><th>Azimuth(&deg;)</th><th>mag.lim.</th><th>FWHM(pix)</th><th>Candidates(new/total)</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+<tr><th>Camera</th><th>Obs.Time(UTC)</th><th>Field</th><th>Preview</th><th>Status</th><th>Log</th><th>Pointing.Offset(&deg;)</th><th>Azimuth(&deg;)</th><th>Altitude(&deg;)</th><th>mag.lim.</th><th>FWHM(pix)</th><th>Candidates(new/total)</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
 #<tr><th>Camera</th><th>Obs.Time(UTC)</th><th>Field</th><th>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</th><th>Status</th><th>Log</th><th>Pointing.Offset(&deg;)</th><th>mag.lim.</th><th>Candidates(new/total)</th><th>Comments</th></tr>" > "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
 
  # Add this summary file to the list
@@ -641,25 +641,9 @@ document.addEventListener(\"DOMContentLoaded\", function() {
 
 fi
 
-# The Altitude column (2026-11-03) and then the Azimuth column (2026-11-18) were
-# added to the summary table. A summary page begun by an earlier version of this
-# script (an update deployed in the middle of a half-night) keeps its old header
-# without the newer column(s), so the rows appended to it keep the old layout
-# without the newer cell(s) - otherwise every later cell would be shown one
-# column to the right of its header. The next page is created with the new
-# header and gets the new layout.
-if grep --quiet '<th>Altitude(&deg;)</th>' "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME" ;then
- SUMMARY_TABLE_HAS_ALTITUDE_COLUMN="yes"
-else
- SUMMARY_TABLE_HAS_ALTITUDE_COLUMN="no"
- debug_log "CAMERA=$CAMERA: $OUTPUT_PROCESSING_SUMMARY_HTML_NAME has the old header without the Altitude column, appending rows in the old layout"
-fi
-if grep --quiet '<th>Azimuth(&deg;)</th>' "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME" ;then
- SUMMARY_TABLE_HAS_AZIMUTH_COLUMN="yes"
-else
- SUMMARY_TABLE_HAS_AZIMUTH_COLUMN="no"
- debug_log "CAMERA=$CAMERA: $OUTPUT_PROCESSING_SUMMARY_HTML_NAME has the old header without the Azimuth column, appending rows in the old layout"
-fi
+# Use the page's column order when appending rows after a mid-night update.
+# Earlier headers may list Altitude first or omit one or both coordinates.
+mapfile -t SUMMARY_COORDINATE_HEADERS < <(grep -m 1 -oE '<th>(Azimuth|Altitude)\(&deg;\)</th>' "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME")
 
 # make body
 for INPUT_DIR in $INPUT_LIST_OF_RESULT_DIRS ;do
@@ -829,16 +813,15 @@ its candidates appear there. Please have a look at the individual-field report."
  MIN_ALTITUDE_DEG=$(nmw_second_epoch_min_altitude "$INPUT_DIR/index.html")
  # The azimuth of that image from its FITS header, blank when the report carries none
  AZIMUTH_DEG=$(nmw_second_epoch_azimuth "$INPUT_DIR/index.html")
- ALT_AZ_CELLS=""
- BLANK_ALT_AZ_CELLS=""
- if [ "$SUMMARY_TABLE_HAS_ALTITUDE_COLUMN" = "yes" ];then
-  ALT_AZ_CELLS="<td>$MIN_ALTITUDE_DEG</td>"
-  BLANK_ALT_AZ_CELLS="<td></td>"
- fi
- if [ "$SUMMARY_TABLE_HAS_AZIMUTH_COLUMN" = "yes" ];then
-  ALT_AZ_CELLS="$ALT_AZ_CELLS<td>$AZIMUTH_DEG</td>"
-  BLANK_ALT_AZ_CELLS="$BLANK_ALT_AZ_CELLS<td></td>"
- fi
+ COORDINATE_CELLS=""
+ BLANK_COORDINATE_CELLS=""
+ for COORDINATE_HEADER in "${SUMMARY_COORDINATE_HEADERS[@]}" ;do
+  case "$COORDINATE_HEADER" in
+   '<th>Azimuth(&deg;)</th>') COORDINATE_CELLS+="<td>$AZIMUTH_DEG</td>" ;;
+   '<th>Altitude(&deg;)</th>') COORDINATE_CELLS+="<td>$MIN_ALTITUDE_DEG</td>" ;;
+  esac
+  BLANK_COORDINATE_CELLS+="<td></td>"
+ done
  # remove "UTC" as we have it in the table header
  # LOG LINE: the universal start
  #echo -n "<tr><td>$CAMERA</td><td>${LAST_IMAGE_DATE/ UTC/}</td><td><font color='teal'> $FIELD </font></td><td>&nbsp;&nbsp;&mdash;&nbsp;&nbsp;</td>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
@@ -852,7 +835,7 @@ its candidates appear there. Please have a look at the individual-field report."
  # Status
  if [ "$INCLUDE_REPORT_IN_COMBINED_LIST" != "OK" ];then
   # LOG LINE: too many candidates to exclude in the combined report error
-  echo "<td><span class='status-error'>ERROR</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td>$ALT_AZ_CELLS<td>$MAG_LIMIT</td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>too many candidates ($NUMBER_OF_UNIDENTIFIED_CANDIDATES with no ID, $NUMBER_OF_CANDIDATE_TRANSIENTS total) to include in the combined list ($(basename $0))</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+  echo "<td><span class='status-error'>ERROR</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td>$COORDINATE_CELLS<td>$MAG_LIMIT</td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>too many candidates ($NUMBER_OF_UNIDENTIFIED_CANDIDATES with no ID, $NUMBER_OF_CANDIDATE_TRANSIENTS total) to include in the combined list ($(basename $0))</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
  else
   # Match a line carrying both the ERROR word and either phrasing of the
   # stuck-camera message ('IMAGE PROCESSING ERROR (stuck camera ...)' in the
@@ -862,19 +845,19 @@ its candidates appear there. Please have a look at the individual-field report."
   if [ $? -eq 0 ];then
    FIELD=$(grep 'Processing fields' "$INPUT_DIR/index.html" | sed 's:Processing:processing:g' | sed 's:<br>::g' | awk '{print $1}')
    # LOG LINE: suck camera error
-   echo "<td><span class='status-error'>CAMERA STUCK</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td>$BLANK_ALT_AZ_CELLS<td></td><td></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+   echo "<td><span class='status-error'>CAMERA STUCK</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td>$BLANK_COORDINATE_CELLS<td></td><td></td><td></td><td></td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
   elif grep 'ERROR' "$INPUT_DIR/index.html" | grep --quiet 'OBSERVATORY ROOF CLOSED' ;then
    # VaST's closed-roof check: the latest new image shows no stars and no sky
    # light (autoprocess.sh sends the Slack alert for it)
    # LOG LINE: closed observatory roof
-   echo "<td><span class='status-error'>ROOF CLOSED</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td>$BLANK_ALT_AZ_CELLS<td></td><td></td><td></td><td>no stars and no sky light on the latest new image - is the observatory roof closed?</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+   echo "<td><span class='status-error'>ROOF CLOSED</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td></td>$BLANK_COORDINATE_CELLS<td></td><td></td><td></td><td>no stars and no sky light on the latest new image - is the observatory roof closed?</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
   else
    ### Check for all other errors
    grep --quiet 'ERROR' "$INPUT_DIR/index.html"
    if [ $? -eq 0 ] ;then
     ERROR_MSG=$(grep --max-count=1 'ERROR' "$INPUT_DIR/index.html")
     # LOG LINE: generic error
-    echo "<td><span class='status-error'>ERROR</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td>$ALT_AZ_CELLS<td></td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$ERROR_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    echo "<td><span class='status-error'>ERROR</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td>$COORDINATE_CELLS<td></td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$ERROR_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
    else
     DISK_SPACE_WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | grep 'low on disk space' | tail -n1)
     WARNING_MSG=$(grep 'WARNING' "$INPUT_DIR/index.html" | grep -v 'replace_file_with_symlink_if_filename_contains_white_spaces' | tail -n1)
@@ -892,7 +875,7 @@ its candidates appear there. Please have a look at the individual-field report."
     # WARNING_MSG=$(grep 'CPU temperature' "$INPUT_DIR/index.html" | tail -n1)
     #fi
     # LOG LINE: everything fine
-    echo "<td><span class='status-ok'>OK</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td>$ALT_AZ_CELLS<td>$MAG_LIMIT</td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$WARNING_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
+    echo "<td><span class='status-ok'>OK</span></td><td><a href='$INPUT_DIR/' target='_blank'>log</a></td><td>$IMAGE_CENTER_OFFSET_FROM_REF_IMAGE</td>$COORDINATE_CELLS<td>$MAG_LIMIT</td><td>$FWHM_PIX</td><td>$NUMBER_OF_UNIDENTIFIED_CANDIDATES/$NUMBER_OF_CANDIDATE_TRANSIENTS</td><td>$WARNING_MSG</td></tr>" >> "$OUTPUT_PROCESSING_SUMMARY_HTML_NAME"
     ####
    fi # grep --quiet 'ERROR' "$INPUT_DIR/index.html"
   fi # 'camera is stuck'

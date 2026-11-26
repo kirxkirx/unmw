@@ -687,7 +687,7 @@ def test_autoprocess_stuck_camera_alert_is_unchanged(autoprocess):
 
 
 # ---------------------------------------------------------------------------
-# combine_reports.sh: the ROOF CLOSED row of the summary page
+# combine_reports.sh: summary rows
 # ---------------------------------------------------------------------------
 
 def _run_combine_reports(tmp_path, html):
@@ -716,17 +716,25 @@ def _summary_rows(summary):
     rows = [line for line in summary.read_text().splitlines() if line.startswith('<tr>')]
     header = [row for row in rows if '<th>' in row][-1]
     body = [row for row in rows if 'results_' in row]
-    return header.count('<th>'), body
+    return re.findall(r'<th>(.*?)</th>', header), body
 
 
-@pytest.mark.parametrize('layout, expected_columns', [
-    ('altitude_azimuth', 13), ('altitude_only', 12), ('no_coordinates', 11),
-])
-def test_combine_reports_roof_closed_row(tmp_path, layout, expected_columns):
-    unmw, data, env = _run_combine_reports(tmp_path, closed_roof_report(jd_hours_ago(0.5)))
-    if layout != 'altitude_azimuth':
-        # Pages begun before either coordinate column was added keep their layout.
-        coordinate_headers = '<th>Altitude(&deg;)</th>' if layout == 'altitude_only' else ''
+@pytest.mark.parametrize('existing_columns', [None, ('Altitude', 'Azimuth'), ('Altitude',), ()],
+                         ids=['new', 'altitude_first', 'altitude_only', 'no_coordinates'])
+@pytest.mark.parametrize('roof_closed', [True, False], ids=['roof_closed', 'ok'])
+def test_combine_reports_summary_row(tmp_path, existing_columns, roof_closed):
+    jd = jd_hours_ago(0.5)
+    if roof_closed:
+        html = closed_roof_report(jd)
+    else:
+        html = ok_report(jd).replace(
+            'Images used for photometry 4\n',
+            'Images used for photometry 4\n'
+            'Field altitude during imaging: 34.2 deg (FITS keyword CENTALT) a.fits\n'
+            'Field azimuth during imaging: 239.8 deg (FITS keyword CENTAZ) a.fits\n')
+    unmw, data, env = _run_combine_reports(tmp_path, html)
+    if existing_columns is not None:
+        coordinate_headers = ''.join(f'<th>{name}(&deg;)</th>' for name in existing_columns)
         names = subprocess.run(['bash', '-c', 'D=$(date +%Y%m%d); echo ${D}_morning_summary.html '
                                 '${D}_evening_summary.html'], capture_output=True, text=True, check=True)
         for name in names.stdout.split():
@@ -741,14 +749,21 @@ def test_combine_reports_roof_closed_row(tmp_path, layout, expected_columns):
     summaries = [path for path in data.glob('*_summary.html') if 'results_' in path.read_text()]
     assert len(summaries) == 1, result.stdout + result.stderr
     header_cells, rows = _summary_rows(summaries[0])
-    assert header_cells == expected_columns
+    expected_columns = ('Azimuth', 'Altitude') if existing_columns is None else existing_columns
+    assert len(header_cells) == 11 + len(expected_columns)
+    assert header_cells[7:-4] == [f'{name}(&deg;)' for name in expected_columns]
     assert len(rows) == 1
     row = rows[0]
-    assert row.count('<td>') == header_cells
     cells = re.findall(r'<td>(.*?)</td>', row)
-    assert cells[7:7 + expected_columns - 11] == [''] * (expected_columns - 11)
-    assert "<td><span class='status-error'>ROOF CLOSED</span></td><td><a href='./results_20261112_" in row
-    assert row.endswith('<td>no stars and no sky light on the latest new image'
-                        ' - is the observatory roof closed?</td></tr>')
+    assert len(cells) == len(header_cells)
+    if roof_closed:
+        assert cells[7:-4] == [''] * len(expected_columns)
+        assert "<td><span class='status-error'>ROOF CLOSED</span></td><td><a href='./results_20261112_" in row
+        assert row.endswith('<td>no stars and no sky light on the latest new image'
+                            ' - is the observatory roof closed?</td></tr>')
+    else:
+        assert cells[4] == "<span class='status-ok'>OK</span>"
+        values = {'Azimuth': '239.8', 'Altitude': '34.2'}
+        assert cells[7:-4] == [values[name] for name in expected_columns]
     assert row.startswith('<tr><td>TTUQ2b1x1</td>')
     assert not (tmp_path / 'curl_calls.jsonl').exists()

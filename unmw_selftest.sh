@@ -901,8 +901,8 @@ if ! grep --quiet '<th>Altitude(&deg;)</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;t
  echo "$0 test error: cannot find 'Altitude(&deg;)' column header in $LATEST_PROCESSING_SUMMARY_LOG"
  exit 1
 fi
-if ! grep --quiet '<th>Altitude(&deg;)</th><th>Azimuth(&deg;)</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;then
- echo "$0 test error: cannot find the 'Azimuth(&deg;)' column header right after 'Altitude(&deg;)' in $LATEST_PROCESSING_SUMMARY_LOG"
+if ! grep --quiet '<th>Azimuth(&deg;)</th><th>Altitude(&deg;)</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;then
+ echo "$0 test error: cannot find the 'Azimuth(&deg;)' column header right before 'Altitude(&deg;)' in $LATEST_PROCESSING_SUMMARY_LOG"
  exit 1
 fi
 if ! grep --quiet '<th>mag.lim.</th>' "$LATEST_PROCESSING_SUMMARY_LOG" ;then
@@ -1020,8 +1020,8 @@ done < <(grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep 'OK')
 # CENTALT/OBJCTALT keyword, and VaST revisions older than the altitude log line write
 # nothing to parse) or a number of degrees with one decimal place between -90 and 90
 while IFS= read -r VUL3_ROW; do
- # Altitude is in the 8th <td> column, right after Pointing.Offset
- VUL3_ALTITUDE=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '8p' | tr -d ' ')
+ # Altitude is in the 9th <td> column, right after Azimuth
+ VUL3_ALTITUDE=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '9p' | tr -d ' ')
  if [ -z "$VUL3_ALTITUDE" ]; then
   echo "Altitude value for Vul3 is blank (acceptable: no altitude keyword in the FITS header)"
  elif echo "$VUL3_ALTITUDE" | grep -qE '^-?[0-9]+\.[0-9]$' && echo "$VUL3_ALTITUDE" | awk '{exit ($1 >= -90 && $1 <= 90 ? 0 : 1)}' ;then
@@ -1035,8 +1035,8 @@ done < <(grep 'Vul3' "$LATEST_PROCESSING_SUMMARY_LOG" | grep 'OK')
 # Check the Azimuth value for Vul3 OK rows - blank (the ST-8300M test images carry no
 # CENTAZ/OBJCTAZ keyword) or a number of degrees with one decimal place between 0 and 360
 while IFS= read -r VUL3_ROW; do
- # Azimuth is in the 9th <td> column, right after Altitude
- VUL3_AZIMUTH=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '9p' | tr -d ' ')
+ # Azimuth is in the 8th <td> column, right after Pointing.Offset
+ VUL3_AZIMUTH=$(echo "$VUL3_ROW" | sed 's/<\/td><td>/\n/g' | sed 's/<[^>]*>//g' | sed -n '8p' | tr -d ' ')
  if [ -z "$VUL3_AZIMUTH" ]; then
   echo "Azimuth value for Vul3 is blank (acceptable: no azimuth keyword in the FITS header)"
  elif echo "$VUL3_AZIMUTH" | grep -qE '^[0-9]+\.[0-9]$' && echo "$VUL3_AZIMUTH" | awk '{exit ($1 >= 0 && $1 <= 360 ? 0 : 1)}' ;then
