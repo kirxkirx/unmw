@@ -286,7 +286,8 @@ fi
 
 ##### Measure the new frames #####
 awk '{ for (i = 1; i <= NF; i++) if (substr($i, 1, 6) == "frame=") print substr($i, 7) }' "$MEASUREMENTS" | sort -u > "$WORK_TMP/measured.txt"
-find "$GOOD_DIR" -mindepth 2 -maxdepth 2 -type f -name 'wcs_fd_*.fits' | sort > "$WORK_TMP/archive_frames.txt"
+# Follow the archive directory if it is a symlink to another drive.
+find -H "$GOOD_DIR" -mindepth 2 -maxdepth 2 -type f -name 'wcs_fd_*.fits' | sort > "$WORK_TMP/archive_frames.txt"
 # (getline, not the NR == FNR idiom, which fails when the first file is empty)
 awk -v measured_file="$WORK_TMP/measured.txt" 'BEGIN { while ((getline line < measured_file) > 0) measured[line] = 1 } { n = split($0, p, "/") ; if (!(p[n] in measured)) print }' "$WORK_TMP/archive_frames.txt" > "$WORK_TMP/to_measure.txt"
 if [ "$LIMIT" -gt 0 ]; then
