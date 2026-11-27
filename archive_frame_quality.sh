@@ -21,7 +21,7 @@
 #
 #  1. twilight: the Sun above TWILIGHT_SUN_ALT_DEG (-18 deg)                    -> REJECT
 #  2. moon:     moonlight brightens the sky at the field by more than
-#               MOON_BRIGHTENING_MAG (0.5 mag; Krisciunas & Schaefer 1991)       -> REJECT
+#               MOON_BRIGHTENING_MAG (1.0 mag; Krisciunas & Schaefer 1991)       -> REJECT
 #  3. no_stars, obstructed, focus, trailed: no Tycho-2 zero point; a cell of the frame that
 #               lost more than half of the Tycho-2 stars it normally shows (clouds, roof, dew);
 #               star images twice the usual size of the camera; elongated star images -> REJECT
@@ -37,6 +37,9 @@
 #  5. a frame that would be kept but is more than FLOOR_BELOW_CAMERA_CLEAR_MAG (1 mag) below
 #               the camera's airmass-corrected clear sky -> REVIEW (the best frames of a field
 #               that is never clear are not kept unseen)
+#  6. a frame that would be kept still needs enough field measurements, low enough airmass,
+#               and a smooth sky background after accounting for patterns that persist in
+#               the same field on other nights. Doubtful frames -> REVIEW.
 #
 # Built-in checks stop the run before anything is moved: for every camera, frames taken in
 # twilight and in moonlight must have a brighter sky than dark-time frames (otherwise the
@@ -89,23 +92,29 @@ export LC_ALL
 SCRIPTDIR=$(dirname "$(readlink -f "$0")")
 
 ##### Thresholds #####
-# The user's decisions of 2026-11-23: twilight, moonlight and the floor below the camera's
+# Archive policy: twilight, moonlight and the floor below the camera's
 # clear sky. The other limits are starting values, to be set from frames sorted by eye.
 TWILIGHT_SUN_ALT_DEG=-18
-MOON_BRIGHTENING_MAG=0.5
+MOON_BRIGHTENING_MAG=1.0
 FLOOR_BELOW_CAMERA_CLEAR_MAG=1.0
+# Limit predicted moonlight in the frames used to fit clear-sky baselines.
+BASELINE_MAX_MOON_BRIGHTENING_MAG=0.5
 # The zero-point deficits of the cells against the clear level of the field: the median cell
 # (the transparency of the whole frame) and the third-worst cell (a patch of cloud; a single
 # cell is too noisy: the worst of 24 cells of a clear frame was 0.27-0.34 mag in the test)
-KEEP_MAX_MEDIAN_DEFICIT_MAG=0.2
+KEEP_MAX_MEDIAN_DEFICIT_MAG=0.10
 REJECT_MIN_MEDIAN_DEFICIT_MAG=0.75
-KEEP_MAX_PATCH_DEFICIT_MAG=0.4
+KEEP_MAX_PATCH_DEFICIT_MAG=0.20
 REJECT_MIN_PATCH_DEFICIT_MAG=1.0
-# a field with too few dark-time frames: the frame zero point against the camera clear sky
-KEEP_MAX_CAMERA_DEFICIT_MAG=0.3
+# KEEP requires a field baseline. Use the camera baseline to reject large losses.
 REJECT_MIN_CAMERA_DEFICIT_MAG=1.0
 KEEP_MAX_LIM_DEFICIT_MAG=0.5
 REJECT_MIN_LIM_DEFICIT_MAG=1.0
+# At high airmass, even visually poor frames can pass the photometric cuts.
+KEEP_MAX_AIRMASS=2.5
+KEEP_MIN_CELL_FRACTION=0.75
+KEEP_MAX_SKY_RESIDUAL_PERCENT=2.2
+MIN_SKY_REFERENCE_NIGHTS=3
 # the fraction of the Tycho-2 stars found in a cell, below the usual fraction of that cell
 KEEP_MAX_FOUND_DEFICIT=0.2
 REJECT_MIN_FOUND_DEFICIT=0.5
@@ -375,9 +384,9 @@ percentiles() {
 # samples for the extinction fit: the raw cell zero points of the dark-time frames per camera
 # and airmass bin. The last label of a frame counts. (The labels are read with getline: the
 # NR == FNR idiom fails when the first file is empty.)
-awk -v twilight="$TWILIGHT_SUN_ALT_DEG" -v moon="$MOON_BRIGHTENING_MAG" -v kfit_samples="$WORK_TMP/kfit_samples.tsv" -v labels_file="$LABELS" '
+awk -v twilight="$TWILIGHT_SUN_ALT_DEG" -v moon="$BASELINE_MAX_MOON_BRIGHTENING_MAG" -v kfit_samples="$WORK_TMP/kfit_samples.tsv" -v labels_file="$LABELS" '
 BEGIN {
- FS = "\n" ; twilight += 0 ; moon += 0
+ FS = "\n" ; OFS = "\t" ; twilight += 0 ; moon += 0
  while ((getline line < labels_file) > 0) { split(line, l, "\t") ; label[l[1]] = l[2] }
  close(labels_file)
  printf "" > kfit_samples
@@ -418,8 +427,18 @@ BEGIN {
   }
   raw = raw (i > 1 ? "," : "") r
  }
- printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", frame, v["img_dir"], camera, field, v["status"], v["sun_alt"], v["moon_sky_brightening"], v["lim_mag"], v["fwhm"], v["elongation"], v["sky_rate"], v["center_alt"], v["header_centalt"], lab, v["center_airmass"], raw, v["cell_airmass"], v["cell_found"], dark, ok, k_tool
-}' "$MEASUREMENTS" > "$WORK_TMP/frames_raw.tsv"
+ # Use the observing night and meridian side when matching the sky background. JD starts
+ # at noon, and sidereal time plus site longitude gives the local meridian in RA.
+ night = "NA" ; side = "NA"
+ jd = v["jd"] ; lon = v["site_lon"] ; ra = v["center_ra"]
+ if (jd + 0 > 0 && lon ~ /^-?[0-9]+(\.[0-9]+)?$/ && ra ~ /^[0-9]+(\.[0-9]+)?$/) {
+  night = int(jd + lon / 360)
+  ha = (280.46061837 + 360.98564736629 * (jd - 2451545.0) + lon - ra + 180) % 360
+  if (ha < 0) ha += 360
+  side = (ha < 180 ? "rising" : "setting")
+ }
+ print frame, v["img_dir"], camera, field, v["status"], v["sun_alt"], v["moon_sky_brightening"], v["lim_mag"], v["fwhm"], v["elongation"], v["sky_rate"], v["center_alt"], v["header_centalt"], lab, v["center_airmass"], raw, v["cell_airmass"], v["cell_found"], dark, ok, k_tool, v["cells"], v["cell_sky"], side, night
+}' "$MEASUREMENTS" > "$WORK_TMP/frames_raw.tsv" || die "could not parse frame measurements"
 
 # The extinction coefficient of every camera: a straight line through the clear-sky upper
 # envelope (the BASELINE_PERCENTILE of the raw cell zero points) of the airmass bins
@@ -459,7 +478,7 @@ function median_of_list(list,   n, a, i, j, t, cnt, s) {
  return (s[cnt / 2] + s[cnt / 2 + 1]) / 2
 }
 BEGIN {
- twilight += 0 ; moon += 0
+ OFS = "\t" ; twilight += 0 ; moon += 0
  while ((getline line < kfit_file) > 0) { split(line, q, "\t") ; kfit[q[1]] = q[2] + 0 }
  close(kfit_file)
  printf "" > samples
@@ -497,25 +516,93 @@ BEGIN {
   else if (dm > moon) print "SKY\t" camera "|moon\t" $11 > samples
   else if (dm < 0.05) print "SKY\t" camera "|dark\t" $11 > samples
  }
- printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%.4f\n", frame, $2, camera, field, $5, $6, $7, zp, lim, $9, $10, $11, $12, $13, lab, cells, found, k
-}' "$WORK_TMP/frames_raw.tsv" > "$WORK_TMP/frames.tsv"
+ print frame, $2, camera, field, $5, $6, $7, zp, lim, $9, $10, $11, $12, $13, lab, cells, found, sprintf("%.4f", k), $22, $23, $24, $25, $15
+}' "$WORK_TMP/frames_raw.tsv" > "$WORK_TMP/frames.tsv" || die "could not fit field measurements"
 percentiles < "$WORK_TMP/samples.tsv" > "$WORK_TMP/baselines.tsv"
 
 # Pass 3: the verdicts. verdicts.tsv: frame, img_dir, verdict, reason, camera, field, details
 # frames.tsv: 1 frame 2 img_dir 3 camera 4 field 5 status 6 sun_alt 7 moon_brightening 8 zp_corr
 # 9 lim_corr 10 fwhm 11 elongation 12 sky_rate 13 center_alt 14 header_centalt 15 label
-# 16 cell zp_corr 17 cell found fraction 18 extinction
+# 16 cell zp_corr 17 cell found fraction 18 extinction 19 cell grid 20 cell sky
+# 21 meridian side 22 observing night 23 center airmass
 awk -F'\t' -v twilight="$TWILIGHT_SUN_ALT_DEG" -v moon="$MOON_BRIGHTENING_MAG" \
  -v floor_mag="$FLOOR_BELOW_CAMERA_CLEAR_MAG" -v keep_median="$KEEP_MAX_MEDIAN_DEFICIT_MAG" -v reject_median="$REJECT_MIN_MEDIAN_DEFICIT_MAG" \
  -v keep_patch="$KEEP_MAX_PATCH_DEFICIT_MAG" -v reject_patch="$REJECT_MIN_PATCH_DEFICIT_MAG" \
- -v keep_cam="$KEEP_MAX_CAMERA_DEFICIT_MAG" -v reject_cam="$REJECT_MIN_CAMERA_DEFICIT_MAG" \
+ -v reject_cam="$REJECT_MIN_CAMERA_DEFICIT_MAG" \
  -v keep_lim="$KEEP_MAX_LIM_DEFICIT_MAG" -v reject_lim="$REJECT_MIN_LIM_DEFICIT_MAG" -v keep_found="$KEEP_MAX_FOUND_DEFICIT" \
  -v reject_found="$REJECT_MIN_FOUND_DEFICIT" -v pair_max="$PAIR_MAX_ZP_DIFFERENCE_MAG" -v fwhm_factor="$FOCUS_MAX_FWHM_FACTOR" \
+ -v keep_airmass="$KEEP_MAX_AIRMASS" -v keep_cell_fraction="$KEEP_MIN_CELL_FRACTION" \
+ -v keep_sky="$KEEP_MAX_SKY_RESIDUAL_PERCENT" -v min_sky_nights="$MIN_SKY_REFERENCE_NIGHTS" \
  -v trailed="$TRAILED_MIN_ELONGATION" -v min_field="$MIN_FIELD_FRAMES" -v baselines_file="$WORK_TMP/baselines.tsv" '
+function sort_values(values, n,   i, j, v) {
+ for (i = 2; i <= n; i++) {
+  v = values[i] ; j = i - 1
+  while (j >= 1 && values[j] > v) { values[j + 1] = values[j] ; j-- }
+  values[j + 1] = v
+ }
+}
+function quantile(values, n, fraction,   rank, i) {
+ rank = 1 + fraction * (n - 1) ; i = int(rank)
+ if (i == n) return values[i]
+ return values[i] + (rank - i) * (values[i + 1] - values[i])
+}
+function sky_span(pattern, n,   i, sorted) {
+ for (i = 1; i <= n; i++) sorted[i] = pattern[i]
+ sort_values(sorted, n)
+ return quantile(sorted, n, 0.95) - quantile(sorted, n, 0.05)
+}
+# The centred quadratic basis is orthogonal on a complete rectangular cell grid.
+function sky_terms(i, nx, ny, terms,   x, y) {
+ x = (i - 1) % nx - (nx - 1) / 2
+ y = int((i - 1) / nx) - (ny - 1) / 2
+ terms[1] = 1 ; terms[2] = x ; terms[3] = y ; terms[4] = x * y
+ terms[5] = x * x - (nx * nx - 1) / 12
+ terms[6] = y * y - (ny * ny - 1) / 12
+}
+# Detrend the tile medians, then express the residuals as a percentage of the frame sky.
+# A missing or malformed grid leaves the sky unverified.
+function sky_pattern(layout, values, pattern,   size, sky, nx, ny, n, i, k, terms, sums, norms, smooth, med) {
+ if (layout !~ /^[0-9]+x[0-9]+$/) return 0
+ split(layout, size, "x") ; nx = size[1] + 0 ; ny = size[2] + 0
+ n = split(values, sky, ",")
+ if (nx < 3 || ny < 3 || n != nx * ny) return 0
+ for (i = 1; i <= n; i++) {
+  if (sky[i] !~ /^[0-9]+(\.[0-9]+)?$/ || sky[i] + 0 <= 0) return 0
+  sky_terms(i, nx, ny, terms)
+  for (k = 1; k <= 6; k++) { sums[k] += terms[k] * sky[i] ; norms[k] += terms[k] * terms[k] }
+ }
+ for (i = 1; i <= n; i++) {
+  sky_terms(i, nx, ny, terms) ; smooth = 0
+  for (k = 1; k <= 6; k++) smooth += terms[k] * sums[k] / norms[k]
+  pattern[i] = sky[i] - smooth
+ }
+ sort_values(sky, n) ; med = quantile(sky, n, 0.5)
+ for (i = 1; i <= n; i++) pattern[i] *= 100 / med
+ return n
+}
+# Subtract strong sky structure if it recurs in the same camera/field and meridian side.
+# The reference is the cellwise median, with one photometric frame per other dark night.
+function subtract_sky_reference(i, pattern, n,   group, j, ref, count, candidates, cell, values, typical) {
+ group = f_sky_group[i]
+ for (j = 1; j <= n_sky_refs[group]; j++) {
+  ref = sky_refs[group, j]
+  if (f_night[ref] != f_night[i]) candidates[++count] = ref
+ }
+ if (count < min_sky_nights) return 0
+ for (cell = 1; cell <= n; cell++) {
+  for (j = 1; j <= count; j++) values[j] = f_sky[candidates[j], cell]
+  sort_values(values, count)
+  typical[cell] = quantile(values, count, 0.5)
+ }
+ if (sky_span(typical, n) <= keep_sky) return 0
+ for (cell = 1; cell <= n; cell++) pattern[cell] -= typical[cell]
+ return count
+}
 BEGIN {
  twilight += 0 ; moon += 0 ; floor_mag += 0 ; keep_median += 0 ; reject_median += 0 ; keep_patch += 0 ; reject_patch += 0
- keep_cam += 0 ; reject_cam += 0 ; keep_lim += 0 ; reject_lim += 0
+ reject_cam += 0 ; keep_lim += 0 ; reject_lim += 0
  keep_found += 0 ; reject_found += 0 ; pair_max += 0 ; fwhm_factor += 0 ; trailed += 0 ; min_field += 0
+ keep_airmass += 0 ; keep_cell_fraction += 0 ; keep_sky += 0 ; min_sky_nights += 0
  while ((getline line < baselines_file) > 0) {
   split(line, b, "\t") ; key = b[1] "|" b[2]
   n_base[key] = b[3] ; median_base[key] = b[4] ; pct_base[key] = b[5]
@@ -526,15 +613,17 @@ BEGIN {
  frame = $1 ; img = $2 ; camera = $3 ; field = $4 ; status = $5 ; sun = $6 + 0 ; dm = $7 + 0
  zp = $8 ; lim = $9 ; fwhm = $10 ; elong = $11 ; lab = $15 ; cells = $16 ; found = $17
  verdict = "" ; reason = "" ; details = ""
+ n_cmp = 0 ; lim_deficit = -99
  cam_clear = ("CAMZP|" camera in pct_base) ? pct_base["CAMZP|" camera] : "NA"
  cam_fwhm = ("CAMFWHM|" camera in median_base) ? median_base["CAMFWHM|" camera] : "NA"
  n_field = ("NFIELD|" camera "|" field in n_base) ? n_base["NFIELD|" camera "|" field] + 0 : 0
  # the largest loss of Tycho-2 stars in a cell against the usual fraction of that cell (1 for a
  # field with few frames)
- max_found_deficit = 0
+ max_found_deficit = 0 ; n_found = 0
  nfc = split(found, ff, ",")
  for (i = 1; i <= nfc; i++) {
-  if (ff[i] == "NA") continue
+  if (ff[i] == "NA" || ff[i] == "") continue
+  n_found++
   key = "FOUND|" camera "|" field "|" i
   usual = 1.0
   if ((key in pct_base) && n_base[key] + 0 >= min_field) usual = pct_base[key] + 0
@@ -552,14 +641,14 @@ BEGIN {
  else {
   # transparency against the clear level of the field, cell by cell (sorted deficits: the
   # median cell and the third-worst cell), and the limiting magnitude
-  n_cmp = 0 ; split("", deficit)
+  split("", deficit)
   nc = split(cells, c, ",")
   for (i = 1; i <= nc; i++) {
    key = "CELL|" camera "|" field "|" i
-   if (c[i] == "NA" || !(key in pct_base) || n_base[key] + 0 < min_field) continue
+   if (c[i] == "NA" || c[i] == "" || !(key in pct_base) || n_base[key] + 0 < min_field) continue
    n_cmp++ ; deficit[n_cmp] = pct_base[key] - c[i]
   }
-  for (i = 2; i <= n_cmp; i++) { t = deficit[i] ; j = i - 1 ; while (j >= 1 && deficit[j] > t) { deficit[j + 1] = deficit[j] ; j-- } ; deficit[j + 1] = t }
+  sort_values(deficit, n_cmp)
   median_deficit = 0 ; patch_deficit = 0
   if (n_cmp > 0) {
    if (n_cmp % 2 == 1) median_deficit = deficit[(n_cmp + 1) / 2]
@@ -567,7 +656,6 @@ BEGIN {
    patch_deficit = deficit[n_cmp]
    if (n_cmp >= 3) patch_deficit = deficit[n_cmp - 2]
   }
-  lim_deficit = -99
   key = "LIM|" camera "|" field
   if (lim != "NA" && (key in pct_base) && n_base[key] + 0 >= min_field) lim_deficit = pct_base[key] - lim
   found_text = " max_found_deficit=" sprintf("%.3f", max_found_deficit)
@@ -578,7 +666,6 @@ BEGIN {
     d = cam_clear - zp
     details = "below_camera_clear=" sprintf("%.3f", d) " field_frames=" n_field found_text
     if (d >= reject_cam) { verdict = "REJECT" ; reason = "clouds" }
-    else if (d <= keep_cam && max_found_deficit <= keep_found) { verdict = "KEEP" ; reason = "clear" }
     else { verdict = "REVIEW" ; reason = "few_field_frames" }
    }
   } else {
@@ -593,9 +680,44 @@ BEGIN {
   # the floor: never keep unseen a frame far below the camera clear sky
   if (verdict == "KEEP" && cam_clear != "NA" && cam_clear - zp > floor_mag) { verdict = "REVIEW" ; reason = "below_camera_clear_sky" ; details = details " below_camera_clear=" sprintf("%.3f", cam_clear - zp) }
  }
- nf++ ; f_frame[nf] = frame ; f_img[nf] = img ; f_verdict[nf] = verdict ; f_reason[nf] = reason ; f_camera[nf] = camera ; f_field[nf] = field ; f_details[nf] = details ; f_zp[nf] = zp ; f_lab[nf] = lab
+ nf++
+ if (verdict == "KEEP") {
+  n_sky = sky_pattern($19, $20, pattern)
+  airmass = $23 + 0
+  complete = (n_sky > 0 && n_sky == nc && n_sky == nfc && n_cmp >= keep_cell_fraction * n_sky && n_found >= keep_cell_fraction * n_sky && lim_deficit != -99 && airmass >= 1)
+  if (!complete && lab != "good") {
+   verdict = "REVIEW" ; reason = "incomplete_measurements"
+   details = details " sky_cells=" n_sky " compared_cells=" n_cmp " found_cells=" n_found " airmass=" $23
+  } else if (n_sky > 0) {
+   group = camera "|" field "|" $19 "|" $21
+   f_sky_group[nf] = group ; f_night[nf] = $22 ; f_n_sky[nf] = n_sky ; f_airmass[nf] = airmass
+   for (i = 1; i <= n_sky; i++) f_sky[nf, i] = pattern[i]
+   if ($21 != "NA" && $22 != "NA" && sun <= twilight && dm <= 0.05 && zp != "NA") {
+    ref_key = group SUBSEP $22
+    if (!(ref_key in best_ref) || zp + 0 > f_zp[best_ref[ref_key]] + 0) best_ref[ref_key] = nf
+   }
+  }
+ }
+ f_frame[nf] = frame ; f_img[nf] = img ; f_verdict[nf] = verdict ; f_reason[nf] = reason ; f_camera[nf] = camera ; f_field[nf] = field ; f_details[nf] = details ; f_zp[nf] = zp ; f_lab[nf] = lab
 }
 END {
+ for (key in best_ref) {
+  split(key, parts, SUBSEP) ; group = parts[1]
+  sky_refs[group, ++n_sky_refs[group]] = best_ref[key]
+ }
+ for (i = 1; i <= nf; i++) {
+  if (f_verdict[i] != "KEEP" || f_lab[i] == "good") continue
+  n = f_n_sky[i]
+  for (j = 1; j <= n; j++) pattern[j] = f_sky[i, j]
+  raw_span = sky_span(pattern, n) ; excess = raw_span ; refs_used = 0
+  if (raw_span > keep_sky) {
+   refs_used = subtract_sky_reference(i, pattern, n)
+   if (refs_used) excess = sky_span(pattern, n)
+  }
+  f_details[i] = f_details[i] " sky_residual_pct=" sprintf("%.3f", raw_span) " sky_excess_pct=" sprintf("%.3f", excess) " sky_reference_nights=" refs_used " airmass=" f_airmass[i]
+  if (excess > keep_sky) { f_verdict[i] = "REVIEW" ; f_reason[i] = "sky_structure" }
+  else if (f_airmass[i] > keep_airmass) { f_verdict[i] = "REVIEW" ; f_reason[i] = "high_airmass" }
+ }
  # the two (or more) frames of an upload: the worse one goes to review when they disagree
  for (i = 1; i <= nf; i++) {
   if (f_verdict[i] != "KEEP" || f_zp[i] == "NA" || f_lab[i] == "good") continue
@@ -605,7 +727,7 @@ END {
   }
  }
  for (i = 1; i <= nf; i++) printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", f_frame[i], f_img[i], f_verdict[i], f_reason[i], f_camera[i], f_field[i], f_details[i]
-}' "$WORK_TMP/frames.tsv" > "$WORK_TMP/verdicts.tsv"
+}' "$WORK_TMP/frames.tsv" > "$WORK_TMP/verdicts.tsv" || die "could not determine frame quality verdicts"
 VERDICTS="$QUALITY_DIR/verdicts_${RUN_STAMP}.tsv"
 cp "$WORK_TMP/verdicts.tsv" "$VERDICTS"
 
