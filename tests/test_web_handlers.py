@@ -491,10 +491,12 @@ def test_fastplot_cache_bypasses_rate_limit_without_new_work(plot_sandbox, capsy
 
 
 @pytest.mark.parametrize('candidate,expected', [('candidate1', 200), ('another', 503)])
-def test_fastplot_actual_flock_blocks_duplicate_launch(plot_sandbox, capsys, candidate, expected):
+@pytest.mark.parametrize('history', ['', 'previous_candidate\n'])
+def test_fastplot_actual_flock_blocks_duplicate_launch(
+        plot_sandbox, capsys, candidate, expected, history):
     plot_sandbox.data.mkdir()
     with (plot_sandbox.data / '.fastplot.lock').open('w') as lock:
-        lock.write(candidate)
+        lock.write(history + candidate + '\n')
         lock.flush()
         fcntl.flock(lock, fcntl.LOCK_EX)
         fastplot.main()

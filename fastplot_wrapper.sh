@@ -163,8 +163,8 @@ fi
 
 echo "Lock acquired"
 
-# Write candidate ID to lock file so CGI can identify the current job
-echo "$CANDIDATE_ID" >&200
+# Truncate only after acquiring the lock, keeping the same lock-file inode.
+printf '%s\n' "$CANDIDATE_ID" > "$LOCK_FILE" || exit 1
 
 # --- Clean Up Stale Working Directories ---
 # Safe because we hold the lock - no other fastplot is running

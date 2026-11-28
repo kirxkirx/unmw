@@ -333,7 +333,8 @@ def check_lock(fastplot_dir):
         current_id = None
         try:
             with open(lock_file, 'r') as f:
-                current_id = f.read().strip()
+                # Older wrappers appended an ID every time they acquired the lock.
+                current_id = f.read().strip().rsplit('\n', 1)[-1] or None
         except (IOError, OSError):
             pass
         os.close(fd)
